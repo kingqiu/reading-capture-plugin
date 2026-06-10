@@ -12,18 +12,18 @@ It is designed for a Codex/OpenClaw-assisted writing workflow:
 
 ## Current Status
 
-Version: `0.3.1`
+Version: `0.4.0`
 
 This is a personal workflow plugin under active development.
 
 ## Features
 
-- Dedicated `Reading Capture Reader` view.
-- `资料库` view for browsing saved article groups across configured source folders.
+- Dedicated `Reading Capture Reader` view with a dark immersive reading style.
+- `知见录` view for browsing saved article groups across configured source folders.
 - Article grouping supports both directory-based article bundles and standalone Markdown files.
 - Best-version detection prefers enriched Chinese Markdown, then translations, then original Markdown.
 - Digest folders under `Learning/web/x_articles/digest(s)` are excluded from the article library.
-- Paper-like research-magazine reading style.
+- Unified dark interface for both the reader and article library.
 - Dynamic highlights based on saved reading notes.
 - Image annotations: right-click an image in the reader to save a thought and jump back to it later.
 - Right-side annotation sidebar.
@@ -56,7 +56,7 @@ Then enable `Reading Capture` from Obsidian's Community plugins settings.
 ## Commands
 
 - `Reading Capture: 打开阅读器视图`
-- `Reading Capture: 打开资料库`
+- `Reading Capture: 打开知见录`
 - `Reading Capture: 标注选中文本并记录想法`
 - `Reading Capture: 快速高亮选中文本`
 - `Reading Capture: 记录当前想法`

@@ -487,8 +487,8 @@ class ReadingCaptureSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("资料库扫描目录")
-      .setDesc("每行一个目录。资料库会扫描这些目录下的 Markdown / PDF 文件，并按文章组展示。")
+      .setName("知见录扫描目录")
+      .setDesc("每行一个目录。知见录会扫描这些目录下的 Markdown / PDF 文件，并按文章组展示。")
       .addTextArea((text) =>
         text
           .setPlaceholder(KNOWN_SOURCE_ROOTS.join("\n"))
@@ -500,7 +500,7 @@ class ReadingCaptureSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("资料库排除目录")
+      .setName("知见录排除目录")
       .setDesc("每行一个目录。阅读笔记目录和 Obsidian 配置目录默认会排除。")
       .addTextArea((text) =>
         text
@@ -930,7 +930,7 @@ class ReadingCaptureLibraryView extends ItemView {
   }
 
   getDisplayText() {
-    return "资料库";
+    return "知见录";
   }
 
   getIcon() {
@@ -964,7 +964,8 @@ class ReadingCaptureLibraryView extends ItemView {
     const shell = container.createDiv({ cls: "reading-capture-library-shell" });
     const top = shell.createDiv({ cls: "reading-capture-library-top" });
     const title = top.createDiv({ cls: "reading-capture-library-title" });
-    title.createEl("h1", { text: "资料库" });
+    title.createEl("h1", { text: "知见录" });
+    title.createEl("div", { cls: "reading-capture-library-subtitle", text: `${this.groups.length} 个文章组 · ${this.totalAnnotationCount()} 条阅读标注` });
     const tools = top.createDiv({ cls: "reading-capture-library-tools" });
     const search = tools.createEl("input", {
       type: "search",
@@ -1028,6 +1029,10 @@ class ReadingCaptureLibraryView extends ItemView {
     );
   }
 
+  totalAnnotationCount() {
+    return this.groups.reduce((sum, group) => sum + Number(group.stats && group.stats.annotationCount ? group.stats.annotationCount : 0), 0);
+  }
+
   renderFilterSection(container, title, options, activeValue, onSelect) {
     const section = container.createDiv({ cls: "reading-capture-library-filter-section" });
     section.createEl("h2", { text: title });
@@ -1076,7 +1081,7 @@ class ReadingCaptureLibraryView extends ItemView {
     const header = list.createDiv({ cls: "reading-capture-library-list-header" });
     header.createEl("strong", { text: this.isLoading ? "正在扫描文章..." : `${groups.length} 个文章组` });
     if (this.isLoading) {
-      list.createDiv({ cls: "reading-capture-library-empty", text: "正在整理资料库，请稍等。" });
+      list.createDiv({ cls: "reading-capture-library-empty", text: "正在整理知见录，请稍等。" });
       return;
     }
     if (!groups.length) {
@@ -1214,7 +1219,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
 
     this.addCommand({
       id: "open-article-library",
-      name: "打开资料库",
+      name: "打开知见录",
       callback: async () => this.openArticleLibrary(),
     });
 
