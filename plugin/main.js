@@ -919,6 +919,7 @@ class ReadingCaptureLibraryView extends ItemView {
     this.groups = [];
     this.selectedGroupId = "";
     this.query = "";
+    this.searchDraft = "";
     this.sourceFilter = "all";
     this.stateFilter = "all";
     this.sortMode = "mtime-desc";
@@ -970,16 +971,45 @@ class ReadingCaptureLibraryView extends ItemView {
     const search = tools.createEl("input", {
       type: "search",
       placeholder: "搜索标题、路径、摘要...",
-      value: this.query,
+      value: this.searchDraft,
     });
     search.addEventListener("input", () => {
-      this.query = search.value;
-      this.render();
+      this.searchDraft = search.value;
+    });
+    search.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      this.applySearch();
+    });
+    const searchButton = tools.createEl("button", { text: "搜索" });
+    searchButton.addEventListener("click", () => {
+      this.searchDraft = search.value;
+      this.applySearch();
     });
     const refresh = tools.createEl("button", { text: this.isLoading ? "扫描中..." : "重新扫描" });
     refresh.disabled = this.isLoading;
     refresh.addEventListener("click", () => this.reload());
+    if (this.query) {
+      const clearButton = tools.createEl("button", { text: "清除" });
+      clearButton.addEventListener("click", () => {
+        this.query = "";
+        this.searchDraft = "";
+        this.render();
+      });
+    }
+    this.renderMainLayout(shell);
+  }
 
+  applySearch() {
+    this.query = String(this.searchDraft || "").trim();
+    const visibleGroups = this.visibleGroups();
+    if (this.groups.length && !visibleGroups.find((group) => group.id === this.selectedGroupId)) {
+      const first = visibleGroups[0];
+      this.selectedGroupId = first ? first.id : "";
+    }
+    this.render();
+  }
+
+  renderMainLayout(shell) {
     const layout = shell.createDiv({ cls: "reading-capture-library-layout" });
     const filters = layout.createEl("aside", { cls: "reading-capture-library-filters" });
     const list = layout.createDiv({ cls: "reading-capture-library-list" });
