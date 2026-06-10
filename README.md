@@ -12,7 +12,7 @@ It is designed for a Codex/OpenClaw-assisted writing workflow:
 
 ## Current Status
 
-Version: `0.4.0`
+Version: `0.4.1`
 
 This is a personal workflow plugin under active development.
 
@@ -24,6 +24,7 @@ This is a personal workflow plugin under active development.
 - Best-version detection prefers enriched Chinese Markdown, then translations, then original Markdown.
 - Digest folders under `Learning/web/x_articles/digest(s)` are excluded from the article library.
 - Unified dark interface for both the reader and article library.
+- Softer low-glare dark palette and aligned three-column library layout.
 - Dynamic highlights based on saved reading notes.
 - Image annotations: right-click an image in the reader to save a thought and jump back to it later.
 - Right-side annotation sidebar.
