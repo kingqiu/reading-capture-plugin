@@ -1,6 +1,7 @@
 const { ItemView, MarkdownRenderer, Modal, Notice, Plugin, PluginSettingTab, Setting, normalizePath } = require("obsidian");
 
 const READER_VIEW_TYPE = "reading-capture-reader";
+const ARTICLE_LIBRARY_VIEW_TYPE = "reading-capture-library";
 
 const KNOWN_SOURCE_ROOTS = [
   "Learning/web/seaart_articles",
@@ -307,6 +308,8 @@ const core = {
 const DEFAULT_SETTINGS = {
   readingRoot: "Learning/reading-notes",
   openNoteAfterCapture: false,
+  articleLibraryRoots: KNOWN_SOURCE_ROOTS.join("\n"),
+  articleLibraryExcludeRoots: "Learning/reading-notes\n.obsidian",
 };
 
 class TextInputModal extends Modal {
@@ -476,6 +479,32 @@ class ReadingCaptureSettingTab extends PluginSettingTab {
           this.plugin.settings.openNoteAfterCapture = value;
           await this.plugin.saveSettings();
         })
+      );
+
+    new Setting(containerEl)
+      .setName("资料库扫描目录")
+      .setDesc("每行一个目录。资料库会扫描这些目录下的 Markdown / PDF 文件，并按文章组展示。")
+      .addTextArea((text) =>
+        text
+          .setPlaceholder(KNOWN_SOURCE_ROOTS.join("\n"))
+          .setValue(this.plugin.settings.articleLibraryRoots || DEFAULT_SETTINGS.articleLibraryRoots)
+          .onChange(async (value) => {
+            this.plugin.settings.articleLibraryRoots = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("资料库排除目录")
+      .setDesc("每行一个目录。阅读笔记目录和 Obsidian 配置目录默认会排除。")
+      .addTextArea((text) =>
+        text
+          .setPlaceholder(DEFAULT_SETTINGS.articleLibraryExcludeRoots)
+          .setValue(this.plugin.settings.articleLibraryExcludeRoots || DEFAULT_SETTINGS.articleLibraryExcludeRoots)
+          .onChange(async (value) => {
+            this.plugin.settings.articleLibraryExcludeRoots = value;
+            await this.plugin.saveSettings();
+          })
       );
   }
 }
@@ -878,11 +907,276 @@ class ReadingCaptureReaderView extends ItemView {
   }
 }
 
+class ReadingCaptureLibraryView extends ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.groups = [];
+    this.selectedGroupId = "";
+    this.query = "";
+    this.sourceFilter = "all";
+    this.stateFilter = "all";
+    this.sortMode = "mtime-desc";
+    this.isLoading = false;
+  }
+
+  getViewType() {
+    return ARTICLE_LIBRARY_VIEW_TYPE;
+  }
+
+  getDisplayText() {
+    return "资料库";
+  }
+
+  getIcon() {
+    return "library";
+  }
+
+  async onOpen() {
+    await this.reload();
+  }
+
+  async reload() {
+    this.isLoading = true;
+    await this.render();
+    try {
+      this.groups = await this.plugin.buildArticleLibraryGroups();
+      if (!this.selectedGroupId && this.groups.length) this.selectedGroupId = this.groups[0].id;
+      if (this.selectedGroupId && !this.groups.find((group) => group.id === this.selectedGroupId)) {
+        this.selectedGroupId = this.groups.length ? this.groups[0].id : "";
+      }
+    } finally {
+      this.isLoading = false;
+      await this.render();
+    }
+  }
+
+  async render() {
+    const container = this.containerEl.children[1];
+    container.empty();
+    container.addClass("reading-capture-library");
+
+    const shell = container.createDiv({ cls: "reading-capture-library-shell" });
+    const top = shell.createDiv({ cls: "reading-capture-library-top" });
+    const title = top.createDiv({ cls: "reading-capture-library-title" });
+    title.createEl("h1", { text: "资料库" });
+    const tools = top.createDiv({ cls: "reading-capture-library-tools" });
+    const search = tools.createEl("input", {
+      type: "search",
+      placeholder: "搜索标题、路径、摘要...",
+      value: this.query,
+    });
+    search.addEventListener("input", () => {
+      this.query = search.value;
+      this.render();
+    });
+    const refresh = tools.createEl("button", { text: this.isLoading ? "扫描中..." : "重新扫描" });
+    refresh.disabled = this.isLoading;
+    refresh.addEventListener("click", () => this.reload());
+
+    const layout = shell.createDiv({ cls: "reading-capture-library-layout" });
+    const filters = layout.createEl("aside", { cls: "reading-capture-library-filters" });
+    const list = layout.createDiv({ cls: "reading-capture-library-list" });
+    const detail = layout.createEl("aside", { cls: "reading-capture-library-detail" });
+
+    this.renderFilters(filters);
+    this.renderList(list);
+    this.renderDetail(detail);
+  }
+
+  renderFilters(filters) {
+    filters.empty();
+    this.renderFilterSection(filters, "来源", this.sourceOptions(), this.sourceFilter, (value) => {
+      this.sourceFilter = value;
+      this.render();
+    });
+    this.renderFilterSection(
+      filters,
+      "状态",
+      [
+        ["all", "全部"],
+        ["annotated", "有标注"],
+        ["topic", "有选题"],
+        ["fact", "待核查"],
+        ["unread", "未读"],
+      ],
+      this.stateFilter,
+      (value) => {
+        this.stateFilter = value;
+        this.render();
+      }
+    );
+    this.renderFilterSection(
+      filters,
+      "排序",
+      [
+        ["mtime-desc", "最近更新"],
+        ["last-read-desc", "最近阅读"],
+        ["annotations-desc", "标注最多"],
+        ["title-asc", "标题 A-Z"],
+      ],
+      this.sortMode,
+      (value) => {
+        this.sortMode = value;
+        this.render();
+      }
+    );
+  }
+
+  renderFilterSection(container, title, options, activeValue, onSelect) {
+    const section = container.createDiv({ cls: "reading-capture-library-filter-section" });
+    section.createEl("h2", { text: title });
+    for (const [value, label, count] of options) {
+      const button = section.createEl("button", { text: count === undefined ? label : `${label} ${count}` });
+      if (activeValue === value) button.addClass("is-active");
+      button.addEventListener("click", () => onSelect(value));
+    }
+  }
+
+  sourceOptions() {
+    const counts = new Map();
+    for (const group of this.groups) {
+      const label = group.sourceLabel || "未分类";
+      counts.set(label, (counts.get(label) || 0) + 1);
+    }
+    return [["all", "全部", this.groups.length], ...[...counts.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([label, count]) => [label, label, count])];
+  }
+
+  visibleGroups() {
+    const query = String(this.query || "").trim().toLowerCase();
+    const groups = this.groups.filter((group) => {
+      if (this.sourceFilter !== "all" && group.sourceLabel !== this.sourceFilter) return false;
+      if (this.stateFilter === "annotated" && group.stats.annotationCount <= 0) return false;
+      if (this.stateFilter === "topic" && group.stats.topicCount <= 0) return false;
+      if (this.stateFilter === "fact" && group.stats.factCount <= 0) return false;
+      if (this.stateFilter === "unread" && group.stats.hasReading) return false;
+      if (!query) return true;
+      return [group.title, group.snippet, group.groupPath, group.files.map((file) => file.name).join(" ")]
+        .join(" ")
+        .toLowerCase()
+        .includes(query);
+    });
+
+    return groups.sort((left, right) => {
+      if (this.sortMode === "title-asc") return left.title.localeCompare(right.title);
+      if (this.sortMode === "annotations-desc") return right.stats.annotationCount - left.stats.annotationCount || right.mtime - left.mtime;
+      if (this.sortMode === "last-read-desc") return (right.stats.lastReadTime || 0) - (left.stats.lastReadTime || 0) || right.mtime - left.mtime;
+      return right.mtime - left.mtime;
+    });
+  }
+
+  renderList(list) {
+    list.empty();
+    const groups = this.visibleGroups();
+    const header = list.createDiv({ cls: "reading-capture-library-list-header" });
+    header.createEl("strong", { text: this.isLoading ? "正在扫描文章..." : `${groups.length} 个文章组` });
+    if (this.isLoading) {
+      list.createDiv({ cls: "reading-capture-library-empty", text: "正在整理资料库，请稍等。" });
+      return;
+    }
+    if (!groups.length) {
+      list.createDiv({ cls: "reading-capture-library-empty", text: "没有找到匹配的文章。可以调整搜索词或扫描目录。" });
+      return;
+    }
+    for (const group of groups) {
+      const card = list.createDiv({ cls: "reading-capture-library-card" });
+      if (group.id === this.selectedGroupId) card.addClass("is-active");
+      card.addEventListener("click", () => {
+        this.selectedGroupId = group.id;
+        this.render();
+      });
+
+      const meta = card.createDiv({ cls: "reading-capture-library-card-meta" });
+      meta.createEl("span", { text: group.sourceLabel });
+      meta.createEl("span", { text: group.dateLabel });
+      meta.createEl("span", { text: group.groupType === "single-file" ? "单文件" : "文章组" });
+      card.createEl("h2", { text: group.title });
+      if (group.snippet) card.createEl("p", { text: group.snippet });
+      const versions = card.createDiv({ cls: "reading-capture-library-versions" });
+      for (const version of group.versions.slice(0, 4)) {
+        versions.createEl("span", { text: version.label });
+      }
+      const bottom = card.createDiv({ cls: "reading-capture-library-card-bottom" });
+      bottom.createEl("span", { text: `${group.stats.annotationCount} 条标注` });
+      bottom.createEl("span", { text: `${group.files.length} 个文件` });
+      const open = bottom.createEl("button", { text: "阅读" });
+      open.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        await this.openBestVersion(group);
+      });
+    }
+  }
+
+  renderDetail(detail) {
+    detail.empty();
+    const selected = this.groups.find((group) => group.id === this.selectedGroupId);
+    if (!selected) {
+      detail.createDiv({ cls: "reading-capture-library-empty", text: "选择一篇文章后，这里会显示版本和阅读记录。" });
+      return;
+    }
+
+    detail.createEl("div", { cls: "reading-capture-library-detail-kicker", text: selected.sourceLabel });
+    detail.createEl("h2", { text: selected.title });
+    detail.createEl("p", { text: selected.groupPath });
+    const stats = detail.createDiv({ cls: "reading-capture-library-stats" });
+    stats.createEl("span", { text: `标注 ${selected.stats.annotationCount}` });
+    stats.createEl("span", { text: `选题 ${selected.stats.topicCount}` });
+    stats.createEl("span", { text: `待核查 ${selected.stats.factCount}` });
+
+    const actions = detail.createDiv({ cls: "reading-capture-library-detail-actions" });
+    const openBest = actions.createEl("button", { text: "打开最佳版本" });
+    openBest.addClass("mod-cta");
+    openBest.addEventListener("click", () => this.openBestVersion(selected));
+    const openNote = actions.createEl("button", { text: "阅读记录" });
+    openNote.disabled = !selected.stats.readingNotePath;
+    openNote.addEventListener("click", async () => {
+      if (!selected.stats.readingNotePath) return;
+      const noteFile = this.plugin.app.vault.getAbstractFileByPath(selected.stats.readingNotePath);
+      await this.plugin.openFile(this.plugin.isFile(noteFile) ? noteFile : this.plugin.makeFileRef(selected.stats.readingNotePath));
+    });
+
+    detail.createEl("h3", { text: "版本" });
+    const versions = detail.createDiv({ cls: "reading-capture-library-version-list" });
+    for (const version of selected.versions) {
+      const row = versions.createDiv({ cls: "reading-capture-library-version-row" });
+      row.createEl("span", { text: version.label });
+      row.createEl("strong", { text: version.name });
+      if (version.kind === "markdown") {
+        const button = row.createEl("button", { text: "阅读" });
+        button.addEventListener("click", async () => {
+          const file = this.plugin.app.vault.getAbstractFileByPath(version.path);
+          if (this.plugin.isFile(file)) await this.plugin.openReaderForFile(file);
+        });
+      }
+    }
+
+    if (selected.snippet) {
+      detail.createEl("h3", { text: "摘要" });
+      detail.createEl("blockquote", { text: selected.snippet });
+    }
+  }
+
+  async openBestVersion(group) {
+    const version = group && group.bestVersion;
+    if (!version || version.kind !== "markdown") {
+      new Notice("这个文章组没有可打开的 Markdown 版本。");
+      return;
+    }
+    const file = this.plugin.app.vault.getAbstractFileByPath(version.path);
+    if (!this.plugin.isFile(file)) {
+      new Notice("找不到这个版本的源文件。");
+      return;
+    }
+    await this.plugin.openReaderForFile(file);
+  }
+}
+
 module.exports = class ReadingCapturePlugin extends Plugin {
   async onload() {
     await this.loadSettings();
     this.addSettingTab(new ReadingCaptureSettingTab(this.app, this));
     this.registerView(READER_VIEW_TYPE, (leaf) => new ReadingCaptureReaderView(leaf, this));
+    this.registerView(ARTICLE_LIBRARY_VIEW_TYPE, (leaf) => new ReadingCaptureLibraryView(leaf, this));
 
     this.registerEvent(
       this.app.workspace.on("editor-menu", (menu, editor, view) => {
@@ -911,6 +1205,12 @@ module.exports = class ReadingCapturePlugin extends Plugin {
         }
         await this.openReaderForFile(file);
       },
+    });
+
+    this.addCommand({
+      id: "open-article-library",
+      name: "打开资料库",
+      callback: async () => this.openArticleLibrary(),
     });
 
     this.addCommand({
@@ -1018,6 +1318,18 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     const view = leaf.view;
     if (view && typeof view.setSource === "function") {
       await view.setSource(file.path);
+    }
+  }
+
+  async openArticleLibrary() {
+    const leaf = this.app.workspace.getLeaf(false);
+    await leaf.setViewState({
+      type: ARTICLE_LIBRARY_VIEW_TYPE,
+      active: true,
+    });
+    const view = leaf.view;
+    if (view && typeof view.reload === "function") {
+      await view.reload();
     }
   }
 
@@ -1399,9 +1711,229 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     return preview;
   }
 
+  parsePathList(value, fallback = "") {
+    return String(value || fallback || "")
+      .split(/\r?\n/)
+      .map((line) => normalizePath(line.trim()).replace(/\/+$/g, ""))
+      .filter(Boolean);
+  }
+
+  getArticleLibraryRoots() {
+    return this.parsePathList(this.settings.articleLibraryRoots, DEFAULT_SETTINGS.articleLibraryRoots);
+  }
+
+  getArticleLibraryExcludeRoots() {
+    const configured = this.parsePathList(this.settings.articleLibraryExcludeRoots, DEFAULT_SETTINGS.articleLibraryExcludeRoots);
+    const readingRoot = normalizePath(this.settings.readingRoot || DEFAULT_SETTINGS.readingRoot).replace(/\/+$/g, "");
+    return [...new Set([...configured, readingRoot].filter(Boolean))];
+  }
+
+  getVaultFiles() {
+    const vault = this.app && this.app.vault;
+    if (!vault) return [];
+    if (typeof vault.getFiles === "function") return vault.getFiles();
+    if (typeof vault.getMarkdownFiles === "function") return vault.getMarkdownFiles();
+    return [];
+  }
+
+  isLibraryCandidate(file) {
+    if (!this.isFile(file)) return false;
+    const kind = sourceKindFromPath(file.path);
+    return kind === "markdown" || kind === "pdf";
+  }
+
+  resolveArticleGroupPath(filePath, roots = this.getArticleLibraryRoots()) {
+    const normalized = normalizeVaultPath(filePath);
+    const matchedRoot = roots
+      .map((root) => normalizeVaultPath(root).replace(/\/+$/g, ""))
+      .filter(Boolean)
+      .sort((left, right) => right.length - left.length)
+      .find((root) => normalized === root || normalized.startsWith(`${root}/`));
+    if (!matchedRoot) return null;
+    const relative = normalized.slice(matchedRoot.length).replace(/^\/+/, "");
+    if (!relative) return null;
+    const parts = relative.split("/").filter(Boolean);
+    if (parts.length <= 1) {
+      return {
+        groupType: "single-file",
+        groupPath: normalized,
+        sourceRoot: matchedRoot,
+      };
+    }
+    return {
+      groupType: "directory",
+      groupPath: `${matchedRoot}/${parts[0]}`,
+      sourceRoot: matchedRoot,
+    };
+  }
+
+  isExcludedLibraryPath(filePath) {
+    const normalized = normalizeVaultPath(filePath);
+    return this.getArticleLibraryExcludeRoots().some((root) => normalized === root || normalized.startsWith(`${root}/`));
+  }
+
+  articleVersionRank(fileName) {
+    const name = basename(fileName, extname(fileName)).toLowerCase();
+    const ext = extname(fileName).toLowerCase();
+    if (ext === ".pdf") return 90;
+    if (name === "article_zh_enriched") return 1;
+    if (name.includes("zh_enriched") || name.includes("enriched")) return 2;
+    if (name === "article_zh") return 3;
+    if (name.endsWith("_zh") || name.includes("_zh_")) return 4;
+    if (name === "translation" || name.includes("translation")) return 5;
+    if (name === "article") return 6;
+    return 20;
+  }
+
+  articleVersionLabel(fileName) {
+    const name = basename(fileName, extname(fileName)).toLowerCase();
+    const ext = extname(fileName).toLowerCase();
+    if (ext === ".pdf") return "PDF";
+    if (name.includes("zh_enriched") || name.includes("enriched")) return "扩展版";
+    if (name === "article_zh" || name.endsWith("_zh") || name.includes("_zh_") || name.includes("translation")) return "中文版";
+    if (name === "article") return "原文";
+    return "Markdown";
+  }
+
+  async buildArticleLibraryGroups() {
+    const roots = this.getArticleLibraryRoots();
+    const files = this.getVaultFiles().filter((file) => this.isLibraryCandidate(file) && !this.isExcludedLibraryPath(file.path));
+    const grouped = new Map();
+
+    for (const file of files) {
+      const groupInfo = this.resolveArticleGroupPath(file.path, roots);
+      if (!groupInfo) continue;
+      const id = `${groupInfo.groupType}:${groupInfo.groupPath}`;
+      if (!grouped.has(id)) {
+        grouped.set(id, {
+          id,
+          groupType: groupInfo.groupType,
+          groupPath: groupInfo.groupPath,
+          sourceRoot: groupInfo.sourceRoot,
+          sourceLabel: rootSlug(groupInfo.sourceRoot),
+          files: [],
+        });
+      }
+      grouped.get(id).files.push(file);
+    }
+
+    const index = await this.loadIndex();
+    const groups = [];
+    for (const group of grouped.values()) {
+      group.files.sort((left, right) => left.path.localeCompare(right.path));
+      group.versions = group.files
+        .map((file) => ({
+          path: file.path,
+          name: file.name,
+          kind: sourceKindFromPath(file.path),
+          label: this.articleVersionLabel(file.name),
+          priority: this.articleVersionRank(file.name),
+          mtime: file.stat && file.stat.mtime ? file.stat.mtime : 0,
+        }))
+        .sort((left, right) => left.priority - right.priority || left.name.localeCompare(right.name));
+      group.bestVersion = group.versions.find((version) => version.kind === "markdown") || group.versions[0] || null;
+      group.mtime = Math.max(...group.files.map((file) => (file.stat && file.stat.mtime ? file.stat.mtime : 0)), 0);
+      const summary = await this.readArticleGroupSummary(group);
+      group.title = summary.title;
+      group.snippet = summary.snippet;
+      group.dateLabel = this.articleDateLabel(group);
+      group.stats = await this.articleGroupStats(group, index);
+      groups.push(group);
+    }
+
+    return groups.sort((left, right) => right.mtime - left.mtime);
+  }
+
+  async readArticleGroupSummary(group) {
+    const fallbackTitle = this.cleanArticleTitle(group.groupType === "single-file" ? titleFromPath(group.groupPath) : basename(group.groupPath));
+    const best = group.bestVersion;
+    if (!best || best.kind !== "markdown") return { title: fallbackTitle, snippet: "" };
+    try {
+      const markdown = await this.readText(best.path);
+      const frontmatterTitle = this.readFrontmatterValue(markdown, "title");
+      const heading = (markdown.match(/^\s*#\s+(.+)$/m) || [])[1] || "";
+      const title = this.cleanArticleTitle(frontmatterTitle || heading || fallbackTitle);
+      const snippet = this.articleSnippet(markdown, title);
+      return { title, snippet };
+    } catch (error) {
+      return { title: fallbackTitle, snippet: "" };
+    }
+  }
+
+  cleanArticleTitle(value) {
+    return String(value || "未命名文章")
+      .replace(/^\d{8}[_-]?/, "")
+      .replace(/^\d{4}-\d{2}-\d{2}[_-]?/, "")
+      .replace(/[_-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim() || "未命名文章";
+  }
+
+  articleSnippet(markdown, title) {
+    const withoutFrontmatter = String(markdown || "").replace(/^---[\s\S]*?\n---\s*/, "");
+    const lines = withoutFrontmatter
+      .split(/\r?\n/)
+      .map((line) =>
+        line
+          .replace(/!\[[^\]]*]\([^)]+\)/g, "")
+          .replace(/\[([^\]]+)]\([^)]+\)/g, "$1")
+          .replace(/^#{1,6}\s+/, "")
+          .replace(/^>\s?/, "")
+          .trim()
+      )
+      .filter((line) => line && line !== title && !/^[-*_]{3,}$/.test(line));
+    const text = lines.find((line) => line.length >= 18) || lines[0] || "";
+    return text.length > 180 ? `${text.slice(0, 180)}...` : text;
+  }
+
+  articleDateLabel(group) {
+    const value = `${group.groupPath} ${group.title}`;
+    const compact = value.match(/(20\d{2})(\d{2})(\d{2})/);
+    if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}`;
+    const dashed = value.match(/(20\d{2})-(\d{2})-(\d{2})/);
+    if (dashed) return `${dashed[1]}-${dashed[2]}-${dashed[3]}`;
+    if (group.mtime) return new Date(group.mtime).toISOString().slice(0, 10);
+    return "";
+  }
+
+  async articleGroupStats(group, index) {
+    const paths = new Set(group.versions.map((version) => version.path));
+    const stats = {
+      annotationCount: 0,
+      topicCount: 0,
+      factCount: 0,
+      imageCount: 0,
+      hasReading: false,
+      lastReadTime: 0,
+      readingNotePath: "",
+    };
+    const sources = index && index.sources ? index.sources : {};
+    for (const [sourcePath, entry] of Object.entries(sources)) {
+      if (!paths.has(sourcePath)) continue;
+      stats.hasReading = true;
+      stats.annotationCount += Number(entry.annotation_count || 0);
+      const updatedTime = Date.parse(entry.updated || "");
+      if (Number.isFinite(updatedTime)) stats.lastReadTime = Math.max(stats.lastReadTime, updatedTime);
+      if (!stats.readingNotePath && entry.reading_note_path) stats.readingNotePath = entry.reading_note_path;
+      if (!entry.reading_note_path) continue;
+      try {
+        const noteMarkdown = await this.readText(entry.reading_note_path);
+        const annotations = this.parseAnnotationsFromReadingNote(noteMarkdown);
+        stats.topicCount += annotations.filter((item) => this.annotationMatchesFilter(item, "topic")).length;
+        stats.factCount += annotations.filter((item) => this.annotationMatchesFilter(item, "fact")).length;
+        stats.imageCount += annotations.filter((item) => this.annotationMatchesFilter(item, "image")).length;
+      } catch (error) {
+        // A missing note should not block the library from opening.
+      }
+    }
+    return stats;
+  }
+
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     this.settings.readingRoot = normalizePath(this.settings.readingRoot || DEFAULT_SETTINGS.readingRoot);
+    this.settings.articleLibraryRoots = this.settings.articleLibraryRoots || DEFAULT_SETTINGS.articleLibraryRoots;
+    this.settings.articleLibraryExcludeRoots = this.settings.articleLibraryExcludeRoots || DEFAULT_SETTINGS.articleLibraryExcludeRoots;
   }
 
   async saveSettings() {

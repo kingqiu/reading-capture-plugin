@@ -95,6 +95,9 @@ function makeFakeApp() {
     getMarkdownFiles() {
       return [...files.values()].map((entry) => entry.file).filter((file) => file.name.endsWith(".md"));
     },
+    getFiles() {
+      return [...files.values()].map((entry) => entry.file);
+    },
   };
 
   return {
@@ -352,10 +355,57 @@ topic idea
   assert.strictEqual(plugin.annotationMatchesFilter(annotations[1], "topic"), true);
 }
 
+async function testArticleLibraryGrouping() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = {
+    readingRoot: "Learning/reading-notes",
+    openNoteAfterCapture: false,
+    articleLibraryRoots: "Learning/web/x_articles\nLearning/research",
+    articleLibraryExcludeRoots: "Learning/reading-notes\n.obsidian",
+  };
+
+  const enriched = makeFile("Learning/web/x_articles/20260608_loop/article_zh_enriched.md", "# Loop Enriched\n\nThis is the enriched Chinese version.");
+  const original = makeFile("Learning/web/x_articles/20260608_loop/article.md", "# Loop Original\n\nOriginal version.");
+  const pdf = makeFile("Learning/web/x_articles/20260608_loop/article_zh_enriched.pdf", "");
+  const single = makeFile("Learning/research/20260609_single_note.md", "# Single Note\n\nA standalone research article.");
+  files.set(enriched.path, { file: enriched, content: "# Loop Enriched\n\nThis is the enriched Chinese version." });
+  files.set(original.path, { file: original, content: "# Loop Original\n\nOriginal version." });
+  files.set(pdf.path, { file: pdf, content: "" });
+  files.set(single.path, { file: single, content: "# Single Note\n\nA standalone research article." });
+
+  const directoryInfo = plugin.resolveArticleGroupPath(enriched.path, plugin.getArticleLibraryRoots());
+  assert.strictEqual(directoryInfo.groupType, "directory");
+  assert.strictEqual(directoryInfo.groupPath, "Learning/web/x_articles/20260608_loop");
+
+  const singleInfo = plugin.resolveArticleGroupPath(single.path, plugin.getArticleLibraryRoots());
+  assert.strictEqual(singleInfo.groupType, "single-file");
+  assert.strictEqual(singleInfo.groupPath, single.path);
+
+  assert.strictEqual(plugin.articleVersionRank("article_zh_enriched.md"), 1);
+  assert.strictEqual(plugin.articleVersionRank("article_zh.md"), 3);
+  assert.strictEqual(plugin.articleVersionRank("article.md"), 6);
+  assert.strictEqual(plugin.articleVersionLabel("article_zh_enriched.md"), "扩展版");
+  assert.strictEqual(plugin.articleVersionLabel("article_zh.md"), "中文版");
+  assert.strictEqual(plugin.articleVersionLabel("article.md"), "原文");
+
+  const groups = await plugin.buildArticleLibraryGroups();
+  const directoryGroup = groups.find((group) => group.groupPath === "Learning/web/x_articles/20260608_loop");
+  const singleGroup = groups.find((group) => group.groupPath === single.path);
+  assert.ok(directoryGroup, "directory article group should be present");
+  assert.ok(singleGroup, "single-file article group should be present");
+  assert.strictEqual(directoryGroup.bestVersion.path, enriched.path);
+  assert.strictEqual(directoryGroup.versions.some((version) => version.kind === "pdf"), true);
+  assert.strictEqual(singleGroup.groupType, "single-file");
+}
+
 testCaptureWritesAnnotationAndIndex()
   .then(testCaptureReusesExistingUnindexedFile)
   .then(testCaptureImageNote)
   .then(testRecordTargetAndHighlight)
+  .then(testArticleLibraryGrouping)
   .then(() => console.log("plugin capture test passed"))
   .catch((error) => {
     console.error(error);
