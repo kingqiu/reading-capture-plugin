@@ -1,0 +1,10 @@
+{
+  "name": "reading-capture",
+  "version": "0.2.1",
+  "private": true,
+  "description": "Obsidian plugin for immersive reading, highlights, and structured reading notes.",
+  "scripts": {
+    "test": "node --check plugin/main.js && node test/reading-core.test.js && node test/plugin-capture.test.js"
+  },
+  "license": "UNLICENSED"
+}
