@@ -12,7 +12,7 @@ It is designed for a Codex/OpenClaw-assisted writing workflow:
 
 ## Current Status
 
-Version: `0.3.0`
+Version: `0.3.1`
 
 This is a personal workflow plugin under active development.
 
@@ -22,6 +22,7 @@ This is a personal workflow plugin under active development.
 - `资料库` view for browsing saved article groups across configured source folders.
 - Article grouping supports both directory-based article bundles and standalone Markdown files.
 - Best-version detection prefers enriched Chinese Markdown, then translations, then original Markdown.
+- Digest folders under `Learning/web/x_articles/digest(s)` are excluded from the article library.
 - Paper-like research-magazine reading style.
 - Dynamic highlights based on saved reading notes.
 - Image annotations: right-click an image in the reader to save a thought and jump back to it later.

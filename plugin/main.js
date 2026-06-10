@@ -13,6 +13,11 @@ const KNOWN_SOURCE_ROOTS = [
   "Raw",
 ];
 
+const ALWAYS_EXCLUDED_LIBRARY_ROOTS = [
+  "Learning/web/x_articles/digest",
+  "Learning/web/x_articles/digests",
+];
+
 function sha1(value, length = 8) {
   let hash = 2166136261;
   const text = String(value);
@@ -309,7 +314,7 @@ const DEFAULT_SETTINGS = {
   readingRoot: "Learning/reading-notes",
   openNoteAfterCapture: false,
   articleLibraryRoots: KNOWN_SOURCE_ROOTS.join("\n"),
-  articleLibraryExcludeRoots: "Learning/reading-notes\n.obsidian",
+  articleLibraryExcludeRoots: ["Learning/reading-notes", ".obsidian", ...ALWAYS_EXCLUDED_LIBRARY_ROOTS].join("\n"),
 };
 
 class TextInputModal extends Modal {
@@ -1725,7 +1730,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
   getArticleLibraryExcludeRoots() {
     const configured = this.parsePathList(this.settings.articleLibraryExcludeRoots, DEFAULT_SETTINGS.articleLibraryExcludeRoots);
     const readingRoot = normalizePath(this.settings.readingRoot || DEFAULT_SETTINGS.readingRoot).replace(/\/+$/g, "");
-    return [...new Set([...configured, readingRoot].filter(Boolean))];
+    return [...new Set([...configured, readingRoot, ...ALWAYS_EXCLUDED_LIBRARY_ROOTS].filter(Boolean))];
   }
 
   getVaultFiles() {

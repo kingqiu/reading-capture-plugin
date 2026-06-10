@@ -371,10 +371,12 @@ async function testArticleLibraryGrouping() {
   const original = makeFile("Learning/web/x_articles/20260608_loop/article.md", "# Loop Original\n\nOriginal version.");
   const pdf = makeFile("Learning/web/x_articles/20260608_loop/article_zh_enriched.pdf", "");
   const single = makeFile("Learning/research/20260609_single_note.md", "# Single Note\n\nA standalone research article.");
+  const digest = makeFile("Learning/web/x_articles/digest/digest_20260308_185542.md", "# X 博主最新动态\n\nDigest should not be treated as an article.");
   files.set(enriched.path, { file: enriched, content: "# Loop Enriched\n\nThis is the enriched Chinese version." });
   files.set(original.path, { file: original, content: "# Loop Original\n\nOriginal version." });
   files.set(pdf.path, { file: pdf, content: "" });
   files.set(single.path, { file: single, content: "# Single Note\n\nA standalone research article." });
+  files.set(digest.path, { file: digest, content: "# X 博主最新动态\n\nDigest should not be treated as an article." });
 
   const directoryInfo = plugin.resolveArticleGroupPath(enriched.path, plugin.getArticleLibraryRoots());
   assert.strictEqual(directoryInfo.groupType, "directory");
@@ -399,6 +401,7 @@ async function testArticleLibraryGrouping() {
   assert.strictEqual(directoryGroup.bestVersion.path, enriched.path);
   assert.strictEqual(directoryGroup.versions.some((version) => version.kind === "pdf"), true);
   assert.strictEqual(singleGroup.groupType, "single-file");
+  assert.strictEqual(groups.some((group) => group.groupPath === "Learning/web/x_articles/digest"), false);
 }
 
 testCaptureWritesAnnotationAndIndex()
