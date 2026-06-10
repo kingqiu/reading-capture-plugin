@@ -23,6 +23,7 @@ This is a personal workflow plugin under active development.
 - Dynamic highlights based on saved reading notes.
 - Image annotations: right-click an image in the reader to save a thought and jump back to it later.
 - Right-side annotation sidebar.
+- Sidebar filters, collapse mode, and unlocated-record hints.
 - Hover card for saved thoughts.
 - Click sidebar cards to jump back to the highlighted passage.
 - Capture selected text with a note.

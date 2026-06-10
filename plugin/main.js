@@ -486,6 +486,8 @@ class ReadingCaptureReaderView extends ItemView {
     this.plugin = plugin;
     this.sourcePath = "";
     this.activeAnnotationId = "";
+    this.sidebarFilter = "all";
+    this.sidebarCollapsed = false;
   }
 
   getViewType() {
@@ -535,11 +537,18 @@ class ReadingCaptureReaderView extends ItemView {
     const captureButton = actions.createEl("button", { text: "记录选中内容" });
     captureButton.addClass("mod-cta");
     captureButton.addEventListener("click", () => this.captureSelection(sourceFile));
+    const sidebarButton = actions.createEl("button", { text: this.sidebarCollapsed ? "显示标注" : "隐藏标注" });
+    sidebarButton.addEventListener("click", async () => {
+      this.sidebarCollapsed = !this.sidebarCollapsed;
+      await this.render();
+    });
 
     const stage = container.createDiv({ cls: "reading-capture-reader-stage" });
+    if (this.sidebarCollapsed) stage.addClass("is-sidebar-collapsed");
     const articlePanel = stage.createDiv({ cls: "reading-capture-reader-article-panel" });
     const body = articlePanel.createDiv({ cls: "reading-capture-reader-body markdown-preview-view" });
     const sidebar = stage.createEl("aside", { cls: "reading-capture-reader-sidebar" });
+    if (this.sidebarCollapsed) sidebar.addClass("is-collapsed");
     const tooltip = container.createDiv({ cls: "reading-capture-floating-note" });
     const markdown = await this.plugin.readText(sourceFile.path);
     if (MarkdownRenderer && typeof MarkdownRenderer.render === "function") {
@@ -631,7 +640,7 @@ class ReadingCaptureReaderView extends ItemView {
   }
 
   captureImage(sourceFile, image, body) {
-    const media = this.plugin.imageMetadataFromElement(image, body);
+    const media = this.plugin.imageMetadataFromElement(image, body, sourceFile);
     new TextInputModal(
       this.app,
       "记录图片想法",
@@ -682,6 +691,7 @@ class ReadingCaptureReaderView extends ItemView {
   highlightImageInElement(root, annotation) {
     const image = this.plugin.findImageForAnnotation(root, annotation);
     if (!image) return;
+    annotation.located = true;
     image.addClass("reading-capture-reader-image-highlight");
     image.dataset.annotationId = annotation.id;
     image.dataset.quoteHash = annotation.mediaHash || "";
@@ -702,6 +712,7 @@ class ReadingCaptureReaderView extends ItemView {
     const rawRange = this.plugin.findQuoteRawRange(fullText, quote);
     if (!rawRange) return;
 
+    let didHighlight = false;
     for (const item of textNodes) {
       if (item.end <= rawRange.start || item.start >= rawRange.end) continue;
       const from = Math.max(rawRange.start - item.start, 0);
@@ -719,10 +730,12 @@ class ReadingCaptureReaderView extends ItemView {
       }
       try {
         range.surroundContents(mark);
+        didHighlight = true;
       } catch (error) {
         // Complex inline markup can make surroundContents unhappy. Skip rather than breaking render.
       }
     }
+    if (didHighlight && annotation) annotation.located = true;
   }
 
   renderSidebar(sidebar, annotations) {
@@ -732,6 +745,7 @@ class ReadingCaptureReaderView extends ItemView {
     header.createEl("div", { cls: "reading-capture-sidebar-kicker", text: "Notes" });
     header.createEl("h3", { text: "阅读标注" });
     header.createEl("div", { cls: "reading-capture-sidebar-count", text: `${items.length} 条记录` });
+    this.renderSidebarFilters(sidebar, items);
 
     if (!items.length) {
       const empty = sidebar.createDiv({ cls: "reading-capture-sidebar-empty" });
@@ -741,12 +755,23 @@ class ReadingCaptureReaderView extends ItemView {
     }
 
     const list = sidebar.createDiv({ cls: "reading-capture-sidebar-list" });
-    for (const item of items) {
+    const visibleItems = items.filter((item) => this.plugin.annotationMatchesFilter(item, this.sidebarFilter));
+    if (!visibleItems.length) {
+      const empty = list.createDiv({ cls: "reading-capture-sidebar-empty" });
+      empty.createEl("strong", { text: "当前筛选没有记录" });
+      empty.createEl("span", { text: "切换到全部可以查看完整标注。" });
+      return;
+    }
+    for (const item of visibleItems) {
       const card = list.createDiv({ cls: "reading-capture-sidebar-card" });
       card.dataset.annotationId = item.id;
       const top = card.createDiv({ cls: "reading-capture-sidebar-card-top" });
       top.createEl("span", { cls: `reading-capture-type-pill ${this.plugin.typeClass(item)}`, text: this.plugin.annotationLabel(item) });
       top.createEl("span", { cls: "reading-capture-sidebar-time", text: this.plugin.shortTime(item.time) });
+      if (!item.located && (item.quote || item.mediaType)) {
+        card.addClass("is-unlocated");
+        top.createEl("span", { cls: "reading-capture-location-pill", text: "未定位" });
+      }
       if (item.quote) {
         card.createEl("blockquote", { cls: "reading-capture-sidebar-quote", text: this.plugin.previewSelectedText(item.quote) });
       } else if (item.mediaType === "image") {
@@ -758,6 +783,27 @@ class ReadingCaptureReaderView extends ItemView {
         card.createEl("div", { cls: "reading-capture-sidebar-note", text: item.note });
       }
       card.addEventListener("click", () => this.activateAnnotation(item.id, true));
+    }
+  }
+
+  renderSidebarFilters(sidebar, items) {
+    const filters = [
+      ["all", "全部"],
+      ["thought", "想法"],
+      ["image", "图片"],
+      ["topic", "选题"],
+      ["fact", "待核查"],
+      ["unlocated", "未定位"],
+    ];
+    const row = sidebar.createDiv({ cls: "reading-capture-sidebar-filters" });
+    for (const [value, label] of filters) {
+      const count = items.filter((item) => this.plugin.annotationMatchesFilter(item, value)).length;
+      const button = row.createEl("button", { text: `${label}${value === "all" ? "" : ` ${count}`}` });
+      if (this.sidebarFilter === value) button.addClass("is-active");
+      button.addEventListener("click", () => {
+        this.sidebarFilter = value;
+        this.renderSidebar(sidebar, items);
+      });
     }
   }
 
@@ -775,7 +821,7 @@ class ReadingCaptureReaderView extends ItemView {
       this.showFloatingNote(tooltip, mark, item);
     });
     body.addEventListener("mouseout", (event) => {
-      const mark = event.target && event.target.closest ? event.target.closest(".reading-capture-reader-highlight") : null;
+      const mark = event.target && event.target.closest ? event.target.closest(".reading-capture-reader-highlight, .reading-capture-reader-image-highlight") : null;
       if (!mark || !body.contains(mark)) return;
       const next = event.relatedTarget;
       if (next && tooltip.contains(next)) return;
@@ -1166,14 +1212,14 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       .replace(/==([\s\S]*?)==/g, "$1");
   }
 
-  imageMetadataFromElement(image, body) {
+  imageMetadataFromElement(image, body, sourceFile = null) {
     const images = [...body.querySelectorAll("img")];
     const index = images.indexOf(image);
     const src = image.getAttribute("src") || image.currentSrc || "";
     const alt = image.getAttribute("alt") || "";
     return {
       type: "image",
-      src: this.normalizeImageSource(src),
+      src: this.stableImageSource(src, sourceFile),
       alt,
       index: index >= 0 ? index : Number(image.dataset.readingCaptureImageIndex || 0),
     };
@@ -1189,10 +1235,32 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     const value = String(src || "").trim();
     if (!value) return "";
     try {
-      return decodeURIComponent(value).replace(/\\/g, "/");
+      return decodeURIComponent(value).replace(/\\/g, "/").replace(/[?#].*$/, "");
     } catch (error) {
-      return value.replace(/\\/g, "/");
+      return value.replace(/\\/g, "/").replace(/[?#].*$/, "");
     }
+  }
+
+  stableImageSource(src, sourceFile = null) {
+    const normalized = this.normalizeImageSource(src);
+    if (!normalized) return "";
+    const sourceDir = sourceFile && sourceFile.path ? normalizeVaultPath(sourceFile.path).split("/").slice(0, -1).join("/") : "";
+    const adapter = this.app && this.app.vault ? this.app.vault.adapter : null;
+    const sourceAbs = sourceFile && adapter && typeof adapter.getFullPath === "function" ? this.normalizeImageSource(adapter.getFullPath(sourceFile.path)) : "";
+    const sourceAbsDir = sourceAbs ? sourceAbs.split("/").slice(0, -1).join("/") : "";
+
+    if (sourceAbsDir && normalized.includes(`${sourceAbsDir}/`)) {
+      return normalizeVaultPath(normalized.slice(normalized.indexOf(`${sourceAbsDir}/`) + sourceAbsDir.length + 1));
+    }
+    if (sourceDir && normalized.includes(`${sourceDir}/`)) {
+      return normalizeVaultPath(normalized.slice(normalized.indexOf(`${sourceDir}/`) + sourceDir.length + 1));
+    }
+    const vaultRoot = adapter && typeof adapter.getFullPath === "function" ? this.normalizeImageSource(adapter.getFullPath("")) : "";
+    if (vaultRoot && normalized.includes(`${vaultRoot}/`)) {
+      return normalizeVaultPath(normalized.slice(normalized.indexOf(`${vaultRoot}/`) + vaultRoot.length + 1));
+    }
+    if (!/^[a-z]+:\/\//i.test(normalized) && !normalized.startsWith("/")) return normalizeVaultPath(normalized);
+    return this.imageBaseName(normalized);
   }
 
   imageBaseName(src) {
@@ -1212,8 +1280,9 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     if (mediaSrc || mediaBase) {
       const bySrc = images.find((image) => {
         const src = this.normalizeImageSource(image.getAttribute("src") || image.currentSrc || "");
+        const stableSrc = this.stableImageSource(src);
         const base = this.imageBaseName(src);
-        return (mediaSrc && src.includes(mediaSrc)) || (mediaBase && base === mediaBase);
+        return (mediaSrc && (src.includes(mediaSrc) || stableSrc === mediaSrc || stableSrc.endsWith(`/${mediaSrc}`))) || (mediaBase && base === mediaBase);
       });
       if (bySrc) return bySrc;
     }
@@ -1452,6 +1521,17 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     if (item.section === "事实待核查" || item.type === "fact-check") return "is-fact";
     if (!item.quote || item.type === "idea") return "is-idea";
     return "is-thought";
+  }
+
+  annotationMatchesFilter(item, filter) {
+    if (!item) return false;
+    if (!filter || filter === "all") return true;
+    if (filter === "unlocated") return !item.located && !!(item.quote || item.mediaType);
+    if (filter === "image") return item.mediaType === "image";
+    if (filter === "topic") return item.section === "可写选题" || item.type === "topic";
+    if (filter === "fact") return item.section === "事实待核查" || item.type === "fact-check";
+    if (filter === "thought") return item.mediaType !== "image" && !(item.section === "可写选题" || item.type === "topic") && !(item.section === "事实待核查" || item.type === "fact-check");
+    return true;
   }
 
   shortTime(value) {

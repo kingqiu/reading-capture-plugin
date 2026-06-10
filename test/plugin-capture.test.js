@@ -193,6 +193,9 @@ async function testCaptureImageNote() {
     openNoteAfterCapture: false,
   };
 
+  const stableSrc = plugin.stableImageSource("app://abc/vault/Learning/web/x_articles/example/images/loop.png?12345", sourceFile);
+  assert.strictEqual(stableSrc, "images/loop.png");
+
   await plugin.captureForFile(sourceFile, {
     selectedText: "",
     note: "This image explains the loop visually.",
@@ -200,7 +203,7 @@ async function testCaptureImageNote() {
     heading: "标注记录",
     media: {
       type: "image",
-      src: "images/loop.png",
+      src: stableSrc,
       alt: "Loop diagram",
       index: 2,
     },
@@ -222,6 +225,11 @@ async function testCaptureImageNote() {
   assert.strictEqual(annotations[0].mediaIndex, "2");
   assert.strictEqual(plugin.annotationLabel(annotations[0]), "图片想法");
   assert.strictEqual(plugin.typeClass(annotations[0]), "is-image");
+  assert.strictEqual(plugin.annotationMatchesFilter(annotations[0], "image"), true);
+  assert.strictEqual(plugin.annotationMatchesFilter(annotations[0], "topic"), false);
+  assert.strictEqual(plugin.annotationMatchesFilter(annotations[0], "unlocated"), true);
+  annotations[0].located = true;
+  assert.strictEqual(plugin.annotationMatchesFilter(annotations[0], "unlocated"), false);
 }
 
 function testRecordTargetAndHighlight() {
@@ -340,6 +348,8 @@ topic idea
   assert.strictEqual(plugin.typeClass(annotations[1]), "is-topic");
   assert.strictEqual(plugin.annotationLabel(annotations[1]), "可写选题");
   assert.strictEqual(plugin.shortTime(annotations[1].time), "15:00");
+  assert.strictEqual(plugin.annotationMatchesFilter(annotations[0], "thought"), true);
+  assert.strictEqual(plugin.annotationMatchesFilter(annotations[1], "topic"), true);
 }
 
 testCaptureWritesAnnotationAndIndex()

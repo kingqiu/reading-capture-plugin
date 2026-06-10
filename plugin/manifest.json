@@ -1,7 +1,7 @@
 {
   "id": "reading-capture",
   "name": "Reading Capture",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "minAppVersion": "1.5.0",
   "description": "Capture highlights and thoughts into a central reading-notes protocol for Codex and OpenClaw workflows.",
   "author": "Jim Qiu & Codex",
