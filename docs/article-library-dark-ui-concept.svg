@@ -1,0 +1,238 @@
+<svg width="1920" height="1200" viewBox="0 0 1920 1200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="panelShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="28" flood-color="#000000" flood-opacity="0.34"/>
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#FFFFFF" flood-opacity="0.05"/>
+    </filter>
+    <filter id="cardShadow" x="-12%" y="-12%" width="124%" height="124%">
+      <feDropShadow dx="0" dy="10" stdDeviation="16" flood-color="#000000" flood-opacity="0.24"/>
+    </filter>
+    <linearGradient id="appBg" x1="0" y1="0" x2="1920" y2="1200" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#080B09"/>
+      <stop offset="0.48" stop-color="#101610"/>
+      <stop offset="1" stop-color="#182116"/>
+    </linearGradient>
+    <linearGradient id="cardBg" x1="0" y1="0" x2="340" y2="180" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#171B18"/>
+      <stop offset="1" stop-color="#101411"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1420 80) rotate(134) scale(760 420)">
+      <stop offset="0" stop-color="#506B53" stop-opacity="0.42"/>
+      <stop offset="0.55" stop-color="#253828" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#080B09" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grain" width="12" height="12" patternUnits="userSpaceOnUse">
+      <path d="M1 1H2V2H1V1ZM7 4H8V5H7V4ZM4 9H5V10H4V9Z" fill="#FFFFFF" fill-opacity="0.035"/>
+    </pattern>
+    <style>
+      .ui { font-family: "PingFang SC", "Songti SC", "Noto Serif SC", sans-serif; }
+      .serif { font-family: "Songti SC", "Noto Serif SC", Georgia, serif; }
+      .title { fill:#F2EFE5; font-size:31px; font-weight:800; }
+      .muted { fill:#7E887D; font-size:14px; font-weight:650; }
+      .sideLabel { fill:#D8DDD4; font-size:17px; font-weight:700; }
+      .sideCount { fill:#707970; font-size:14px; font-weight:800; }
+      .section { fill:#737E73; font-size:12px; font-weight:850; letter-spacing:1.5px; }
+      .cardTitle { fill:#ECEBE2; font-size:19px; font-weight:820; }
+      .cardText { fill:#A7AEA4; font-size:14px; font-weight:560; }
+      .chip { fill:#B8C0B6; font-size:12px; font-weight:750; }
+      .detailTitle { fill:#F2EFE5; font-size:26px; font-weight:850; }
+      .detailText { fill:#A2ABA0; font-size:14px; font-weight:600; }
+    </style>
+  </defs>
+
+  <rect width="1920" height="1200" fill="#050605"/>
+  <rect x="42" y="40" width="1836" height="1120" rx="18" fill="url(#appBg)" stroke="#202821"/>
+  <rect x="42" y="40" width="1836" height="1120" rx="18" fill="url(#halo)"/>
+  <rect x="42" y="40" width="1836" height="1120" rx="18" fill="url(#grain)"/>
+
+  <rect x="42" y="40" width="1836" height="46" rx="18" fill="#0B0D0B"/>
+  <circle cx="70" cy="63" r="7" fill="#FF5F57"/>
+  <circle cx="94" cy="63" r="7" fill="#FFBD2E"/>
+  <circle cx="118" cy="63" r="7" fill="#28C840"/>
+
+  <!-- Sidebar -->
+  <rect x="42" y="86" width="328" height="1074" fill="#0D100E"/>
+  <line x1="370" y1="86" x2="370" y2="1160" stroke="#202720"/>
+  <g class="ui">
+    <rect x="72" y="116" width="42" height="42" rx="12" fill="#181D19" stroke="#283028"/>
+    <path d="M84 128H101V146H84V128ZM105 128H107V146H105V128ZM110 128H122V146H110V128Z" stroke="#DFE4DA" stroke-width="2"/>
+    <text x="136" y="144" class="title">资料库</text>
+    <path d="M334 126V148M323 137H345" stroke="#E2E5DA" stroke-width="2" stroke-linecap="round"/>
+
+    <text x="78" y="207" class="section">READING</text>
+    <rect x="66" y="226" width="278" height="46" rx="13" fill="#202720"/>
+    <circle cx="92" cy="249" r="8" stroke="#F0EBD9" stroke-width="3"/>
+    <text x="122" y="256" class="sideLabel">未读</text>
+    <rect x="292" y="237" width="42" height="24" rx="12" fill="#5267FF"/>
+    <text x="301" y="254" fill="#fff" font-size="13" font-weight="850">486</text>
+
+    <text x="122" y="315" class="sideLabel">全部文章</text><text x="302" y="315" class="sideCount">690</text>
+    <text x="122" y="363" class="sideLabel">有标注</text><text x="306" y="363" class="sideCount">352</text>
+    <text x="122" y="411" class="sideLabel">可写选题</text><text x="314" y="411" class="sideCount">17</text>
+    <text x="122" y="459" class="sideLabel">事实待核查</text><text x="314" y="459" class="sideCount">9</text>
+    <circle cx="93" cy="308" r="7" fill="#8A9587"/>
+    <path d="M86 359L94 348L102 359L94 370Z" fill="#E044A7"/>
+    <path d="M86 408L94 396L102 408L94 420Z" stroke="#E1A121" stroke-width="2"/>
+    <rect x="85" y="447" width="18" height="18" rx="4" stroke="#D85F4A" stroke-width="2"/>
+
+    <line x1="74" y1="506" x2="342" y2="506" stroke="#202720"/>
+    <text x="78" y="546" class="section">SOURCES</text>
+    <rect x="66" y="566" width="278" height="42" rx="11" fill="#161D16" stroke="#2B352B"/>
+    <text x="122" y="593" class="sideLabel">x_articles</text><text x="302" y="593" class="sideCount">489</text>
+    <text x="122" y="641" class="sideLabel">articles</text><text x="302" y="641" class="sideCount">107</text>
+    <text x="122" y="689" class="sideLabel">research</text><text x="309" y="689" class="sideCount">81</text>
+    <text x="122" y="737" class="sideLabel">wechat_articles</text><text x="312" y="737" class="sideCount">10</text>
+    <text x="122" y="785" class="sideLabel">papers</text><text x="322" y="785" class="sideCount">1</text>
+    <text x="122" y="833" class="sideLabel">Raw</text><text x="322" y="833" class="sideCount">1</text>
+    <path d="M84 583H104M84 631H104M84 679H104M84 727H104M84 775H104M84 823H104" stroke="#7B847A" stroke-width="2" stroke-linecap="round"/>
+
+    <line x1="74" y1="878" x2="342" y2="878" stroke="#202720"/>
+    <text x="78" y="918" class="section">SMART FOLDERS</text>
+    <text x="122" y="960" class="sideLabel">最近阅读</text>
+    <text x="122" y="1008" class="sideLabel">图片标注</text>
+    <text x="122" y="1056" class="sideLabel">OpenClaw 导入</text>
+    <text x="122" y="1104" class="sideLabel">待整理选题</text>
+  </g>
+
+  <!-- Header and controls -->
+  <g class="ui">
+    <text x="410" y="136" class="title">资料库</text>
+    <text x="410" y="166" class="muted">691 个文章组 · 352 条标注 · 17 个选题 · 9 个待核查</text>
+    <rect x="710" y="108" width="530" height="48" rx="12" fill="#111611" stroke="#303A30"/>
+    <text x="738" y="138" fill="#7D877B" font-size="15" font-weight="650">搜索标题、路径、摘要、标签...</text>
+    <rect x="1258" y="108" width="122" height="48" rx="12" fill="#1D2B1F" stroke="#435842"/>
+    <text x="1287" y="138" fill="#ECF4E7" font-size="15" font-weight="850">重新扫描</text>
+    <rect x="1394" y="108" width="138" height="48" rx="12" fill="#111611" stroke="#303A30"/>
+    <text x="1421" y="138" fill="#D7DDD2" font-size="15" font-weight="800">打开阅读器</text>
+    <rect x="1548" y="108" width="280" height="48" rx="12" fill="#111611" stroke="#303A30"/>
+    <text x="1574" y="138" fill="#98A496" font-size="15" font-weight="800">视图：Cards · 排序：Latest</text>
+
+    <rect x="410" y="196" width="1418" height="44" rx="12" fill="#111611" stroke="#202820"/>
+    <text x="570" y="224" fill="#CED6CA" font-size="15" font-weight="750">Latest</text>
+    <text x="842" y="224" fill="#CED6CA" font-size="15" font-weight="750">Any source</text>
+    <text x="1110" y="224" fill="#CED6CA" font-size="15" font-weight="750">Cards</text>
+    <text x="1372" y="224" fill="#CED6CA" font-size="15" font-weight="750">Best version</text>
+    <circle cx="550" cy="218" r="5" fill="#5267FF"/>
+    <circle cx="822" cy="218" r="5" fill="#7E8A7A"/>
+    <circle cx="1090" cy="218" r="5" fill="#7E8A7A"/>
+    <circle cx="1352" cy="218" r="5" fill="#7E8A7A"/>
+  </g>
+
+  <!-- Card grid -->
+  <g class="ui">
+    <g filter="url(#cardShadow)">
+      <rect x="410" y="270" width="330" height="176" rx="13" fill="url(#cardBg)" stroke="#2C342C"/>
+      <circle cx="428" cy="290" r="4" fill="#5267FF"/>
+      <text x="430" y="318" class="cardTitle">「WTF 是一个 Loop?」丰富版</text>
+      <text x="430" y="350" class="cardText">原文翻译 + 增强解读 · 完整版</text>
+      <rect x="430" y="376" width="48" height="23" rx="7" fill="#242B24"/><text x="442" y="392" class="chip">扩展</text>
+      <rect x="486" y="376" width="48" height="23" rx="7" fill="#242B24"/><text x="498" y="392" class="chip">中文</text>
+      <rect x="542" y="376" width="42" height="23" rx="7" fill="#242B24"/><text x="553" y="392" class="chip">PDF</text>
+      <line x1="430" y1="413" x2="716" y2="413" stroke="#2B342B"/>
+      <text x="430" y="435" fill="#8B9588" font-size="13" font-weight="700">5 条标注 · x_articles · 2026-06-08</text>
+    </g>
+    <g filter="url(#cardShadow)">
+      <rect x="758" y="270" width="330" height="176" rx="13" fill="url(#cardBg)" stroke="#2C342C"/>
+      <circle cx="776" cy="290" r="4" fill="#5267FF"/>
+      <text x="778" y="318" class="cardTitle">循环工程：14 步路线图</text>
+      <text x="778" y="350" class="cardText">Codez 对 Agent Loop 的结构化拆解...</text>
+      <rect x="778" y="376" width="48" height="23" rx="7" fill="#242B24"/><text x="790" y="392" class="chip">中文</text>
+      <rect x="834" y="376" width="48" height="23" rx="7" fill="#242B24"/><text x="846" y="392" class="chip">原文</text>
+      <line x1="778" y1="413" x2="1064" y2="413" stroke="#2B342B"/>
+      <text x="778" y="435" fill="#8B9588" font-size="13" font-weight="700">0 条标注 · x_articles · 2026-06-10</text>
+    </g>
+    <g filter="url(#cardShadow)">
+      <rect x="1106" y="270" width="330" height="176" rx="13" fill="url(#cardBg)" stroke="#2C342C"/>
+      <circle cx="1124" cy="290" r="4" fill="#D6BA57"/>
+      <text x="1126" y="318" class="cardTitle">Claude Code Skill 场景</text>
+      <text x="1126" y="350" class="cardText">10 大微信读书 Skill 场景，全部提示词...</text>
+      <rect x="1126" y="376" width="48" height="23" rx="7" fill="#242B24"/><text x="1138" y="392" class="chip">选题</text>
+      <rect x="1182" y="376" width="48" height="23" rx="7" fill="#242B24"/><text x="1194" y="392" class="chip">中文</text>
+      <line x1="1126" y1="413" x2="1412" y2="413" stroke="#2B342B"/>
+      <text x="1126" y="435" fill="#8B9588" font-size="13" font-weight="700">4 条标注 · articles · 2026-05-31</text>
+    </g>
+
+    <g filter="url(#cardShadow)">
+      <rect x="410" y="466" width="330" height="176" rx="13" fill="url(#cardBg)" stroke="#2C342C"/>
+      <circle cx="428" cy="486" r="4" fill="#5267FF"/>
+      <text x="430" y="514" class="cardTitle">不可被训练者</text>
+      <text x="430" y="546" class="cardText">来源 sararnormous @ X，关于 AI...</text>
+      <rect x="430" y="572" width="48" height="23" rx="7" fill="#242B24"/><text x="442" y="588" class="chip">中文</text>
+      <rect x="486" y="572" width="48" height="23" rx="7" fill="#242B24"/><text x="498" y="588" class="chip">原文</text>
+      <line x1="430" y1="609" x2="716" y2="609" stroke="#2B342B"/>
+      <text x="430" y="631" fill="#8B9588" font-size="13" font-weight="700">0 条标注 · x_articles · 2026-06-08</text>
+    </g>
+    <g filter="url(#cardShadow)">
+      <rect x="758" y="466" width="330" height="176" rx="13" fill="url(#cardBg)" stroke="#2C342C"/>
+      <circle cx="776" cy="486" r="4" fill="#E044A7"/>
+      <text x="778" y="514" class="cardTitle">AI 智能体落地路线</text>
+      <text x="778" y="546" class="cardText">从企业 AI 落地到技能库设计...</text>
+      <rect x="778" y="572" width="48" height="23" rx="7" fill="#242B24"/><text x="790" y="588" class="chip">待核</text>
+      <rect x="834" y="572" width="48" height="23" rx="7" fill="#242B24"/><text x="846" y="588" class="chip">论文</text>
+      <line x1="778" y1="609" x2="1064" y2="609" stroke="#2B342B"/>
+      <text x="778" y="631" fill="#8B9588" font-size="13" font-weight="700">7 条标注 · research · 2026-05-29</text>
+    </g>
+    <g filter="url(#cardShadow)">
+      <rect x="1106" y="466" width="330" height="176" rx="13" fill="url(#cardBg)" stroke="#2C342C"/>
+      <circle cx="1124" cy="486" r="4" fill="#5267FF"/>
+      <text x="1126" y="514" class="cardTitle">Agent 存储计算模型</text>
+      <text x="1126" y="546" class="cardText">把 memory、tools 与执行循环...</text>
+      <rect x="1126" y="572" width="48" height="23" rx="7" fill="#242B24"/><text x="1138" y="588" class="chip">中文</text>
+      <rect x="1182" y="572" width="48" height="23" rx="7" fill="#242B24"/><text x="1194" y="588" class="chip">原文</text>
+      <line x1="1126" y1="609" x2="1412" y2="609" stroke="#2B342B"/>
+      <text x="1126" y="631" fill="#8B9588" font-size="13" font-weight="700">1 条标注 · x_articles · 2026-06-02</text>
+    </g>
+
+    <g filter="url(#cardShadow)">
+      <rect x="410" y="662" width="330" height="176" rx="13" fill="url(#cardBg)" stroke="#2C342C"/>
+      <circle cx="428" cy="682" r="4" fill="#5267FF"/>
+      <text x="430" y="710" class="cardTitle">OpenAI Codex 永远在线</text>
+      <text x="430" y="742" class="cardText">关于 Codex 运行模式、协作成本...</text>
+      <rect x="430" y="768" width="48" height="23" rx="7" fill="#242B24"/><text x="442" y="784" class="chip">图片</text>
+      <line x1="430" y1="805" x2="716" y2="805" stroke="#2B342B"/>
+      <text x="430" y="827" fill="#8B9588" font-size="13" font-weight="700">2 条标注 · wechat · 2026-06-03</text>
+    </g>
+    <g filter="url(#cardShadow)">
+      <rect x="758" y="662" width="330" height="176" rx="13" fill="url(#cardBg)" stroke="#2C342C"/>
+      <circle cx="776" cy="682" r="4" fill="#5267FF"/>
+      <text x="778" y="710" class="cardTitle">动态工作流与 Agent</text>
+      <text x="778" y="742" class="cardText">从 Orchestration 到可恢复任务...</text>
+      <rect x="778" y="768" width="48" height="23" rx="7" fill="#242B24"/><text x="790" y="784" class="chip">中文</text>
+      <line x1="778" y1="805" x2="1064" y2="805" stroke="#2B342B"/>
+      <text x="778" y="827" fill="#8B9588" font-size="13" font-weight="700">0 条标注 · x_articles · 2026-06-03</text>
+    </g>
+    <g filter="url(#cardShadow)">
+      <rect x="1106" y="662" width="330" height="176" rx="13" fill="url(#cardBg)" stroke="#2C342C"/>
+      <circle cx="1124" cy="682" r="4" fill="#5267FF"/>
+      <text x="1126" y="710" class="cardTitle">Sarah Guo 推文 Fable 5</text>
+      <text x="1126" y="742" class="cardText">关于 myths、引用链和生成式...</text>
+      <rect x="1126" y="768" width="48" height="23" rx="7" fill="#242B24"/><text x="1138" y="784" class="chip">原文</text>
+      <rect x="1182" y="768" width="42" height="23" rx="7" fill="#242B24"/><text x="1193" y="784" class="chip">PDF</text>
+      <line x1="1126" y1="805" x2="1412" y2="805" stroke="#2B342B"/>
+      <text x="1126" y="827" fill="#8B9588" font-size="13" font-weight="700">0 条标注 · x_articles · 2026-06-10</text>
+    </g>
+  </g>
+
+  <!-- Detail rail -->
+  <g class="ui" filter="url(#panelShadow)">
+    <rect x="1468" y="270" width="360" height="568" rx="16" fill="#111611" stroke="#303A30"/>
+    <text x="1494" y="310" fill="#737E73" font-size="12" font-weight="850" letter-spacing="1.4">SELECTED</text>
+    <text x="1494" y="348" class="detailTitle">「WTF 是一个 Loop?」</text>
+    <text x="1494" y="382" class="detailTitle">丰富版</text>
+    <text x="1494" y="414" class="detailText">Learning/web/x_articles/20260608...</text>
+    <rect x="1494" y="440" width="76" height="28" rx="9" fill="#1D251D" stroke="#303A30"/><text x="1512" y="459" class="chip">标注 5</text>
+    <rect x="1582" y="440" width="76" height="28" rx="9" fill="#1D251D" stroke="#303A30"/><text x="1600" y="459" class="chip">选题 1</text>
+    <rect x="1670" y="440" width="92" height="28" rx="9" fill="#1D251D" stroke="#303A30"/><text x="1688" y="459" class="chip">待核查 1</text>
+    <rect x="1494" y="498" width="306" height="46" rx="11" fill="#536A52"/>
+    <text x="1594" y="528" fill="#F4F6EE" font-size="16" font-weight="850">打开最佳版本</text>
+    <rect x="1494" y="558" width="306" height="44" rx="11" fill="#151B16" stroke="#303A30"/>
+    <text x="1618" y="586" fill="#D8DDD4" font-size="16" font-weight="800">阅读记录</text>
+    <text x="1494" y="650" fill="#A7AEA4" font-size="16" font-weight="850">版本</text>
+    <rect x="1494" y="672" width="306" height="58" rx="11" fill="#171D18" stroke="#303A30"/>
+    <text x="1514" y="697" fill="#D6BA57" font-size="13" font-weight="850">扩展版</text>
+    <text x="1514" y="718" fill="#ECEBE2" font-size="15" font-weight="800">article_zh_enriched.md</text>
+    <rect x="1494" y="742" width="306" height="58" rx="11" fill="#171D18" stroke="#303A30"/>
+    <text x="1514" y="767" fill="#D6BA57" font-size="13" font-weight="850">中文版</text>
+    <text x="1514" y="788" fill="#ECEBE2" font-size="15" font-weight="800">article_zh.md</text>
+  </g>
+</svg>
