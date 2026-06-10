@@ -551,6 +551,26 @@ class ReadingCaptureReaderView extends ItemView {
     return this.plugin.isFile(sourceFile) ? sourceFile : null;
   }
 
+  getScrollContainer() {
+    return this.containerEl && this.containerEl.children ? this.containerEl.children[1] : null;
+  }
+
+  async renderKeepingScroll() {
+    const container = this.getScrollContainer();
+    const scrollTop = container ? container.scrollTop : 0;
+    const scrollLeft = container ? container.scrollLeft : 0;
+    await this.render();
+    const restored = this.getScrollContainer();
+    if (!restored) return;
+    const restore = () => {
+      restored.scrollTop = scrollTop;
+      restored.scrollLeft = scrollLeft;
+    };
+    restore();
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(restore);
+    else setTimeout(restore, 0);
+  }
+
   async render() {
     const container = this.containerEl.children[1];
     container.empty();
@@ -580,7 +600,7 @@ class ReadingCaptureReaderView extends ItemView {
     const sidebarButton = actions.createEl("button", { text: this.sidebarCollapsed ? "显示标注" : "隐藏标注" });
     sidebarButton.addEventListener("click", async () => {
       this.sidebarCollapsed = !this.sidebarCollapsed;
-      await this.render();
+      await this.renderKeepingScroll();
     });
 
     const stage = container.createDiv({ cls: "reading-capture-reader-stage" });
@@ -645,7 +665,7 @@ class ReadingCaptureReaderView extends ItemView {
           type: target.type === "highlight-with-note" ? "idea" : target.type,
           heading: target.heading,
         });
-        await this.render();
+        await this.renderKeepingScroll();
       },
       { includeTypeSelect: true }
     ).open();
@@ -673,7 +693,7 @@ class ReadingCaptureReaderView extends ItemView {
           type: target.type,
           heading: target.heading,
         });
-        await this.render();
+        await this.renderKeepingScroll();
       },
       { includeTypeSelect: true, previewText: this.plugin.previewSelectedText(selectedText) }
     ).open();
@@ -698,7 +718,7 @@ class ReadingCaptureReaderView extends ItemView {
           heading: target.heading,
           media,
         });
-        await this.render();
+        await this.renderKeepingScroll();
       },
       { includeTypeSelect: true, previewText: this.plugin.imagePreviewText(media) }
     ).open();
@@ -1433,7 +1453,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
         type: "highlight",
         heading: "标注记录",
       });
-      await reader.render();
+      await reader.renderKeepingScroll();
       return;
     }
     const context = this.getActiveMarkdownContext();
@@ -1463,7 +1483,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
         return;
       }
       const selectedText = reader.getSelectedTextWithin(reader.containerEl);
-      this.openTypedCaptureModal(file, selectedText, recordType, async () => reader.render());
+      this.openTypedCaptureModal(file, selectedText, recordType, async () => reader.renderKeepingScroll());
       return;
     }
     const context = this.getActiveMarkdownContext();

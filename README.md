@@ -12,7 +12,7 @@ It is designed for a Codex/OpenClaw-assisted writing workflow:
 
 ## Current Status
 
-Version: `0.4.2`
+Version: `0.4.3`
 
 This is a personal workflow plugin under active development.
 
