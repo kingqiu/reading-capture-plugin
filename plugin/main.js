@@ -233,12 +233,14 @@ function buildAnnotationBlock({
   captureSource = "obsidian-plugin",
   locationHint = "",
   confidence = "high",
+  media = null,
   now = new Date().toISOString(),
 }) {
   const parts = dateParts(now);
   const timestamp = toIsoString(now);
   const cleanQuote = cleanSelectedText(selectedText);
-  const annotationId = `ann_${parts.ymd}_${timePart(now)}_${sha1(`${timestamp}:${cleanQuote}:${note}:${type}`, 4)}`;
+  const mediaKey = media ? `${media.type || ""}:${media.src || ""}:${media.index || ""}` : "";
+  const annotationId = `ann_${parts.ymd}_${timePart(now)}_${sha1(`${timestamp}:${cleanQuote}:${note}:${type}:${mediaKey}`, 4)}`;
   const quoteHash = cleanQuote ? `q_${sha1(cleanQuote, 8)}` : "";
   const lines = [
     `### ${annotationId}`,
@@ -249,8 +251,17 @@ function buildAnnotationBlock({
     `- quote_hash: ${quoteHash}`,
     `- location_hint: ${locationHint}`,
     `- confidence: ${confidence}`,
-    "",
   ];
+  if (media) {
+    lines.push(
+      `- media_type: ${media.type || ""}`,
+      `- media_src: ${yamlValue(media.src || "")}`,
+      `- media_alt: ${yamlValue(media.alt || "")}`,
+      `- media_index: ${typeof media.index === "number" ? media.index : ""}`,
+      `- media_hash: ${media.src ? `m_${sha1(media.src, 8)}` : ""}`
+    );
+  }
+  lines.push("");
   if (cleanQuote) {
     lines.push(blockquote(cleanQuote), "");
   }
@@ -536,6 +547,7 @@ class ReadingCaptureReaderView extends ItemView {
     } else {
       await MarkdownRenderer.renderMarkdown(markdown, body, sourceFile.path, this);
     }
+    this.indexReaderImages(body);
     const annotations = await this.applyHighlights(body, sourceFile);
     this.renderSidebar(sidebar, annotations);
     this.bindHighlightInteractions(body, tooltip, sidebar, annotations);
@@ -545,10 +557,25 @@ class ReadingCaptureReaderView extends ItemView {
       if (!selection || !selection.toString().trim()) return;
     });
     body.addEventListener("contextmenu", (event) => {
+      const image = event.target && event.target.closest ? event.target.closest("img") : null;
+      if (image && body.contains(image)) {
+        event.preventDefault();
+        this.captureImage(sourceFile, image, body);
+        return;
+      }
       const selectedText = this.getSelectedTextWithin(body);
       if (!selectedText) return;
       event.preventDefault();
       this.captureSelectedText(sourceFile, selectedText);
+    });
+  }
+
+  indexReaderImages(body) {
+    body.querySelectorAll("img").forEach((image, index) => {
+      image.dataset.readingCaptureImageIndex = String(index);
+      image.dataset.readingCaptureImageKey = this.plugin.imageKeyFromElement(image, index);
+      image.addClass("reading-capture-reader-image");
+      if (!image.getAttribute("title")) image.setAttribute("title", "右键记录这张图的想法");
     });
   }
 
@@ -603,6 +630,31 @@ class ReadingCaptureReaderView extends ItemView {
     ).open();
   }
 
+  captureImage(sourceFile, image, body) {
+    const media = this.plugin.imageMetadataFromElement(image, body);
+    new TextInputModal(
+      this.app,
+      "记录图片想法",
+      "写下你对这张图的想法。",
+      async (note, recordType) => {
+        if (!note) {
+          new Notice("没有输入内容。");
+          return;
+        }
+        const target = this.plugin.resolveRecordTarget(recordType, note);
+        await this.plugin.captureForFile(sourceFile, {
+          selectedText: "",
+          note,
+          type: target.type === "highlight-with-note" ? "image-note" : target.type,
+          heading: target.heading,
+          media,
+        });
+        await this.render();
+      },
+      { includeTypeSelect: true, previewText: this.plugin.imagePreviewText(media) }
+    ).open();
+  }
+
   getSelectedTextWithin(container) {
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return "";
@@ -621,9 +673,18 @@ class ReadingCaptureReaderView extends ItemView {
     const noteMarkdown = await this.plugin.readText(noteFile.path);
     const annotations = this.plugin.parseAnnotationsFromReadingNote(noteMarkdown);
     for (const annotation of annotations) {
-      if (annotation.quote) this.highlightQuoteInElement(body, annotation);
+      if (annotation.mediaType === "image") this.highlightImageInElement(body, annotation);
+      else if (annotation.quote) this.highlightQuoteInElement(body, annotation);
     }
     return annotations;
+  }
+
+  highlightImageInElement(root, annotation) {
+    const image = this.plugin.findImageForAnnotation(root, annotation);
+    if (!image) return;
+    image.addClass("reading-capture-reader-image-highlight");
+    image.dataset.annotationId = annotation.id;
+    image.dataset.quoteHash = annotation.mediaHash || "";
   }
 
   highlightQuoteInElement(root, annotation) {
@@ -688,6 +749,10 @@ class ReadingCaptureReaderView extends ItemView {
       top.createEl("span", { cls: "reading-capture-sidebar-time", text: this.plugin.shortTime(item.time) });
       if (item.quote) {
         card.createEl("blockquote", { cls: "reading-capture-sidebar-quote", text: this.plugin.previewSelectedText(item.quote) });
+      } else if (item.mediaType === "image") {
+        const media = card.createDiv({ cls: "reading-capture-sidebar-media" });
+        media.createEl("span", { text: "图片" });
+        media.createEl("strong", { text: item.mediaAlt || item.mediaSrc || `第 ${Number(item.mediaIndex || 0) + 1} 张图` });
       }
       if (item.note) {
         card.createEl("div", { cls: "reading-capture-sidebar-note", text: item.note });
@@ -703,7 +768,7 @@ class ReadingCaptureReaderView extends ItemView {
       tooltip.empty();
     };
     body.addEventListener("mouseover", (event) => {
-      const mark = event.target && event.target.closest ? event.target.closest(".reading-capture-reader-highlight") : null;
+      const mark = event.target && event.target.closest ? event.target.closest(".reading-capture-reader-highlight, .reading-capture-reader-image-highlight") : null;
       if (!mark || !body.contains(mark)) return;
       const item = byId.get(mark.dataset.annotationId);
       if (!item) return;
@@ -718,7 +783,7 @@ class ReadingCaptureReaderView extends ItemView {
     });
     tooltip.addEventListener("mouseleave", hideTooltip);
     body.addEventListener("click", (event) => {
-      const mark = event.target && event.target.closest ? event.target.closest(".reading-capture-reader-highlight") : null;
+      const mark = event.target && event.target.closest ? event.target.closest(".reading-capture-reader-highlight, .reading-capture-reader-image-highlight") : null;
       if (!mark || !body.contains(mark)) return;
       this.activateAnnotation(mark.dataset.annotationId, false);
     });
@@ -746,9 +811,10 @@ class ReadingCaptureReaderView extends ItemView {
     if (!annotationId) return;
     this.activeAnnotationId = annotationId;
     this.containerEl.querySelectorAll(".reading-capture-reader-highlight.is-active").forEach((element) => element.removeClass("is-active"));
+    this.containerEl.querySelectorAll(".reading-capture-reader-image-highlight.is-active").forEach((element) => element.removeClass("is-active"));
     this.containerEl.querySelectorAll(".reading-capture-sidebar-card.is-active").forEach((element) => element.removeClass("is-active"));
     const escapedId = this.plugin.cssEscape(annotationId);
-    this.containerEl.querySelectorAll(`.reading-capture-reader-highlight[data-annotation-id="${escapedId}"]`).forEach((element, index) => {
+    this.containerEl.querySelectorAll(`.reading-capture-reader-highlight[data-annotation-id="${escapedId}"], .reading-capture-reader-image-highlight[data-annotation-id="${escapedId}"]`).forEach((element, index) => {
       element.addClass("is-active");
       if (scrollArticle && index === 0) element.scrollIntoView({ block: "center", behavior: "smooth" });
     });
@@ -1100,6 +1166,62 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       .replace(/==([\s\S]*?)==/g, "$1");
   }
 
+  imageMetadataFromElement(image, body) {
+    const images = [...body.querySelectorAll("img")];
+    const index = images.indexOf(image);
+    const src = image.getAttribute("src") || image.currentSrc || "";
+    const alt = image.getAttribute("alt") || "";
+    return {
+      type: "image",
+      src: this.normalizeImageSource(src),
+      alt,
+      index: index >= 0 ? index : Number(image.dataset.readingCaptureImageIndex || 0),
+    };
+  }
+
+  imageKeyFromElement(image, fallbackIndex = 0) {
+    const src = this.normalizeImageSource(image.getAttribute("src") || image.currentSrc || "");
+    const base = this.imageBaseName(src);
+    return base || `image-${fallbackIndex}`;
+  }
+
+  normalizeImageSource(src) {
+    const value = String(src || "").trim();
+    if (!value) return "";
+    try {
+      return decodeURIComponent(value).replace(/\\/g, "/");
+    } catch (error) {
+      return value.replace(/\\/g, "/");
+    }
+  }
+
+  imageBaseName(src) {
+    const clean = this.normalizeImageSource(src).split(/[?#]/)[0];
+    return clean.split("/").filter(Boolean).pop() || clean;
+  }
+
+  imagePreviewText(media) {
+    const label = media && (media.alt || media.src || `第 ${Number(media.index || 0) + 1} 张图`);
+    return `图片：${label}`;
+  }
+
+  findImageForAnnotation(root, annotation) {
+    const images = [...root.querySelectorAll("img")];
+    const mediaSrc = this.normalizeImageSource(annotation.mediaSrc || "");
+    const mediaBase = this.imageBaseName(mediaSrc);
+    if (mediaSrc || mediaBase) {
+      const bySrc = images.find((image) => {
+        const src = this.normalizeImageSource(image.getAttribute("src") || image.currentSrc || "");
+        const base = this.imageBaseName(src);
+        return (mediaSrc && src.includes(mediaSrc)) || (mediaBase && base === mediaBase);
+      });
+      if (bySrc) return bySrc;
+    }
+    const index = Number(annotation.mediaIndex);
+    if (Number.isInteger(index) && index >= 0 && index < images.length) return images[index];
+    return null;
+  }
+
   trimTextRangeForHighlight(text, from, to) {
     const value = String(text || "");
     let start = Math.max(0, from);
@@ -1127,7 +1249,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
-  async captureForFile(file, { selectedText, note, type, heading }) {
+  async captureForFile(file, { selectedText, note, type, heading, media = null }) {
     if (!this.isFile(file)) {
       new Notice("没有找到当前文件。");
       return;
@@ -1143,6 +1265,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       note,
       type,
       captureSource: "obsidian-plugin",
+      media,
       now: this.now(),
     });
     const original = await this.readText(noteFile.path);
@@ -1257,6 +1380,11 @@ module.exports = class ReadingCapturePlugin extends Plugin {
           quoteHash: "",
           locationHint: "",
           confidence: "",
+          mediaType: "",
+          mediaSrc: "",
+          mediaAlt: "",
+          mediaIndex: "",
+          mediaHash: "",
           quote: "",
           note: "",
           quoteLines: [],
@@ -1276,6 +1404,11 @@ module.exports = class ReadingCapturePlugin extends Plugin {
         if (key === "quote_hash") current.quoteHash = value;
         if (key === "location_hint") current.locationHint = value;
         if (key === "confidence") current.confidence = value;
+        if (key === "media_type") current.mediaType = value;
+        if (key === "media_src") current.mediaSrc = this.readInlineValue(value);
+        if (key === "media_alt") current.mediaAlt = this.readInlineValue(value);
+        if (key === "media_index") current.mediaIndex = value;
+        if (key === "media_hash") current.mediaHash = value;
         mode = "";
         continue;
       }
@@ -1304,6 +1437,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
 
   annotationLabel(item) {
     if (!item) return "记录";
+    if (item.mediaType === "image") return item.type === "topic" ? "图片选题" : item.type === "fact-check" ? "图片待核查" : "图片想法";
     if (item.section === "可写选题" || item.type === "topic") return "可写选题";
     if (item.section === "事实待核查" || item.type === "fact-check") return "事实待核查";
     if (item.type === "idea" || !item.quote) return "想法";
@@ -1313,6 +1447,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
 
   typeClass(item) {
     if (!item) return "is-thought";
+    if (item.mediaType === "image") return "is-image";
     if (item.section === "可写选题" || item.type === "topic") return "is-topic";
     if (item.section === "事实待核查" || item.type === "fact-check") return "is-fact";
     if (!item.quote || item.type === "idea") return "is-idea";
@@ -1517,7 +1652,11 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     const text = String(markdown || "");
     const match = text.match(new RegExp(`^${key}:\\s*(.*)$`, "m"));
     if (!match) return "";
-    const raw = match[1].trim();
+    return this.readInlineValue(match[1]);
+  }
+
+  readInlineValue(value) {
+    const raw = String(value || "").trim();
     if (!raw) return "";
     try {
       return JSON.parse(raw);

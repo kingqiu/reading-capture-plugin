@@ -284,6 +284,24 @@
   box-shadow: 0 10px 26px rgba(46, 56, 43, 0.14);
 }
 
+.reading-capture-reader-image {
+  cursor: context-menu;
+  transition: box-shadow 140ms ease, outline-color 140ms ease, transform 140ms ease;
+}
+
+.reading-capture-reader-image-highlight {
+  outline: 3px solid rgba(214, 186, 87, 0.82);
+  outline-offset: 5px;
+  position: relative;
+}
+
+.reading-capture-reader-image-highlight:hover,
+.reading-capture-reader-image-highlight.is-active {
+  box-shadow: 0 16px 36px rgba(129, 105, 31, 0.28);
+  outline-color: rgba(170, 141, 48, 0.96);
+  transform: translateY(-1px);
+}
+
 .reading-capture-reader-highlight {
   background: var(--rc-yellow);
   border-radius: 4px;
@@ -417,6 +435,10 @@
   background: rgba(209, 109, 99, 0.3);
 }
 
+.reading-capture-type-pill.is-image {
+  background: rgba(176, 145, 73, 0.36);
+}
+
 .reading-capture-sidebar-time {
   color: var(--rc-ink-faint);
   font-size: 11px;
@@ -434,6 +456,33 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 4;
   white-space: pre-line;
+}
+
+.reading-capture-sidebar-media {
+  align-items: baseline;
+  border-left: 2px solid rgba(170, 141, 48, 0.5);
+  color: #596556;
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0 0 8px;
+  padding-left: 8px;
+}
+
+.reading-capture-sidebar-media span {
+  color: #80671d;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.reading-capture-sidebar-media strong {
+  color: #364235;
+  display: -webkit-box;
+  font-weight: 500;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .reading-capture-sidebar-note {

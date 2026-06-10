@@ -21,6 +21,7 @@ This is a personal workflow plugin under active development.
 - Dedicated `Reading Capture Reader` view.
 - Paper-like research-magazine reading style.
 - Dynamic highlights based on saved reading notes.
+- Image annotations: right-click an image in the reader to save a thought and jump back to it later.
 - Right-side annotation sidebar.
 - Hover card for saved thoughts.
 - Click sidebar cards to jump back to the highlighted passage.
@@ -67,4 +68,3 @@ npm test
 ```
 
 The plugin currently has no runtime build step. The source files in `plugin/` are the files copied into the Obsidian plugin directory.
-

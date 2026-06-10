@@ -183,6 +183,47 @@ async function testCaptureReusesExistingUnindexedFile() {
   assert.strictEqual(index.sources[sourceFile.path].reading_note_path, existingPath);
 }
 
+async function testCaptureImageNote() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, sourceFile, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = {
+    readingRoot: "Learning/reading-notes",
+    openNoteAfterCapture: false,
+  };
+
+  await plugin.captureForFile(sourceFile, {
+    selectedText: "",
+    note: "This image explains the loop visually.",
+    type: "image-note",
+    heading: "标注记录",
+    media: {
+      type: "image",
+      src: "images/loop.png",
+      alt: "Loop diagram",
+      index: 2,
+    },
+  });
+
+  const readingPath = [...files.keys()].find((path) => path.startsWith("Learning/reading-notes/2026/06/") && path.endsWith(".md"));
+  const readingContent = files.get(readingPath).content;
+  assert.match(readingContent, /type: image-note/);
+  assert.match(readingContent, /media_type: image/);
+  assert.match(readingContent, /media_src: "images\/loop.png"/);
+  assert.match(readingContent, /media_alt: "Loop diagram"/);
+  assert.match(readingContent, /media_index: 2/);
+
+  const annotations = plugin.parseAnnotationsFromReadingNote(readingContent);
+  assert.strictEqual(annotations.length, 1);
+  assert.strictEqual(annotations[0].mediaType, "image");
+  assert.strictEqual(annotations[0].mediaSrc, "images/loop.png");
+  assert.strictEqual(annotations[0].mediaAlt, "Loop diagram");
+  assert.strictEqual(annotations[0].mediaIndex, "2");
+  assert.strictEqual(plugin.annotationLabel(annotations[0]), "图片想法");
+  assert.strictEqual(plugin.typeClass(annotations[0]), "is-image");
+}
+
 function testRecordTargetAndHighlight() {
   const PluginClass = loadPluginClass();
   const plugin = new PluginClass();
@@ -303,6 +344,7 @@ topic idea
 
 testCaptureWritesAnnotationAndIndex()
   .then(testCaptureReusesExistingUnindexedFile)
+  .then(testCaptureImageNote)
   .then(testRecordTargetAndHighlight)
   .then(() => console.log("plugin capture test passed"))
   .catch((error) => {
