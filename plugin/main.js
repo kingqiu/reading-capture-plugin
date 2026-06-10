@@ -511,6 +511,12 @@ class ReadingCaptureReaderView extends ItemView {
     await this.render();
   }
 
+  getSourceFile() {
+    if (!this.sourcePath) return null;
+    const sourceFile = this.app.vault.getAbstractFileByPath(this.sourcePath);
+    return this.plugin.isFile(sourceFile) ? sourceFile : null;
+  }
+
   async render() {
     const container = this.containerEl.children[1];
     container.empty();
@@ -910,39 +916,29 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     this.addCommand({
       id: "capture-selection-with-note",
       name: "标注选中文本并记录想法",
-      editorCallback: async (editor, view) => {
-        const selectedText = editor.getSelection().trim();
-        if (!selectedText) {
-          new Notice("请先选中一段文字。");
-          return;
-        }
-        this.openCaptureModal(view.file, editor, selectedText, this.getSelectionRange(editor));
-      },
+      callback: async () => this.captureSelectionFromActiveContext(),
     });
 
     this.addCommand({
       id: "quick-highlight-selection",
       name: "快速高亮选中文本",
-      editorCallback: async (editor, view) => {
-        const selectedText = editor.getSelection().trim();
-        const selectionRange = this.getSelectionRange(editor);
-        if (!selectedText) {
-          new Notice("请先选中一段文字。");
-          return;
-        }
-        await this.captureForFile(view.file, {
-          selectedText,
-          note: "",
-          type: "highlight",
-          heading: "标注记录",
-        });
-      },
+      callback: async () => this.quickHighlightFromActiveContext(),
     });
 
     this.addCommand({
       id: "capture-current-thought",
       name: "记录当前想法",
       callback: async () => {
+        const reader = this.getActiveReaderView();
+        if (reader) {
+          const file = reader.getSourceFile();
+          if (!file) {
+            new Notice("没有找到当前阅读器源文件。");
+            return;
+          }
+          reader.captureFreeThought(file);
+          return;
+        }
         const file = this.app.workspace.getActiveFile();
         if (!file) {
           new Notice("没有找到当前文件。");
@@ -966,45 +962,13 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     this.addCommand({
       id: "add-writing-topic",
       name: "加入可写选题",
-      editorCallback: async (editor, view) => {
-        const selectedText = editor.getSelection().trim();
-        const selectionRange = this.getSelectionRange(editor);
-        new TextInputModal(this.app, "加入可写选题", "写下这个选题或补充说明。", async (note) => {
-          const finalNote = note || selectedText;
-          if (!finalNote && !selectedText) {
-            new Notice("没有可记录的内容。");
-            return;
-          }
-          await this.captureForFile(view.file, {
-            selectedText,
-            note: finalNote,
-            type: "topic",
-            heading: "可写选题",
-          });
-        }).open();
-      },
+      callback: async () => this.captureTypedEntryFromActiveContext("topic"),
     });
 
     this.addCommand({
       id: "add-fact-check",
       name: "加入事实待核查",
-      editorCallback: async (editor, view) => {
-        const selectedText = editor.getSelection().trim();
-        const selectionRange = this.getSelectionRange(editor);
-        new TextInputModal(this.app, "加入事实待核查", "写下需要核查的问题或说明。", async (note) => {
-          const finalNote = note || selectedText;
-          if (!finalNote && !selectedText) {
-            new Notice("没有可记录的内容。");
-            return;
-          }
-          await this.captureForFile(view.file, {
-            selectedText,
-            note: finalNote,
-            type: "fact-check",
-            heading: "事实待核查",
-          });
-        }).open();
-      },
+      callback: async () => this.captureTypedEntryFromActiveContext("fact-check"),
     });
 
     this.addCommand({
@@ -1055,6 +1019,132 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     if (view && typeof view.setSource === "function") {
       await view.setSource(file.path);
     }
+  }
+
+  getActiveReaderView() {
+    const leaf = this.app.workspace.getActiveViewOfType ? this.app.workspace.getActiveViewOfType(ReadingCaptureReaderView) : null;
+    if (leaf) return leaf;
+    const activeLeaf = this.app.workspace.activeLeaf;
+    const view = activeLeaf && activeLeaf.view;
+    return view && typeof view.getViewType === "function" && view.getViewType() === READER_VIEW_TYPE ? view : null;
+  }
+
+  getActiveMarkdownContext() {
+    const leaf = this.app.workspace.activeLeaf;
+    const view = leaf && leaf.view ? leaf.view : null;
+    const editor = view && view.editor;
+    const file = view && view.file ? view.file : this.app.workspace.getActiveFile();
+    if (!editor || !file) return null;
+    return { editor, file };
+  }
+
+  async captureSelectionFromActiveContext() {
+    const reader = this.getActiveReaderView();
+    if (reader) {
+      const file = reader.getSourceFile();
+      if (!file) {
+        new Notice("没有找到当前阅读器源文件。");
+        return;
+      }
+      await reader.captureSelection(file);
+      return;
+    }
+    const context = this.getActiveMarkdownContext();
+    if (!context) {
+      new Notice("请在 Markdown 文件或阅读器视图中使用。");
+      return;
+    }
+    const selectedText = context.editor.getSelection().trim();
+    if (!selectedText) {
+      new Notice("请先选中一段文字。");
+      return;
+    }
+    this.openCaptureModal(context.file, context.editor, selectedText, this.getSelectionRange(context.editor));
+  }
+
+  async quickHighlightFromActiveContext() {
+    const reader = this.getActiveReaderView();
+    if (reader) {
+      const file = reader.getSourceFile();
+      if (!file) {
+        new Notice("没有找到当前阅读器源文件。");
+        return;
+      }
+      const selectedText = reader.getSelectedTextWithin(reader.containerEl);
+      if (!selectedText) {
+        new Notice("请先在阅读器里选中一段文字。");
+        return;
+      }
+      await this.captureForFile(file, {
+        selectedText,
+        note: "",
+        type: "highlight",
+        heading: "标注记录",
+      });
+      await reader.render();
+      return;
+    }
+    const context = this.getActiveMarkdownContext();
+    if (!context) {
+      new Notice("请在 Markdown 文件或阅读器视图中使用。");
+      return;
+    }
+    const selectedText = context.editor.getSelection().trim();
+    if (!selectedText) {
+      new Notice("请先选中一段文字。");
+      return;
+    }
+    await this.captureForFile(context.file, {
+      selectedText,
+      note: "",
+      type: "highlight",
+      heading: "标注记录",
+    });
+  }
+
+  async captureTypedEntryFromActiveContext(recordType) {
+    const reader = this.getActiveReaderView();
+    if (reader) {
+      const file = reader.getSourceFile();
+      if (!file) {
+        new Notice("没有找到当前阅读器源文件。");
+        return;
+      }
+      const selectedText = reader.getSelectedTextWithin(reader.containerEl);
+      this.openTypedCaptureModal(file, selectedText, recordType, async () => reader.render());
+      return;
+    }
+    const context = this.getActiveMarkdownContext();
+    if (!context) {
+      new Notice("请在 Markdown 文件或阅读器视图中使用。");
+      return;
+    }
+    const selectedText = context.editor.getSelection().trim();
+    this.openTypedCaptureModal(context.file, selectedText, recordType);
+  }
+
+  openTypedCaptureModal(file, selectedText, recordType, afterSave = null) {
+    const isTopic = recordType === "topic";
+    new TextInputModal(
+      this.app,
+      isTopic ? "加入可写选题" : "加入事实待核查",
+      isTopic ? "写下这个选题或补充说明。" : "写下需要核查的问题或说明。",
+      async (note) => {
+        const finalNote = note || selectedText;
+        if (!finalNote && !selectedText) {
+          new Notice("没有可记录的内容。");
+          return;
+        }
+        await this.captureForFile(file, {
+          selectedText,
+          note: finalNote,
+          type: recordType,
+          heading: isTopic ? "可写选题" : "事实待核查",
+        });
+        if (afterSave) await afterSave();
+      },
+      { previewText: this.previewSelectedText(selectedText) }
+    ).open();
   }
 
   openCaptureModal(file, editor, selectedText, selectionRange) {
