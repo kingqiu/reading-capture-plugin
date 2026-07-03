@@ -47,7 +47,20 @@ After enabling the plugin, open the Reading Capture settings:
 
 ## Installation
 
-Copy the plugin files into your Obsidian vault:
+Download `reading-capture.zip` from the latest GitHub Release and unzip it into your Obsidian vault:
+
+```text
+<vault>/.obsidian/plugins/
+└── reading-capture/
+    ├── main.js
+    ├── reading-core.js
+    ├── manifest.json
+    └── styles.css
+```
+
+Then enable `Reading Capture` from Obsidian's Community plugins settings.
+
+For manual file-by-file installation, copy the plugin files into your Obsidian vault:
 
 ```text
 <vault>/.obsidian/plugins/reading-capture/
@@ -57,8 +70,6 @@ Copy the plugin files into your Obsidian vault:
 └── styles.css
 ```
 
-Then enable `Reading Capture` from Obsidian's Community plugins settings.
-
 You can also build a local install package:
 
 ```bash
@@ -66,6 +77,12 @@ npm run package
 ```
 
 This creates `dist/reading-capture/` and, when the local `zip` command is available, `dist/reading-capture.zip`.
+
+## First Use
+
+1. Open Reading Capture settings.
+2. Add one or more vault-relative folders to `知见录扫描目录`, such as `Articles` or `Reading`.
+3. Run `Reading Capture: 打开知见录` from Obsidian's command palette.
 
 ## Commands
 
