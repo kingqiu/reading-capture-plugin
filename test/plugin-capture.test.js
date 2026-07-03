@@ -520,6 +520,27 @@ async function testArticleLibraryFiltersAndSortsForResearchWorkflow() {
   view.stateFilter = "all";
   view.sortMode = "files-desc";
   assert.deepStrictEqual(view.visibleGroups().map((group) => group.id), ["c", "a", "b"]);
+
+  const stateCounts = Object.fromEntries(view.stateOptions().map(([value, label, count]) => [value, { label, count }]));
+  assert.strictEqual(stateCounts.all.count, 3);
+  assert.strictEqual(stateCounts.annotated.count, 1);
+  assert.strictEqual(stateCounts.unannotated.count, 2);
+  assert.strictEqual(stateCounts["has-pdf"].count, 2);
+  assert.strictEqual(stateCounts["has-zh"].count, 1);
+
+  view.groups[0].stats.status = "reading";
+  view.groups[1].stats.status = "unread";
+  view.groups[2].stats.status = "annotated";
+  view.groups[2].stats.codexStatus = "pending_summary";
+  const progressCounts = Object.fromEntries(view.progressOptions().map(([value, label, count]) => [value, { label, count }]));
+  assert.strictEqual(progressCounts.all.count, 3);
+  assert.strictEqual(progressCounts.reading.count, 1);
+  assert.strictEqual(progressCounts.unread.count, 1);
+  assert.strictEqual(progressCounts["pending-summary"].count, 1);
+  assert.strictEqual(progressCounts["writing-ready"], undefined);
+
+  view.progressFilter = "pending-summary";
+  assert.deepStrictEqual(view.visibleGroups().map((group) => group.id), ["c"]);
 }
 
 async function testArticleLibraryUsesCacheUntilSourceFilesChange() {
@@ -595,6 +616,73 @@ async function testArticleLibrarySnapshotPersistsForFastInitialRender() {
   const restoredGroup = restored.getArticleLibrarySnapshot().find((group) => group.groupPath === "Learning/web/x_articles/20260703_snapshot");
   assert.ok(restoredGroup, "saved article library snapshot should be restored on load");
   assert.strictEqual(restoredGroup.title, "Snapshot Title");
+}
+
+async function testTopicPoolCollectsWritableTopicsFromReadingNotes() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files, sourceFile } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = {
+    readingRoot: "Learning/reading-notes",
+    openNoteAfterCapture: false,
+  };
+  const notePath = "Learning/reading-notes/2026/06/example.md";
+  const noteMarkdown = `---
+type: reading-note
+source_vault_path: "${sourceFile.path}"
+source_title: "Example Article"
+status: reading
+codex_status: pending_summary
+updated: "2026-06-10T00:00:00+08:00"
+---
+
+# 阅读记录：Example Article
+
+## 标注记录
+
+### ann_normal
+
+- time: 2026-06-10T12:00:00+08:00
+- type: highlight-with-note
+
+我的想法：
+normal note
+
+## 可写选题
+
+### ann_topic
+
+- time: 2026-06-10T13:00:00+08:00
+- type: topic
+
+> source quote
+
+我的想法：
+topic idea
+`;
+  files.set(notePath, { file: makeFile(notePath, noteMarkdown), content: noteMarkdown });
+  const index = core.createEmptyIndex(fixedNow);
+  index.sources[sourceFile.path] = {
+    source_vault_path: sourceFile.path,
+    source_title: "Example Article",
+    reading_note_path: notePath,
+    annotation_count: 2,
+    status: "reading",
+    codex_status: "pending_summary",
+    updated: fixedNow,
+  };
+  files.set(plugin.indexPath(), { file: makeFile(plugin.indexPath(), JSON.stringify(index)), content: `${JSON.stringify(index, null, 2)}\n` });
+
+  const topics = await plugin.buildTopicPoolItems();
+
+  assert.strictEqual(topics.length, 1);
+  assert.strictEqual(topics[0].id, "ann_topic");
+  assert.strictEqual(topics[0].sourceTitle, "Example Article");
+  assert.strictEqual(topics[0].sourcePath, sourceFile.path);
+  assert.strictEqual(topics[0].readingNotePath, notePath);
+  assert.strictEqual(topics[0].note, "topic idea");
+  assert.strictEqual(topics[0].quote, "source quote");
 }
 
 async function testOpenLibraryVersionUsesReaderForMarkdownAndObsidianForPdf() {
@@ -692,6 +780,7 @@ testCaptureWritesAnnotationAndIndex()
   .then(testArticleLibraryFiltersAndSortsForResearchWorkflow)
   .then(testArticleLibraryUsesCacheUntilSourceFilesChange)
   .then(testArticleLibrarySnapshotPersistsForFastInitialRender)
+  .then(testTopicPoolCollectsWritableTopicsFromReadingNotes)
   .then(testOpenLibraryVersionUsesReaderForMarkdownAndObsidianForPdf)
   .then(testGenericDefaultSettings)
   .then(testVersionPathTooltipAndCopy)

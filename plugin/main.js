@@ -3,6 +3,7 @@ const core = require("./reading-core");
 
 const READER_VIEW_TYPE = "reading-capture-reader";
 const ARTICLE_LIBRARY_VIEW_TYPE = "reading-capture-library";
+const TOPIC_POOL_VIEW_TYPE = "reading-capture-topic-pool";
 
 const { KNOWN_SOURCE_ROOTS, basename, extname, normalizeVaultPath, rootSlug, sourceKindFromPath, titleFromPath } = core;
 
@@ -13,6 +14,11 @@ const ALWAYS_EXCLUDED_LIBRARY_ROOTS = [
 
 const ARTICLE_LIBRARY_ROOTS_PLACEHOLDER = ["Articles", "Reading", "Sources"].join("\n");
 const ARTICLE_LIBRARY_CACHE_VERSION = 1;
+const WORKFLOW_STATUS_OPTIONS = [
+  ["reading", "阅读中"],
+  ["annotated", "已标注"],
+  ["pending-summary", "待总结"],
+];
 
 const DEFAULT_SETTINGS = {
   readingRoot: "Reading Capture/notes",
@@ -646,6 +652,7 @@ class ReadingCaptureLibraryView extends ItemView {
     this.searchDraft = "";
     this.sourceFilter = "all";
     this.stateFilter = "all";
+    this.progressFilter = "all";
     this.sortMode = "mtime-desc";
     this.isLoading = false;
   }
@@ -760,22 +767,17 @@ class ReadingCaptureLibraryView extends ItemView {
     this.renderFilterSection(
       filters,
       "状态",
-      [
-        ["all", "全部"],
-        ["annotated", "有标注"],
-        ["unannotated", "无标注"],
-        ["topic", "有选题"],
-        ["fact", "待核查"],
-        ["has-pdf", "有 PDF"],
-        ["has-zh", "有中文"],
-        ["unread", "未读"],
-      ],
+      this.stateOptions(),
       this.stateFilter,
       (value) => {
         this.stateFilter = value;
         this.render();
       }
     );
+    this.renderFilterSection(filters, "进度", this.progressOptions(), this.progressFilter, (value) => {
+      this.progressFilter = value;
+      this.render();
+    });
     this.renderFilterSection(
       filters,
       "排序",
@@ -817,6 +819,39 @@ class ReadingCaptureLibraryView extends ItemView {
     return [["all", "全部", this.groups.length], ...[...counts.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([label, count]) => [label, label, count])];
   }
 
+  stateOptions() {
+    const groups = this.filterBaseGroups();
+    const count = (predicate) => groups.filter(predicate).length;
+    return [
+      ["all", "全部", groups.length],
+      ["annotated", "有标注", count((group) => group.stats.annotationCount > 0)],
+      ["unannotated", "无标注", count((group) => group.stats.annotationCount <= 0)],
+      ["topic", "有选题", count((group) => group.stats.topicCount > 0)],
+      ["fact", "待核查", count((group) => group.stats.factCount > 0)],
+      ["has-pdf", "有 PDF", count((group) => this.groupHasPdf(group))],
+      ["has-zh", "有中文", count((group) => this.groupHasChineseVersion(group))],
+    ];
+  }
+
+  progressOptions() {
+    const groups = this.filterBaseGroups();
+    const count = (status) => groups.filter((group) => this.groupWorkflowStatus(group) === status).length;
+    return [
+      ["all", "全部", groups.length],
+      ["unread", "未读", count("unread")],
+      ...WORKFLOW_STATUS_OPTIONS.map(([value, label]) => [value, label, count(value)]),
+    ];
+  }
+
+  filterBaseGroups() {
+    const query = String(this.query || "").trim().toLowerCase();
+    return this.groups.filter((group) => {
+      if (this.sourceFilter !== "all" && group.sourceLabel !== this.sourceFilter) return false;
+      if (!query) return true;
+      return this.groupMatchesQuery(group, query);
+    });
+  }
+
   visibleGroups() {
     const query = String(this.query || "").trim().toLowerCase();
     const groups = this.groups.filter((group) => {
@@ -827,12 +862,9 @@ class ReadingCaptureLibraryView extends ItemView {
       if (this.stateFilter === "fact" && group.stats.factCount <= 0) return false;
       if (this.stateFilter === "has-pdf" && !this.groupHasPdf(group)) return false;
       if (this.stateFilter === "has-zh" && !this.groupHasChineseVersion(group)) return false;
-      if (this.stateFilter === "unread" && group.stats.hasReading) return false;
+      if (this.progressFilter !== "all" && this.groupWorkflowStatus(group) !== this.progressFilter) return false;
       if (!query) return true;
-      return [group.title, group.snippet, group.groupPath, group.files.map((file) => file.name).join(" ")]
-        .join(" ")
-        .toLowerCase()
-        .includes(query);
+      return this.groupMatchesQuery(group, query);
     });
 
     return groups.sort((left, right) => {
@@ -842,6 +874,13 @@ class ReadingCaptureLibraryView extends ItemView {
       if (this.sortMode === "files-desc") return right.files.length - left.files.length || right.mtime - left.mtime;
       return right.mtime - left.mtime;
     });
+  }
+
+  groupMatchesQuery(group, query) {
+    return [group.title, group.snippet, group.groupPath, group.files.map((file) => file.name).join(" ")]
+      .join(" ")
+      .toLowerCase()
+      .includes(query);
   }
 
   groupHasPdf(group) {
@@ -858,6 +897,22 @@ class ReadingCaptureLibraryView extends ItemView {
         return label.includes("中文") || label.includes("扩展") || path.includes("_zh") || path.includes("translation");
       })
     );
+  }
+
+  groupWorkflowStatus(group) {
+    const stats = group && group.stats ? group.stats : {};
+    if (!stats.hasReading) return "unread";
+    if (stats.status === "used") return "used";
+    if (stats.status === "writing-ready") return "writing-ready";
+    if (stats.status === "annotated" && stats.codexStatus === "pending_summary") return "pending-summary";
+    if (stats.status === "annotated") return "annotated";
+    return stats.status || "reading";
+  }
+
+  workflowStatusLabel(status) {
+    if (status === "unread") return "未读";
+    const option = WORKFLOW_STATUS_OPTIONS.find(([value]) => value === status);
+    return option ? option[1] : "阅读中";
   }
 
   renderList(list) {
@@ -918,6 +973,7 @@ class ReadingCaptureLibraryView extends ItemView {
     stats.createEl("span", { text: `标注 ${selected.stats.annotationCount}` });
     stats.createEl("span", { text: `选题 ${selected.stats.topicCount}` });
     stats.createEl("span", { text: `待核查 ${selected.stats.factCount}` });
+    stats.createEl("span", { text: this.workflowStatusLabel(this.groupWorkflowStatus(selected)) });
 
     const actions = detail.createDiv({ cls: "reading-capture-library-detail-actions" });
     const openBest = actions.createEl("button", { text: "打开最佳版本" });
@@ -964,12 +1020,96 @@ class ReadingCaptureLibraryView extends ItemView {
   }
 }
 
+class ReadingCaptureTopicPoolView extends ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.items = [];
+    this.isLoading = false;
+  }
+
+  getViewType() {
+    return TOPIC_POOL_VIEW_TYPE;
+  }
+
+  getDisplayText() {
+    return "选题池";
+  }
+
+  getIcon() {
+    return "lightbulb";
+  }
+
+  async onOpen() {
+    await this.reload();
+  }
+
+  async reload() {
+    this.isLoading = true;
+    await this.render();
+    try {
+      this.items = await this.plugin.buildTopicPoolItems();
+    } finally {
+      this.isLoading = false;
+      await this.render();
+    }
+  }
+
+  async render() {
+    const container = this.containerEl.children[1];
+    container.empty();
+    container.addClass("reading-capture-topic-pool");
+
+    const shell = container.createDiv({ cls: "reading-capture-topic-shell" });
+    const top = shell.createDiv({ cls: "reading-capture-library-top" });
+    const title = top.createDiv({ cls: "reading-capture-library-title" });
+    title.createEl("h1", { text: "选题池" });
+    title.createEl("div", { cls: "reading-capture-library-subtitle", text: this.isLoading ? "正在整理可写选题..." : `${this.items.length} 个可写选题` });
+    const tools = top.createDiv({ cls: "reading-capture-library-tools" });
+    const refresh = tools.createEl("button", { text: this.isLoading ? "刷新中..." : "刷新" });
+    refresh.disabled = this.isLoading;
+    refresh.addEventListener("click", () => this.reload());
+
+    const list = shell.createDiv({ cls: "reading-capture-topic-list" });
+    if (this.isLoading && !this.items.length) {
+      list.createDiv({ cls: "reading-capture-library-empty", text: "正在整理选题池，请稍等。" });
+      return;
+    }
+    if (!this.items.length) {
+      list.createDiv({ cls: "reading-capture-library-empty", text: "还没有可写选题。你可以在阅读器里把想法加入“可写选题”。" });
+      return;
+    }
+
+    for (const item of this.items) {
+      const card = list.createDiv({ cls: "reading-capture-topic-card" });
+      const meta = card.createDiv({ cls: "reading-capture-library-card-meta" });
+      meta.createEl("span", { text: item.sourceRoot || "source" });
+      if (item.time) meta.createEl("span", { text: item.time });
+      card.createEl("h2", { text: item.note || item.quote || "未命名选题" });
+      if (item.quote) card.createEl("blockquote", { text: item.quote });
+      card.createEl("p", { text: item.sourceTitle || item.sourcePath });
+      const actions = card.createDiv({ cls: "reading-capture-library-detail-actions" });
+      const openSource = actions.createEl("button", { text: "打开来源" });
+      openSource.addEventListener("click", async () => {
+        const file = this.plugin.app.vault.getAbstractFileByPath(item.sourcePath);
+        if (this.plugin.isFile(file)) await this.plugin.openReaderForFile(file);
+      });
+      const openNote = actions.createEl("button", { text: "阅读记录" });
+      openNote.addEventListener("click", async () => {
+        const file = this.plugin.app.vault.getAbstractFileByPath(item.readingNotePath);
+        await this.plugin.openFile(this.plugin.isFile(file) ? file : this.plugin.makeFileRef(item.readingNotePath));
+      });
+    }
+  }
+}
+
 module.exports = class ReadingCapturePlugin extends Plugin {
   async onload() {
     await this.loadSettings();
     this.addSettingTab(new ReadingCaptureSettingTab(this.app, this));
     this.registerView(READER_VIEW_TYPE, (leaf) => new ReadingCaptureReaderView(leaf, this));
     this.registerView(ARTICLE_LIBRARY_VIEW_TYPE, (leaf) => new ReadingCaptureLibraryView(leaf, this));
+    this.registerView(TOPIC_POOL_VIEW_TYPE, (leaf) => new ReadingCaptureTopicPoolView(leaf, this));
 
     this.registerEvent(
       this.app.workspace.on("editor-menu", (menu, editor, view) => {
@@ -1004,6 +1144,12 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       id: "open-article-library",
       name: "打开知见录",
       callback: async () => this.openArticleLibrary(),
+    });
+
+    this.addCommand({
+      id: "open-topic-pool",
+      name: "打开选题池",
+      callback: async () => this.openTopicPool(),
     });
 
     this.addCommand({
@@ -1132,6 +1278,18 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     const leaf = this.app.workspace.getLeaf(false);
     await leaf.setViewState({
       type: ARTICLE_LIBRARY_VIEW_TYPE,
+      active: true,
+    });
+    const view = leaf.view;
+    if (view && typeof view.reload === "function") {
+      await view.reload();
+    }
+  }
+
+  async openTopicPool() {
+    const leaf = this.app.workspace.getLeaf(false);
+    await leaf.setViewState({
+      type: TOPIC_POOL_VIEW_TYPE,
       active: true,
     });
     const view = leaf.view;
@@ -1774,6 +1932,8 @@ module.exports = class ReadingCapturePlugin extends Plugin {
           hasReading: false,
           lastReadTime: 0,
           readingNotePath: "",
+          status: "unread",
+          codexStatus: "pending_summary",
         },
         group.stats || {}
       ),
@@ -1875,11 +2035,15 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       hasReading: false,
       lastReadTime: 0,
       readingNotePath: "",
+      status: "unread",
+      codexStatus: "pending_summary",
     };
     const sources = index && index.sources ? index.sources : {};
     for (const [sourcePath, entry] of Object.entries(sources)) {
       if (!paths.has(sourcePath)) continue;
       stats.hasReading = true;
+      stats.status = entry.status || stats.status || "reading";
+      stats.codexStatus = entry.codex_status || stats.codexStatus || "pending_summary";
       stats.annotationCount += Number(entry.annotation_count || 0);
       const updatedTime = Date.parse(entry.updated || "");
       if (Number.isFinite(updatedTime)) stats.lastReadTime = Math.max(stats.lastReadTime, updatedTime);
@@ -1896,6 +2060,35 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       }
     }
     return stats;
+  }
+
+  async buildTopicPoolItems() {
+    const index = await this.loadIndex();
+    const sources = index && index.sources ? index.sources : {};
+    const items = [];
+    for (const [sourcePath, entry] of Object.entries(sources)) {
+      if (!entry || !entry.reading_note_path) continue;
+      try {
+        const markdown = await this.readText(entry.reading_note_path);
+        const annotations = this.parseAnnotationsFromReadingNote(markdown).filter((item) => this.annotationMatchesFilter(item, "topic"));
+        for (const annotation of annotations) {
+          items.push({
+            id: annotation.id,
+            time: annotation.time || "",
+            sourcePath,
+            sourceTitle: entry.source_title || sourcePath,
+            sourceRoot: entry.source_root || rootSlug(sourcePath.split("/").slice(0, -1).join("/")),
+            readingNotePath: entry.reading_note_path,
+            note: annotation.note,
+            quote: annotation.quote,
+            type: annotation.type,
+          });
+        }
+      } catch (error) {
+        // A missing or malformed reading note should not block the topic pool.
+      }
+    }
+    return items.sort((left, right) => String(right.time || "").localeCompare(String(left.time || "")));
   }
 
   async loadSettings() {
