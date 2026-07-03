@@ -838,7 +838,7 @@ class ReadingCaptureLibraryView extends ItemView {
       return;
     }
     if (!groups.length) {
-      list.createDiv({ cls: "reading-capture-library-empty", text: "没有找到匹配的文章。可以调整搜索词或扫描目录。" });
+      list.createDiv({ cls: "reading-capture-library-empty", text: this.plugin.articleLibraryEmptyMessage() });
       return;
     }
     for (const group of groups) {
@@ -1483,6 +1483,11 @@ module.exports = class ReadingCapturePlugin extends Plugin {
 
   getArticleLibraryRoots() {
     return this.parsePathList(this.settings.articleLibraryRoots, DEFAULT_SETTINGS.articleLibraryRoots);
+  }
+
+  articleLibraryEmptyMessage() {
+    if (!this.getArticleLibraryRoots().length) return "还没有配置知见录扫描目录。请在 Reading Capture 设置里添加保存文章的文件夹。";
+    return "没有找到匹配的文章。可以调整搜索词或扫描目录。";
   }
 
   getArticleLibraryExcludeRoots() {

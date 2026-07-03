@@ -52,11 +52,20 @@ Copy the plugin files into your Obsidian vault:
 ```text
 <vault>/.obsidian/plugins/reading-capture/
 ├── main.js
+├── reading-core.js
 ├── manifest.json
 └── styles.css
 ```
 
 Then enable `Reading Capture` from Obsidian's Community plugins settings.
+
+You can also build a local install package:
+
+```bash
+npm run package
+```
+
+This creates `dist/reading-capture/` and, when the local `zip` command is available, `dist/reading-capture.zip`.
 
 ## Commands
 
@@ -79,7 +88,25 @@ Run checks:
 npm test
 ```
 
-The plugin currently has no runtime build step. The source files in `plugin/` are the files copied into the Obsidian plugin directory.
+Build a release package:
+
+```bash
+npm run package
+```
+
+Run the full release check:
+
+```bash
+npm run release:check
+```
+
+The plugin currently has no compile step. The source files in `plugin/` are copied into the Obsidian plugin directory or release package.
+
+## Release Notes
+
+- Keep `package.json`, `plugin/manifest.json`, and `versions.json` in sync.
+- GitHub release attachments should include the runtime files from `plugin/`: `manifest.json`, `main.js`, `styles.css`, and `reading-core.js`.
+- Obsidian's sample plugin documents `versions.json` as `"plugin-version": "minimum-obsidian-version"` and release attachments as `manifest.json`, `main.js`, and `styles.css`; Reading Capture also needs `reading-core.js` because `main.js` imports it.
 
 ## License
 

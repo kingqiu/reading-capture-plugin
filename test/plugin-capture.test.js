@@ -428,6 +428,10 @@ async function testGenericDefaultSettings() {
   assert.strictEqual(plugin.settings.articleLibraryRoots, "");
   assert.strictEqual(plugin.getArticleLibraryRoots().length, 0);
   assert.deepStrictEqual([...plugin.getArticleLibraryExcludeRoots()], ["Reading Capture/notes", ".obsidian"]);
+  assert.strictEqual(plugin.articleLibraryEmptyMessage(), "还没有配置知见录扫描目录。请在 Reading Capture 设置里添加保存文章的文件夹。");
+
+  plugin.settings.articleLibraryRoots = "Articles";
+  assert.strictEqual(plugin.articleLibraryEmptyMessage(), "没有找到匹配的文章。可以调整搜索词或扫描目录。");
 }
 
 testCaptureWritesAnnotationAndIndex()
