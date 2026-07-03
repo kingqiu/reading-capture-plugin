@@ -522,6 +522,81 @@ async function testArticleLibraryFiltersAndSortsForResearchWorkflow() {
   assert.deepStrictEqual(view.visibleGroups().map((group) => group.id), ["c", "a", "b"]);
 }
 
+async function testArticleLibraryUsesCacheUntilSourceFilesChange() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = {
+    readingRoot: "Learning/reading-notes",
+    openNoteAfterCapture: false,
+    articleLibraryRoots: "Learning/web/x_articles",
+    articleLibraryExcludeRoots: "Learning/reading-notes\n.obsidian",
+  };
+  plugin.articleLibraryCache = { version: 1, groups: {} };
+  plugin.saveSettings = async () => {};
+
+  const article = makeFile("Learning/web/x_articles/20260703_cached/article_zh.md", "# Cached Title\n\nThis cached article summary should only be read once.");
+  files.set(article.path, { file: article, content: "# Cached Title\n\nThis cached article summary should only be read once." });
+
+  let sourceReadCount = 0;
+  const originalReadText = plugin.readText.bind(plugin);
+  plugin.readText = async (filePath) => {
+    if (filePath === article.path) sourceReadCount += 1;
+    return originalReadText(filePath);
+  };
+
+  const first = await plugin.buildArticleLibraryGroups();
+  const second = await plugin.buildArticleLibraryGroups();
+  const cachedGroup = second.find((group) => group.groupPath === "Learning/web/x_articles/20260703_cached");
+
+  assert.ok(first.find((group) => group.groupPath === "Learning/web/x_articles/20260703_cached"));
+  assert.strictEqual(cachedGroup.title, "Cached Title");
+  assert.strictEqual(sourceReadCount, 1);
+
+  article.stat.mtime += 1;
+  files.get(article.path).content = "# Fresh Title\n\nThis changed article should invalidate the cache.";
+  const refreshed = await plugin.buildArticleLibraryGroups();
+  const refreshedGroup = refreshed.find((group) => group.groupPath === "Learning/web/x_articles/20260703_cached");
+
+  assert.strictEqual(refreshedGroup.title, "Fresh Title");
+  assert.strictEqual(sourceReadCount, 2);
+}
+
+async function testArticleLibrarySnapshotPersistsForFastInitialRender() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = {
+    readingRoot: "Learning/reading-notes",
+    openNoteAfterCapture: false,
+    articleLibraryRoots: "Learning/web/x_articles",
+    articleLibraryExcludeRoots: "Learning/reading-notes\n.obsidian",
+  };
+  plugin.articleLibraryCache = { version: 1, groups: {} };
+
+  const article = makeFile("Learning/web/x_articles/20260703_snapshot/article_zh.md", "# Snapshot Title\n\nThis snapshot should be available before a fresh scan finishes.");
+  files.set(article.path, { file: article, content: "# Snapshot Title\n\nThis snapshot should be available before a fresh scan finishes." });
+
+  await plugin.buildArticleLibraryGroups();
+
+  const snapshot = plugin.getArticleLibrarySnapshot();
+  const snapshotGroup = snapshot.find((group) => group.groupPath === "Learning/web/x_articles/20260703_snapshot");
+  assert.ok(snapshotGroup, "article library snapshot should include built groups");
+  assert.strictEqual(snapshotGroup.title, "Snapshot Title");
+  assert.strictEqual(snapshotGroup.files[0].path, article.path);
+  assert.strictEqual(JSON.stringify(JSON.parse(JSON.stringify(snapshot))), JSON.stringify(snapshot));
+
+  const restored = new PluginClass();
+  restored.loadData = async () => plugin.savedData;
+  await restored.loadSettings();
+
+  const restoredGroup = restored.getArticleLibrarySnapshot().find((group) => group.groupPath === "Learning/web/x_articles/20260703_snapshot");
+  assert.ok(restoredGroup, "saved article library snapshot should be restored on load");
+  assert.strictEqual(restoredGroup.title, "Snapshot Title");
+}
+
 async function testOpenLibraryVersionUsesReaderForMarkdownAndObsidianForPdf() {
   const PluginClass = loadPluginClass();
   const plugin = new PluginClass();
@@ -615,6 +690,8 @@ testCaptureWritesAnnotationAndIndex()
   .then(testRecordTargetAndHighlight)
   .then(testArticleLibraryGrouping)
   .then(testArticleLibraryFiltersAndSortsForResearchWorkflow)
+  .then(testArticleLibraryUsesCacheUntilSourceFilesChange)
+  .then(testArticleLibrarySnapshotPersistsForFastInitialRender)
   .then(testOpenLibraryVersionUsesReaderForMarkdownAndObsidianForPdf)
   .then(testGenericDefaultSettings)
   .then(testVersionPathTooltipAndCopy)

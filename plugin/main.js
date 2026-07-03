@@ -12,6 +12,7 @@ const ALWAYS_EXCLUDED_LIBRARY_ROOTS = [
 ];
 
 const ARTICLE_LIBRARY_ROOTS_PLACEHOLDER = ["Articles", "Reading", "Sources"].join("\n");
+const ARTICLE_LIBRARY_CACHE_VERSION = 1;
 
 const DEFAULT_SETTINGS = {
   readingRoot: "Reading Capture/notes",
@@ -667,6 +668,13 @@ class ReadingCaptureLibraryView extends ItemView {
 
   async reload() {
     this.isLoading = true;
+    if (!this.groups.length) {
+      const snapshot = this.plugin.getArticleLibrarySnapshot();
+      if (snapshot.length) {
+        this.groups = snapshot;
+        if (!this.selectedGroupId && this.groups.length) this.selectedGroupId = this.groups[0].id;
+      }
+    }
     await this.render();
     try {
       this.groups = await this.plugin.buildArticleLibraryGroups();
@@ -856,8 +864,8 @@ class ReadingCaptureLibraryView extends ItemView {
     list.empty();
     const groups = this.visibleGroups();
     const header = list.createDiv({ cls: "reading-capture-library-list-header" });
-    header.createEl("strong", { text: this.isLoading ? "正在扫描文章..." : `${groups.length} 个文章组` });
-    if (this.isLoading) {
+    header.createEl("strong", { text: this.isLoading ? (groups.length ? `${groups.length} 个文章组 · 正在刷新` : "正在扫描文章...") : `${groups.length} 个文章组` });
+    if (this.isLoading && !groups.length) {
       list.createDiv({ cls: "reading-capture-library-empty", text: "正在整理知见录，请稍等。" });
       return;
     }
@@ -1671,6 +1679,8 @@ module.exports = class ReadingCapturePlugin extends Plugin {
 
     const index = await this.loadIndex();
     const groups = [];
+    const currentCache = this.normalizeArticleLibraryCache(this.articleLibraryCache);
+    const nextCache = { version: ARTICLE_LIBRARY_CACHE_VERSION, groups: {} };
     for (const group of grouped.values()) {
       group.files.sort((left, right) => left.path.localeCompare(right.path));
       group.versions = group.files
@@ -1685,15 +1695,122 @@ module.exports = class ReadingCapturePlugin extends Plugin {
         .sort((left, right) => left.priority - right.priority || left.name.localeCompare(right.name));
       group.bestVersion = group.versions.find((version) => version.kind === "markdown") || group.versions[0] || null;
       group.mtime = Math.max(...group.files.map((file) => (file.stat && file.stat.mtime ? file.stat.mtime : 0)), 0);
-      const summary = await this.readArticleGroupSummary(group);
-      group.title = summary.title;
-      group.snippet = summary.snippet;
+      const signature = this.articleGroupCacheSignature(group, index);
+      const cached = currentCache.groups[group.id];
+      if (cached && cached.signature === signature && cached.summary && cached.stats) {
+        group.title = cached.summary.title;
+        group.snippet = cached.summary.snippet;
+        group.stats = cached.stats;
+      } else {
+        const summary = await this.readArticleGroupSummary(group);
+        group.title = summary.title;
+        group.snippet = summary.snippet;
+        group.stats = await this.articleGroupStats(group, index);
+      }
       group.dateLabel = this.articleDateLabel(group);
-      group.stats = await this.articleGroupStats(group, index);
+      nextCache.groups[group.id] = {
+        signature,
+        summary: { title: group.title, snippet: group.snippet },
+        stats: group.stats,
+      };
       groups.push(group);
     }
+    const sortedGroups = groups.sort((left, right) => right.mtime - left.mtime);
+    this.articleLibraryCache = nextCache;
+    this.articleLibrarySnapshot = this.serializeArticleLibraryGroups(sortedGroups);
+    await this.saveSettings();
 
-    return groups.sort((left, right) => right.mtime - left.mtime);
+    return sortedGroups;
+  }
+
+  getArticleLibrarySnapshot() {
+    return Array.isArray(this.articleLibrarySnapshot) ? this.articleLibrarySnapshot : [];
+  }
+
+  serializeArticleLibraryGroups(groups) {
+    return (Array.isArray(groups) ? groups : []).map((group) => ({
+      id: group.id,
+      groupType: group.groupType,
+      groupPath: group.groupPath,
+      sourceRoot: group.sourceRoot,
+      sourceLabel: group.sourceLabel,
+      title: group.title,
+      snippet: group.snippet,
+      dateLabel: group.dateLabel,
+      mtime: group.mtime || 0,
+      files: (group.files || []).map((file) => ({
+        path: file.path,
+        name: file.name,
+        basename: file.basename || basename(file.name, extname(file.name)),
+        stat: {
+          mtime: file.stat && file.stat.mtime ? file.stat.mtime : 0,
+          size: file.stat && file.stat.size ? file.stat.size : 0,
+        },
+      })),
+      versions: (group.versions || []).map((version) => ({
+        path: version.path,
+        name: version.name,
+        kind: version.kind,
+        label: version.label,
+        priority: version.priority,
+        mtime: version.mtime || 0,
+      })),
+      bestVersion: group.bestVersion
+        ? {
+            path: group.bestVersion.path,
+            name: group.bestVersion.name,
+            kind: group.bestVersion.kind,
+            label: group.bestVersion.label,
+            priority: group.bestVersion.priority,
+            mtime: group.bestVersion.mtime || 0,
+          }
+        : null,
+      stats: Object.assign(
+        {
+          annotationCount: 0,
+          topicCount: 0,
+          factCount: 0,
+          imageCount: 0,
+          hasReading: false,
+          lastReadTime: 0,
+          readingNotePath: "",
+        },
+        group.stats || {}
+      ),
+    }));
+  }
+
+  normalizeArticleLibraryCache(cache) {
+    if (!cache || cache.version !== ARTICLE_LIBRARY_CACHE_VERSION || !cache.groups || typeof cache.groups !== "object") {
+      return { version: ARTICLE_LIBRARY_CACHE_VERSION, groups: {} };
+    }
+    return cache;
+  }
+
+  articleGroupCacheSignature(group, index) {
+    const files = group.files.map((file) => this.fileCacheSignature(file));
+    const paths = new Set(group.versions.map((version) => version.path));
+    const sources = index && index.sources ? index.sources : {};
+    const reading = Object.entries(sources)
+      .filter(([sourcePath]) => paths.has(sourcePath))
+      .sort((left, right) => left[0].localeCompare(right[0]))
+      .map(([sourcePath, entry]) => {
+        const notePath = entry && entry.reading_note_path ? entry.reading_note_path : "";
+        const noteFile = notePath ? this.app.vault.getAbstractFileByPath(notePath) : null;
+        return [
+          sourcePath,
+          notePath,
+          entry && entry.annotation_count ? entry.annotation_count : 0,
+          entry && entry.updated ? entry.updated : "",
+          this.isFile(noteFile) ? this.fileCacheSignature(noteFile) : "",
+        ].join("|");
+      });
+    return JSON.stringify({ files, reading });
+  }
+
+  fileCacheSignature(file) {
+    const stat = file && file.stat ? file.stat : {};
+    return [file && file.path ? file.path : "", stat.mtime || 0, stat.size || 0].join("|");
   }
 
   async readArticleGroupSummary(group) {
@@ -1782,14 +1899,24 @@ module.exports = class ReadingCapturePlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const data = (await this.loadData()) || {};
+    this.articleLibraryCache = this.normalizeArticleLibraryCache(data.articleLibraryCache);
+    this.articleLibrarySnapshot = Array.isArray(data.articleLibrarySnapshot) ? data.articleLibrarySnapshot : [];
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+    delete this.settings.articleLibraryCache;
+    delete this.settings.articleLibrarySnapshot;
     this.settings.readingRoot = normalizePath(this.settings.readingRoot || DEFAULT_SETTINGS.readingRoot);
     this.settings.articleLibraryRoots = this.settings.articleLibraryRoots || DEFAULT_SETTINGS.articleLibraryRoots;
     this.settings.articleLibraryExcludeRoots = this.settings.articleLibraryExcludeRoots || DEFAULT_SETTINGS.articleLibraryExcludeRoots;
   }
 
   async saveSettings() {
-    await this.saveData(this.settings);
+    await this.saveData(
+      Object.assign({}, this.settings, {
+        articleLibraryCache: this.normalizeArticleLibraryCache(this.articleLibraryCache),
+        articleLibrarySnapshot: this.getArticleLibrarySnapshot(),
+      })
+    );
   }
 
   async captureForFile(file, { selectedText, note, type, heading, media = null }) {
