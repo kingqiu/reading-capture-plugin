@@ -4,6 +4,7 @@ const {
   buildReadingNotePath,
   createEmptyIndex,
   upsertIndexEntry,
+  buildInitialReadingNote,
   buildAnnotationBlock,
   wrapMarkdownHighlight,
   cleanSelectedText,
@@ -33,6 +34,15 @@ function testBuildReadingNotePath() {
   assert.match(
     notePath,
     /^Learning\/reading-notes\/2026\/06\/20260610_x_articles_Creating-a-Second-Brain-with-Claude-Code_[a-f0-9]{8}\.md$/
+  );
+
+  const defaultRootNotePath = buildReadingNotePath({
+    source,
+    now: fixedNow,
+  });
+  assert.match(
+    defaultRootNotePath,
+    /^Reading Capture\/notes\/2026\/06\/20260610_x_articles_Creating-a-Second-Brain-with-Claude-Code_[a-f0-9]{8}\.md$/
   );
 }
 
@@ -82,6 +92,18 @@ function testBuildAnnotationBlock() {
   assert.match(block, /我的想法：\n这个角度可以延展成一篇公众号文章。/);
 }
 
+function testInitialReadingNoteUsesGenericSummaryLanguage() {
+  const source = buildSourceMetadata({
+    vaultPath: "Articles/example.md",
+    title: "Example",
+    now: fixedNow,
+  });
+  const note = buildInitialReadingNote({ source, now: fixedNow });
+
+  assert.match(note, /## AI 汇总/);
+  assert.doesNotMatch(note, /Codex|OpenClaw/);
+}
+
 function testWrapMarkdownHighlight() {
   assert.strictEqual(wrapMarkdownHighlight("important idea"), "==important idea==");
   assert.strictEqual(wrapMarkdownHighlight("==important idea=="), "==important idea==");
@@ -105,6 +127,7 @@ function testBuildAnnotationBlockCleansHighlightMarkers() {
 testBuildReadingNotePath();
 testUpsertIndexEntry();
 testBuildAnnotationBlock();
+testInitialReadingNoteUsesGenericSummaryLanguage();
 testWrapMarkdownHighlight();
 testBuildAnnotationBlockCleansHighlightMarkers();
 

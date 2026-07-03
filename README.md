@@ -2,19 +2,15 @@
 
 Reading Capture is an Obsidian plugin for immersive article reading, lightweight highlighting, and structured reading-note capture.
 
-It is designed for a Codex/OpenClaw-assisted writing workflow:
+It is designed for people who collect long-form reading material in Obsidian and want a separate layer for highlights, notes, writing ideas, and follow-up checks:
 
 - Read saved Markdown articles in a dedicated reader view.
 - Highlight passages without modifying the original Markdown file.
 - Capture thoughts, writing topics, and fact-check items into a central reading-notes protocol.
 - Reopen an article and see saved highlights, hover notes, and a right-side annotation panel.
-- Let Codex or other agent tools later summarize notes and transform them into WeChat, Xiaohongshu, or video scripts.
-
-## Current Status
+- Use the structured reading notes yourself, or let your own automation summarize and transform them later.
 
 Version: `0.4.3`
-
-This is a personal workflow plugin under active development.
 
 ## Features
 
@@ -22,7 +18,7 @@ This is a personal workflow plugin under active development.
 - `知见录` view for browsing saved article groups across configured source folders.
 - Article grouping supports both directory-based article bundles and standalone Markdown files.
 - Best-version detection prefers enriched Chinese Markdown, then translations, then original Markdown.
-- Digest folders under `Learning/web/x_articles/digest(s)` are excluded from the article library.
+- Article library source folders are configurable from the plugin settings.
 - Unified dark interface for both the reader and article library.
 - Softer low-glare dark palette and aligned three-column library layout.
 - Dynamic highlights based on saved reading notes.
@@ -38,8 +34,16 @@ This is a personal workflow plugin under active development.
   - 普通想法
   - 可写选题
   - 事实待核查
-- Central reading-note storage under `Learning/reading-notes`.
+- Central reading-note storage, defaulting to `Reading Capture/notes`.
 - Machine-readable `.reading-index.json`.
+
+## Configuration
+
+After enabling the plugin, open the Reading Capture settings:
+
+- `阅读笔记根目录`: where reading notes, the inbox, and the machine-readable index are stored. The default is `Reading Capture/notes`.
+- `知见录扫描目录`: article folders to scan. Add one vault-relative folder per line, such as `Articles`, `Reading`, or any folder where you keep saved Markdown/PDF reading material.
+- `知见录排除目录`: folders to skip while building the article library. The reading-note root and `.obsidian` are excluded by default.
 
 ## Installation
 
@@ -76,3 +80,7 @@ npm test
 ```
 
 The plugin currently has no runtime build step. The source files in `plugin/` are the files copied into the Obsidian plugin directory.
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).

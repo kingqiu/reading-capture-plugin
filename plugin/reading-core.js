@@ -122,7 +122,7 @@ function buildSourceMetadata({ vaultPath, absPath = "", title = "", stat = {}, n
   };
 }
 
-function buildReadingNotePath({ source, readingRoot = "Learning/reading-notes", now = new Date().toISOString() }) {
+function buildReadingNotePath({ source, readingRoot = "Reading Capture/notes", now = new Date().toISOString() }) {
   const parts = dateParts(now);
   const titleSlug = safeSlug(source.source_title, 72);
   const fileName = `${parts.ymd}_${rootSlug(source.source_root)}_${titleSlug}_${source.source_id}.md`;
@@ -175,7 +175,7 @@ function yamlValue(value) {
 
 function buildInitialReadingNote({ source, now = new Date().toISOString() }) {
   const updated = toIsoString(now);
-  return `---\ntype: reading-note\nschema_version: 1\nsource_id: ${source.source_id}\nsource_vault_path: ${yamlValue(source.source_vault_path)}\nsource_abs_path: ${yamlValue(source.source_abs_path)}\nsource_title: ${yamlValue(source.source_title)}\nsource_file_name: ${yamlValue(source.source_file_name)}\nsource_root: ${yamlValue(source.source_root)}\nsource_kind: ${yamlValue(source.source_kind)}\nsource_mtime: ${yamlValue(source.source_mtime)}\nsource_size: ${source.source_size || 0}\nsource_content_hash: ${yamlValue(source.source_content_hash)}\nsource_aliases: []\nstatus: reading\ncodex_status: pending_summary\npublish_intent: []\ncreated: ${yamlValue(updated)}\nupdated: ${yamlValue(updated)}\n---\n\n# 阅读记录：${source.source_title}\n\n## 源文档\n\n- 来源：[[${source.source_vault_path}]]\n- 类型：${source.source_kind}\n- 首次记录：${updated}\n\n## 一句话判断\n\n\n## 标注记录\n\n\n## 可写选题\n\n\n## 事实待核查\n\n\n## Codex 汇总\n\n> 等待 Codex 写入。\n\n## 内容转化记录\n\n- 微信公众号：\n- 小红书：\n- 视频号：\n`;
+  return `---\ntype: reading-note\nschema_version: 1\nsource_id: ${source.source_id}\nsource_vault_path: ${yamlValue(source.source_vault_path)}\nsource_abs_path: ${yamlValue(source.source_abs_path)}\nsource_title: ${yamlValue(source.source_title)}\nsource_file_name: ${yamlValue(source.source_file_name)}\nsource_root: ${yamlValue(source.source_root)}\nsource_kind: ${yamlValue(source.source_kind)}\nsource_mtime: ${yamlValue(source.source_mtime)}\nsource_size: ${source.source_size || 0}\nsource_content_hash: ${yamlValue(source.source_content_hash)}\nsource_aliases: []\nstatus: reading\ncodex_status: pending_summary\npublish_intent: []\ncreated: ${yamlValue(updated)}\nupdated: ${yamlValue(updated)}\n---\n\n# 阅读记录：${source.source_title}\n\n## 源文档\n\n- 来源：[[${source.source_vault_path}]]\n- 类型：${source.source_kind}\n- 首次记录：${updated}\n\n## 一句话判断\n\n\n## 标注记录\n\n\n## 可写选题\n\n\n## 事实待核查\n\n\n## AI 汇总\n\n> 等待你或自动化工具写入。\n\n## 内容转化记录\n\n- 微信公众号：\n- 小红书：\n- 视频号：\n`;
 }
 
 function countAnnotations(markdown) {
@@ -229,12 +229,14 @@ function buildAnnotationBlock({
   captureSource = "obsidian-plugin",
   locationHint = "",
   confidence = "high",
+  media = null,
   now = new Date().toISOString(),
 }) {
   const parts = dateParts(now);
   const timestamp = toIsoString(now);
   const cleanQuote = cleanSelectedText(selectedText);
-  const annotationId = `ann_${parts.ymd}_${timePart(now)}_${sha1(`${timestamp}:${cleanQuote}:${note}:${type}`, 4)}`;
+  const mediaKey = media ? `${media.type || ""}:${media.src || ""}:${media.index || ""}` : "";
+  const annotationId = `ann_${parts.ymd}_${timePart(now)}_${sha1(`${timestamp}:${cleanQuote}:${note}:${type}:${mediaKey}`, 4)}`;
   const quoteHash = cleanQuote ? `q_${sha1(cleanQuote, 8)}` : "";
   const lines = [
     `### ${annotationId}`,
@@ -245,8 +247,17 @@ function buildAnnotationBlock({
     `- quote_hash: ${quoteHash}`,
     `- location_hint: ${locationHint}`,
     `- confidence: ${confidence}`,
-    "",
   ];
+  if (media) {
+    lines.push(
+      `- media_type: ${media.type || ""}`,
+      `- media_src: ${yamlValue(media.src || "")}`,
+      `- media_alt: ${yamlValue(media.alt || "")}`,
+      `- media_index: ${typeof media.index === "number" ? media.index : ""}`,
+      `- media_hash: ${media.src ? `m_${sha1(media.src, 8)}` : ""}`
+    );
+  }
+  lines.push("");
   if (cleanQuote) {
     lines.push(blockquote(cleanQuote), "");
   }
@@ -273,7 +284,12 @@ function appendUnderHeading(markdown, heading, block) {
 module.exports = {
   KNOWN_SOURCE_ROOTS,
   sha1,
+  basename,
+  extname,
+  rootSlug,
   safeSlug,
+  sourceKindFromPath,
+  titleFromPath,
   buildSourceMetadata,
   buildReadingNotePath,
   createEmptyIndex,

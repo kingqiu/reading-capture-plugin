@@ -4,11 +4,21 @@ const path = require("path");
 const vm = require("vm");
 const core = require("../plugin/reading-core");
 
+const fixedNow = "2026-06-10T11:59:00+08:00";
+
 function loadPluginClass() {
   const code = fs.readFileSync(path.join(__dirname, "../plugin/main.js"), "utf8");
   class ItemView {}
   class Modal {}
-  class Plugin { registerView() {} }
+  class Plugin {
+    async loadData() {
+      return null;
+    }
+    async saveData(data) {
+      this.savedData = data;
+    }
+    registerView() {}
+  }
   class PluginSettingTab {}
   class Setting {}
   const MarkdownRenderer = {};
@@ -19,6 +29,7 @@ function loadPluginClass() {
   const sandbox = {
     require(name) {
       if (name === "obsidian") return { ItemView, MarkdownRenderer, Modal, Notice, Plugin, PluginSettingTab, Setting, normalizePath };
+      if (name === "./reading-core") return core;
       throw new Error(`Unexpected require: ${name}`);
     },
     module: { exports: {} },
@@ -128,6 +139,7 @@ async function testCaptureWritesAnnotationAndIndex() {
     readingRoot: "Learning/reading-notes",
     openNoteAfterCapture: false,
   };
+  plugin.now = () => fixedNow;
 
   await plugin.captureForFile(sourceFile, {
     selectedText: "Selected text",
@@ -147,6 +159,7 @@ async function testCaptureWritesAnnotationAndIndex() {
   const index = JSON.parse(indexContent);
   assert.strictEqual(index.sources[sourceFile.path].reading_note_path, readingPath);
   assert.strictEqual(index.sources[sourceFile.path].annotation_count, 1);
+  assert.doesNotMatch(files.get("Learning/reading-notes/index.md").content, /Codex|OpenClaw/);
 }
 
 async function testCaptureReusesExistingUnindexedFile() {
@@ -158,7 +171,7 @@ async function testCaptureReusesExistingUnindexedFile() {
     readingRoot: "Learning/reading-notes",
     openNoteAfterCapture: false,
   };
-  plugin.now = () => "2026-06-10T11:59:00+08:00";
+  plugin.now = () => fixedNow;
 
   const source = core.buildSourceMetadata({
     vaultPath: sourceFile.path,
@@ -195,6 +208,7 @@ async function testCaptureImageNote() {
     readingRoot: "Learning/reading-notes",
     openNoteAfterCapture: false,
   };
+  plugin.now = () => fixedNow;
 
   const stableSrc = plugin.stableImageSource("app://abc/vault/Learning/web/x_articles/example/images/loop.png?12345", sourceFile);
   assert.strictEqual(stableSrc, "images/loop.png");
@@ -404,11 +418,24 @@ async function testArticleLibraryGrouping() {
   assert.strictEqual(groups.some((group) => group.groupPath === "Learning/web/x_articles/digest"), false);
 }
 
+async function testGenericDefaultSettings() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+
+  await plugin.loadSettings();
+
+  assert.strictEqual(plugin.settings.readingRoot, "Reading Capture/notes");
+  assert.strictEqual(plugin.settings.articleLibraryRoots, "");
+  assert.strictEqual(plugin.getArticleLibraryRoots().length, 0);
+  assert.deepStrictEqual([...plugin.getArticleLibraryExcludeRoots()], ["Reading Capture/notes", ".obsidian"]);
+}
+
 testCaptureWritesAnnotationAndIndex()
   .then(testCaptureReusesExistingUnindexedFile)
   .then(testCaptureImageNote)
   .then(testRecordTargetAndHighlight)
   .then(testArticleLibraryGrouping)
+  .then(testGenericDefaultSettings)
   .then(() => console.log("plugin capture test passed"))
   .catch((error) => {
     console.error(error);

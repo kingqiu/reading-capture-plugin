@@ -6,5 +6,5 @@
   "scripts": {
     "test": "node --check plugin/main.js && node test/reading-core.test.js && node test/plugin-capture.test.js"
   },
-  "license": "UNLICENSED"
+  "license": "Apache-2.0"
 }
