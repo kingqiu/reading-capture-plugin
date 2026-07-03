@@ -1,4 +1,4 @@
-const { ItemView, MarkdownRenderer, Modal, Notice, Plugin, PluginSettingTab, Setting, normalizePath } = require("obsidian");
+const { ItemView, MarkdownRenderer, Menu, Modal, Notice, Plugin, PluginSettingTab, Setting, normalizePath } = require("obsidian");
 const core = require("./reading-core");
 
 const READER_VIEW_TYPE = "reading-capture-reader";
@@ -755,8 +755,11 @@ class ReadingCaptureLibraryView extends ItemView {
       [
         ["all", "全部"],
         ["annotated", "有标注"],
+        ["unannotated", "无标注"],
         ["topic", "有选题"],
         ["fact", "待核查"],
+        ["has-pdf", "有 PDF"],
+        ["has-zh", "有中文"],
         ["unread", "未读"],
       ],
       this.stateFilter,
@@ -772,6 +775,7 @@ class ReadingCaptureLibraryView extends ItemView {
         ["mtime-desc", "最近更新"],
         ["last-read-desc", "最近阅读"],
         ["annotations-desc", "标注最多"],
+        ["files-desc", "文件最多"],
         ["title-asc", "标题 A-Z"],
       ],
       this.sortMode,
@@ -810,8 +814,11 @@ class ReadingCaptureLibraryView extends ItemView {
     const groups = this.groups.filter((group) => {
       if (this.sourceFilter !== "all" && group.sourceLabel !== this.sourceFilter) return false;
       if (this.stateFilter === "annotated" && group.stats.annotationCount <= 0) return false;
+      if (this.stateFilter === "unannotated" && group.stats.annotationCount > 0) return false;
       if (this.stateFilter === "topic" && group.stats.topicCount <= 0) return false;
       if (this.stateFilter === "fact" && group.stats.factCount <= 0) return false;
+      if (this.stateFilter === "has-pdf" && !this.groupHasPdf(group)) return false;
+      if (this.stateFilter === "has-zh" && !this.groupHasChineseVersion(group)) return false;
       if (this.stateFilter === "unread" && group.stats.hasReading) return false;
       if (!query) return true;
       return [group.title, group.snippet, group.groupPath, group.files.map((file) => file.name).join(" ")]
@@ -824,8 +831,25 @@ class ReadingCaptureLibraryView extends ItemView {
       if (this.sortMode === "title-asc") return left.title.localeCompare(right.title);
       if (this.sortMode === "annotations-desc") return right.stats.annotationCount - left.stats.annotationCount || right.mtime - left.mtime;
       if (this.sortMode === "last-read-desc") return (right.stats.lastReadTime || 0) - (left.stats.lastReadTime || 0) || right.mtime - left.mtime;
+      if (this.sortMode === "files-desc") return right.files.length - left.files.length || right.mtime - left.mtime;
       return right.mtime - left.mtime;
     });
+  }
+
+  groupHasPdf(group) {
+    return !!(group && group.versions && group.versions.some((version) => version.kind === "pdf"));
+  }
+
+  groupHasChineseVersion(group) {
+    return !!(
+      group &&
+      group.versions &&
+      group.versions.some((version) => {
+        const label = String(version.label || "");
+        const path = String(version.path || "").toLowerCase();
+        return label.includes("中文") || label.includes("扩展") || path.includes("_zh") || path.includes("translation");
+      })
+    );
   }
 
   renderList(list) {
@@ -857,7 +881,8 @@ class ReadingCaptureLibraryView extends ItemView {
       if (group.snippet) card.createEl("p", { text: group.snippet });
       const versions = card.createDiv({ cls: "reading-capture-library-versions" });
       for (const version of group.versions.slice(0, 4)) {
-        versions.createEl("span", { text: version.label });
+        const pill = versions.createEl("span", { text: version.label });
+        this.plugin.decorateVersionPathElement(pill, version);
       }
       const bottom = card.createDiv({ cls: "reading-capture-library-card-bottom" });
       bottom.createEl("span", { text: `${group.stats.annotationCount} 条标注` });
@@ -902,15 +927,12 @@ class ReadingCaptureLibraryView extends ItemView {
     const versions = detail.createDiv({ cls: "reading-capture-library-version-list" });
     for (const version of selected.versions) {
       const row = versions.createDiv({ cls: "reading-capture-library-version-row" });
+      this.plugin.decorateVersionPathElement(row, version);
       row.createEl("span", { text: version.label });
-      row.createEl("strong", { text: version.name });
-      if (version.kind === "markdown") {
-        const button = row.createEl("button", { text: "阅读" });
-        button.addEventListener("click", async () => {
-          const file = this.plugin.app.vault.getAbstractFileByPath(version.path);
-          if (this.plugin.isFile(file)) await this.plugin.openReaderForFile(file);
-        });
-      }
+      const name = row.createEl("strong", { text: version.name });
+      this.plugin.decorateVersionPathElement(name, version);
+      const button = row.createEl("button", { text: version.kind === "markdown" ? "阅读" : "打开" });
+      button.addEventListener("click", async () => this.plugin.openLibraryVersion(version));
     }
 
     if (selected.snippet) {
@@ -1082,6 +1104,20 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     if (view && typeof view.setSource === "function") {
       await view.setSource(file.path);
     }
+  }
+
+  async openLibraryVersion(version) {
+    if (!version || !version.path) return;
+    const file = this.app.vault.getAbstractFileByPath(version.path);
+    if (!this.isFile(file)) {
+      new Notice("找不到这个版本的源文件。");
+      return;
+    }
+    if (version.kind === "markdown") {
+      await this.openReaderForFile(file);
+      return;
+    }
+    await this.openFile(file);
   }
 
   async openArticleLibrary() {
@@ -1490,6 +1526,45 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     return "没有找到匹配的文章。可以调整搜索词或扫描目录。";
   }
 
+  decorateVersionPathElement(element, version) {
+    const versionPath = version && version.path ? normalizeVaultPath(version.path) : "";
+    if (!element || !versionPath) return;
+    if (typeof element.setAttr === "function") element.setAttr("title", versionPath);
+    else element.title = versionPath;
+    if (element.dataset) element.dataset.versionPath = versionPath;
+    if (typeof element.addEventListener === "function") {
+      element.addEventListener("contextmenu", (event) => this.showVersionPathMenu(event, versionPath));
+    }
+  }
+
+  showVersionPathMenu(event, versionPath) {
+    if (!versionPath) return;
+    if (event && typeof event.preventDefault === "function") event.preventDefault();
+    if (event && typeof event.stopPropagation === "function") event.stopPropagation();
+
+    const menu = new Menu();
+    menu.addItem((item) => {
+      item
+        .setTitle("复制文件路径")
+        .setIcon("copy")
+        .onClick(async () => this.copyVersionPath(versionPath));
+    });
+    menu.showAtMouseEvent(event);
+  }
+
+  async copyVersionPath(versionPath) {
+    await this.writeClipboardText(versionPath);
+    new Notice("已复制路径");
+  }
+
+  async writeClipboardText(text) {
+    if (typeof navigator !== "undefined" && navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    throw new Error("当前环境不支持剪贴板写入。");
+  }
+
   getArticleLibraryExcludeRoots() {
     const configured = this.parsePathList(this.settings.articleLibraryExcludeRoots, DEFAULT_SETTINGS.articleLibraryExcludeRoots);
     const readingRoot = normalizePath(this.settings.readingRoot || DEFAULT_SETTINGS.readingRoot).replace(/\/+$/g, "");
@@ -1560,7 +1635,12 @@ module.exports = class ReadingCapturePlugin extends Plugin {
   articleVersionLabel(fileName) {
     const name = basename(fileName, extname(fileName)).toLowerCase();
     const ext = extname(fileName).toLowerCase();
-    if (ext === ".pdf") return "PDF";
+    if (ext === ".pdf") {
+      if (name.includes("zh_enriched") || name.includes("enriched")) return "扩展 PDF";
+      if (name === "article_zh" || name.endsWith("_zh") || name.includes("_zh_") || name.includes("translation")) return "中文 PDF";
+      if (name === "article") return "原文 PDF";
+      return "PDF";
+    }
     if (name.includes("zh_enriched") || name.includes("enriched")) return "扩展版";
     if (name === "article_zh" || name.endsWith("_zh") || name.includes("_zh_") || name.includes("translation")) return "中文版";
     if (name === "article") return "原文";

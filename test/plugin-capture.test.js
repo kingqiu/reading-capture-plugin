@@ -21,6 +21,28 @@ function loadPluginClass() {
   }
   class PluginSettingTab {}
   class Setting {}
+  class Menu {
+    addItem(callback) {
+      const item = {
+        setTitle() {
+          return item;
+        },
+        setIcon() {
+          return item;
+        },
+        onClick(handler) {
+          item.handler = handler;
+          return item;
+        },
+      };
+      callback(item);
+      this.item = item;
+      return this;
+    }
+    showAtMouseEvent(event) {
+      this.event = event;
+    }
+  }
   const MarkdownRenderer = {};
   function Notice() {}
   function normalizePath(value) {
@@ -28,7 +50,7 @@ function loadPluginClass() {
   }
   const sandbox = {
     require(name) {
-      if (name === "obsidian") return { ItemView, MarkdownRenderer, Modal, Notice, Plugin, PluginSettingTab, Setting, normalizePath };
+      if (name === "obsidian") return { ItemView, MarkdownRenderer, Menu, Modal, Notice, Plugin, PluginSettingTab, Setting, normalizePath };
       if (name === "./reading-core") return core;
       throw new Error(`Unexpected require: ${name}`);
     },
@@ -406,6 +428,9 @@ async function testArticleLibraryGrouping() {
   assert.strictEqual(plugin.articleVersionLabel("article_zh_enriched.md"), "扩展版");
   assert.strictEqual(plugin.articleVersionLabel("article_zh.md"), "中文版");
   assert.strictEqual(plugin.articleVersionLabel("article.md"), "原文");
+  assert.strictEqual(plugin.articleVersionLabel("article_zh_enriched.pdf"), "扩展 PDF");
+  assert.strictEqual(plugin.articleVersionLabel("article_zh.pdf"), "中文 PDF");
+  assert.strictEqual(plugin.articleVersionLabel("article.pdf"), "原文 PDF");
 
   const groups = await plugin.buildArticleLibraryGroups();
   const directoryGroup = groups.find((group) => group.groupPath === "Learning/web/x_articles/20260608_loop");
@@ -416,6 +441,111 @@ async function testArticleLibraryGrouping() {
   assert.strictEqual(directoryGroup.versions.some((version) => version.kind === "pdf"), true);
   assert.strictEqual(singleGroup.groupType, "single-file");
   assert.strictEqual(groups.some((group) => group.groupPath === "Learning/web/x_articles/digest"), false);
+}
+
+async function testArticleLibraryFiltersAndSortsForResearchWorkflow() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  plugin.app = {
+    workspace: {
+      on() {
+        return {};
+      },
+      getActiveFile() {
+        return null;
+      },
+    },
+  };
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => {
+    registeredViews[type] = factory;
+  };
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-library"]({});
+  view.groups = [
+    {
+      id: "a",
+      title: "Alpha",
+      snippet: "",
+      groupPath: "Articles/alpha",
+      sourceLabel: "articles",
+      mtime: 100,
+      files: [makeFile("Articles/alpha/article_zh.md"), makeFile("Articles/alpha/article_zh.pdf")],
+      versions: [
+        { label: "中文版", kind: "markdown", path: "Articles/alpha/article_zh.md" },
+        { label: "中文 PDF", kind: "pdf", path: "Articles/alpha/article_zh.pdf" },
+      ],
+      stats: { annotationCount: 2, topicCount: 0, factCount: 0, hasReading: true, lastReadTime: 40 },
+    },
+    {
+      id: "b",
+      title: "Beta",
+      snippet: "",
+      groupPath: "Articles/beta",
+      sourceLabel: "articles",
+      mtime: 300,
+      files: [makeFile("Articles/beta/article.md")],
+      versions: [{ label: "原文", kind: "markdown", path: "Articles/beta/article.md" }],
+      stats: { annotationCount: 0, topicCount: 0, factCount: 0, hasReading: false, lastReadTime: 0 },
+    },
+    {
+      id: "c",
+      title: "Gamma",
+      snippet: "",
+      groupPath: "Research/gamma",
+      sourceLabel: "research",
+      mtime: 200,
+      files: [makeFile("Research/gamma/article.md"), makeFile("Research/gamma/article.pdf"), makeFile("Research/gamma/notes.md")],
+      versions: [
+        { label: "原文", kind: "markdown", path: "Research/gamma/article.md" },
+        { label: "原文 PDF", kind: "pdf", path: "Research/gamma/article.pdf" },
+      ],
+      stats: { annotationCount: 0, topicCount: 1, factCount: 0, hasReading: true, lastReadTime: 80 },
+    },
+  ];
+
+  view.stateFilter = "unannotated";
+  assert.deepStrictEqual(view.visibleGroups().map((group) => group.id), ["b", "c"]);
+
+  view.stateFilter = "has-pdf";
+  assert.deepStrictEqual(view.visibleGroups().map((group) => group.id), ["c", "a"]);
+
+  view.stateFilter = "has-zh";
+  assert.deepStrictEqual(view.visibleGroups().map((group) => group.id), ["a"]);
+
+  view.stateFilter = "all";
+  view.sortMode = "files-desc";
+  assert.deepStrictEqual(view.visibleGroups().map((group) => group.id), ["c", "a", "b"]);
+}
+
+async function testOpenLibraryVersionUsesReaderForMarkdownAndObsidianForPdf() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  const markdown = makeFile("Articles/alpha/article_zh.md", "# Alpha");
+  const pdf = makeFile("Articles/alpha/article_zh.pdf", "");
+  files.set(markdown.path, { file: markdown, content: "# Alpha" });
+  files.set(pdf.path, { file: pdf, content: "" });
+  plugin.app = app;
+
+  let readerPath = "";
+  let openedPath = "";
+  plugin.openReaderForFile = async (file) => {
+    readerPath = file.path;
+  };
+  plugin.openFile = async (file) => {
+    openedPath = file.path;
+  };
+
+  await plugin.openLibraryVersion({ kind: "markdown", path: markdown.path });
+  await plugin.openLibraryVersion({ kind: "pdf", path: pdf.path });
+
+  assert.strictEqual(readerPath, markdown.path);
+  assert.strictEqual(openedPath, pdf.path);
 }
 
 async function testGenericDefaultSettings() {
@@ -434,12 +564,60 @@ async function testGenericDefaultSettings() {
   assert.strictEqual(plugin.articleLibraryEmptyMessage(), "没有找到匹配的文章。可以调整搜索词或扫描目录。");
 }
 
+async function testVersionPathTooltipAndCopy() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const version = {
+    path: "Learning/web/articles/2026-07-03_codex-in-practice/article_zh.md",
+  };
+  const listeners = {};
+  const event = {
+    prevented: false,
+    stopped: false,
+    preventDefault() {
+      this.prevented = true;
+    },
+    stopPropagation() {
+      this.stopped = true;
+    },
+  };
+  const element = {
+    attrs: {},
+    dataset: {},
+    setAttr(key, value) {
+      this.attrs[key] = value;
+    },
+    addEventListener(type, handler) {
+      listeners[type] = handler;
+    },
+  };
+
+  plugin.decorateVersionPathElement(element, version);
+
+  assert.strictEqual(element.attrs.title, version.path);
+  assert.strictEqual(element.dataset.versionPath, version.path);
+  assert.strictEqual(typeof listeners.contextmenu, "function");
+
+  let copied = "";
+  plugin.writeClipboardText = async (text) => {
+    copied = text;
+  };
+  listeners.contextmenu(event);
+  assert.strictEqual(event.prevented, true);
+  assert.strictEqual(event.stopped, true);
+  await plugin.copyVersionPath(version.path);
+  assert.strictEqual(copied, version.path);
+}
+
 testCaptureWritesAnnotationAndIndex()
   .then(testCaptureReusesExistingUnindexedFile)
   .then(testCaptureImageNote)
   .then(testRecordTargetAndHighlight)
   .then(testArticleLibraryGrouping)
+  .then(testArticleLibraryFiltersAndSortsForResearchWorkflow)
+  .then(testOpenLibraryVersionUsesReaderForMarkdownAndObsidianForPdf)
   .then(testGenericDefaultSettings)
+  .then(testVersionPathTooltipAndCopy)
   .then(() => console.log("plugin capture test passed"))
   .catch((error) => {
     console.error(error);

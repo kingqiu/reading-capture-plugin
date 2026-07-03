@@ -16,7 +16,7 @@ function testReleaseMetadata() {
   assert.strictEqual(packageJson.version, manifest.version);
   assert.strictEqual(versions[manifest.version], manifest.minAppVersion);
   assert.strictEqual(packageJson.scripts.package, "node scripts/package-plugin.js");
-  assert.strictEqual(packageJson.scripts["release:check"], "npm test && npm run package");
+  assert.strictEqual(packageJson.scripts["release:check"], "npm test && npm run package && node test/release-package.test.js");
 }
 
 function testPackageScriptDeclaresRuntimeFiles() {
@@ -27,7 +27,26 @@ function testPackageScriptDeclaresRuntimeFiles() {
   }
 }
 
+function testPackagedMainIsBundled() {
+  const packagedMainPath = path.join(root, "dist/reading-capture/main.js");
+  if (!fs.existsSync(packagedMainPath)) return;
+  const packagedMain = fs.readFileSync(packagedMainPath, "utf8");
+
+  assert.doesNotMatch(packagedMain, /require\(["']\.\/reading-core["']\)/);
+  assert.match(packagedMain, /const core = \(\(\) =>/);
+}
+
+function testLibraryFiltersCanScroll() {
+  const styles = fs.readFileSync(path.join(root, "plugin/styles.css"), "utf8");
+  const rule = styles.match(/\.reading-capture-library-filters\s*\{(?<body>[^}]+)\}/);
+  assert.ok(rule, "library filters should have a dedicated CSS rule");
+  assert.match(rule.groups.body, /max-height:\s*calc\(100vh - 170px\)/);
+  assert.match(rule.groups.body, /overflow-y:\s*auto/);
+}
+
 testReleaseMetadata();
 testPackageScriptDeclaresRuntimeFiles();
+testPackagedMainIsBundled();
+testLibraryFiltersCanScroll();
 
 console.log("release package tests passed");

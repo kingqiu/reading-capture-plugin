@@ -686,6 +686,13 @@
   top: 18px;
 }
 
+.reading-capture-library-filters {
+  max-height: calc(100vh - 170px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
 .reading-capture-library-filter-section + .reading-capture-library-filter-section {
   border-top: 1px solid var(--rc-border-soft);
   margin-top: 18px;
@@ -829,7 +836,7 @@
 }
 
 .reading-capture-library-detail {
-  max-height: calc(100vh - 48px);
+  max-height: calc(100vh - 170px);
   overflow: auto;
 }
 

@@ -4,9 +4,9 @@
   "private": true,
   "description": "Obsidian plugin for immersive reading, highlights, and structured reading notes.",
   "scripts": {
-    "test": "node --check plugin/main.js && node --check scripts/package-plugin.js && node test/reading-core.test.js && node test/plugin-capture.test.js && node test/release-package.test.js",
+    "test": "node --check plugin/main.js && node --check scripts/package-plugin.js && node test/reading-core.test.js && node test/plugin-capture.test.js",
     "package": "node scripts/package-plugin.js",
-    "release:check": "npm test && npm run package"
+    "release:check": "npm test && npm run package && node test/release-package.test.js"
   },
   "license": "Apache-2.0"
 }
