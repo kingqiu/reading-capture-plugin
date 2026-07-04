@@ -4,6 +4,7 @@ const core = require("./reading-core");
 const READER_VIEW_TYPE = "reading-capture-reader";
 const ARTICLE_LIBRARY_VIEW_TYPE = "reading-capture-library";
 const TOPIC_POOL_VIEW_TYPE = "reading-capture-topic-pool";
+const RECORD_VIEW_TYPE = "reading-capture-record";
 
 const { KNOWN_SOURCE_ROOTS, basename, extname, normalizeVaultPath, rootSlug, sourceKindFromPath, titleFromPath } = core;
 
@@ -246,8 +247,9 @@ class ReadingCaptureReaderView extends ItemView {
     return "highlighter";
   }
 
-  async setSource(sourcePath) {
+  async setSource(sourcePath, annotationId = "") {
     this.sourcePath = sourcePath;
+    this.pendingAnnotationId = annotationId || "";
     await this.render();
   }
 
@@ -337,6 +339,11 @@ class ReadingCaptureReaderView extends ItemView {
     const annotations = await this.applyHighlights(body, sourceFile);
     this.renderSidebar(sidebar, annotations, sourceFile);
     this.bindHighlightInteractions(body, tooltip, sidebar, annotations);
+    if (this.pendingAnnotationId) {
+      const annotationId = this.pendingAnnotationId;
+      this.pendingAnnotationId = "";
+      this.activateAnnotation(annotationId, true);
+    }
 
     body.addEventListener("mouseup", () => {
       const selection = window.getSelection();
@@ -615,7 +622,7 @@ class ReadingCaptureReaderView extends ItemView {
         new Notice("还没有阅读记录。");
         return;
       }
-      await this.plugin.openFile(noteFile);
+      await this.plugin.openReadingRecord(noteFile, sourceFile);
     });
     const copyPath = actions.createEl("button", { text: "复制文章路径" });
     copyPath.addEventListener("click", async () => {
@@ -1101,7 +1108,11 @@ class ReadingCaptureLibraryView extends ItemView {
     openNote.addEventListener("click", async () => {
       if (!selected.stats.readingNotePath) return;
       const noteFile = this.plugin.app.vault.getAbstractFileByPath(selected.stats.readingNotePath);
-      await this.plugin.openFile(this.plugin.isFile(noteFile) ? noteFile : this.plugin.makeFileRef(selected.stats.readingNotePath));
+      const sourceFile = selected.bestVersion ? this.plugin.app.vault.getAbstractFileByPath(selected.bestVersion.path) : null;
+      await this.plugin.openReadingRecord(
+        this.plugin.isFile(noteFile) ? noteFile : this.plugin.makeFileRef(selected.stats.readingNotePath),
+        this.plugin.isFile(sourceFile) ? sourceFile : null
+      );
     });
 
     detail.createEl("h3", { text: "版本" });
@@ -1138,6 +1149,303 @@ class ReadingCaptureLibraryView extends ItemView {
       return;
     }
     await this.plugin.openReaderForFile(file);
+  }
+}
+
+class ReadingCaptureRecordView extends ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.notePath = "";
+    this.sourcePath = "";
+    this.sourceTitle = "";
+    this.mode = "record";
+    this.markdown = "";
+    this.items = [];
+    this.activeAnnotationId = "";
+  }
+
+  getViewType() {
+    return RECORD_VIEW_TYPE;
+  }
+
+  getDisplayText() {
+    return this.sourceTitle ? `阅读记录：${this.sourceTitle}` : "阅读记录";
+  }
+
+  getIcon() {
+    return "book-open";
+  }
+
+  async onOpen() {
+    if (this.notePath) await this.reload();
+    else await this.render();
+  }
+
+  async setRecord(notePath, sourcePath = "") {
+    this.notePath = normalizePath(notePath || "");
+    this.sourcePath = normalizePath(sourcePath || "");
+    await this.reload();
+  }
+
+  async reload() {
+    if (!this.notePath) {
+      this.markdown = "";
+      this.items = [];
+      await this.render();
+      return;
+    }
+    this.markdown = await this.plugin.readText(this.notePath);
+    if (!this.sourcePath) this.sourcePath = normalizePath(this.plugin.readFrontmatterValue(this.markdown, "source_vault_path") || "");
+    this.sourceTitle = this.plugin.readFrontmatterValue(this.markdown, "source_title") || this.sourcePath || this.notePath;
+    this.items = this.plugin.parseAnnotationsFromReadingNote(this.markdown);
+    const first = this.groupedRecords().flatMap((group) => group.items)[0];
+    if (!this.activeAnnotationId || !this.items.some((item) => item.id === this.activeAnnotationId)) {
+      this.activeAnnotationId = first ? first.id : "";
+    }
+    await this.render();
+  }
+
+  groupedRecords() {
+    const groups = this.recordGroupDefinitions().map((group) => Object.assign({}, group, { items: [] }));
+    const byKey = new Map(groups.map((group) => [group.key, group]));
+    for (const item of this.items || []) {
+      byKey.get(this.recordGroupKey(item)).items.push(item);
+    }
+    return groups.filter((group) => group.items.length);
+  }
+
+  recordGroupKey(item) {
+    if (this.plugin.annotationMatchesFilter(item, "topic")) return "topic";
+    if (this.plugin.annotationMatchesFilter(item, "fact")) return "fact";
+    if (this.plugin.annotationMatchesFilter(item, "image")) return "image";
+    return "thought";
+  }
+
+  recordGroupDefinitions() {
+    return [
+      { key: "topic", label: "可写选题", cls: "is-topic" },
+      { key: "fact", label: "事实待核查", cls: "is-fact" },
+      { key: "thought", label: "标注想法", cls: "is-thought" },
+      { key: "image", label: "图片", cls: "is-image" },
+    ];
+  }
+
+  recordCounts() {
+    const counts = Object.fromEntries(this.recordGroupDefinitions().map((group) => [group.key, 0]));
+    for (const item of this.items || []) {
+      counts[this.recordGroupKey(item)] = (counts[this.recordGroupKey(item)] || 0) + 1;
+    }
+    return counts;
+  }
+
+  recordSummaryText() {
+    const counts = this.recordCounts();
+    const parts = [`${this.items.length} 条记录`];
+    if (counts.topic) parts.push(`${counts.topic} 个选题`);
+    if (counts.fact) parts.push(`${counts.fact} 个待核查`);
+    if (counts.image) parts.push(`${counts.image} 张图片`);
+    return parts.join(" · ");
+  }
+
+  groupMetaForItem(item) {
+    return (
+      this.groupedRecords().find((group) => group.items.some((candidate) => candidate.id === item.id)) || {
+        key: "thought",
+        label: "标注想法",
+        cls: "is-thought",
+      }
+    );
+  }
+
+  async setMode(mode) {
+    this.mode = mode === "markdown" ? "markdown" : "record";
+    await this.render();
+  }
+
+  async setActiveAnnotation(annotationId) {
+    this.activeAnnotationId = annotationId || "";
+    await this.render();
+  }
+
+  activeAnnotation() {
+    return (this.items || []).find((item) => item.id === this.activeAnnotationId) || (this.items || [])[0] || null;
+  }
+
+  async render() {
+    const container = this.containerEl.children[1];
+    container.empty();
+    container.addClass("reading-capture-record");
+
+    if (!this.notePath) {
+      container.createDiv({ cls: "reading-capture-record-empty", text: "还没有打开阅读记录。" });
+      return;
+    }
+
+    const shell = container.createDiv({ cls: "reading-capture-record-shell" });
+    this.renderHeader(shell);
+    if (this.mode === "markdown") {
+      await this.renderMarkdown(shell);
+      return;
+    }
+    this.renderRecordMode(shell);
+  }
+
+  renderHeader(shell) {
+    const header = shell.createDiv({ cls: "reading-capture-record-top" });
+    const title = header.createDiv({ cls: "reading-capture-record-title" });
+    title.createEl("div", { cls: "reading-capture-reader-kicker", text: "Reading Record" });
+    title.createEl("h1", { text: this.sourceTitle || this.notePath.split("/").pop() || "阅读记录" });
+    if (this.sourcePath) title.createEl("p", { text: this.sourcePath });
+
+    const actions = header.createDiv({ cls: "reading-capture-record-actions" });
+    const modeToggle = actions.createDiv({ cls: "reading-capture-record-mode-toggle" });
+    const recordButton = modeToggle.createEl("button", { text: "记录视图" });
+    if (this.mode === "record") recordButton.addClass("is-active");
+    recordButton.addEventListener("click", () => this.setMode("record"));
+    const markdownButton = modeToggle.createEl("button", { text: "Markdown" });
+    if (this.mode === "markdown") markdownButton.addClass("is-active");
+    markdownButton.addEventListener("click", () => this.setMode("markdown"));
+    const sourceButton = actions.createEl("button", { text: "回到原文" });
+    sourceButton.addEventListener("click", () => this.openSourceForRecord(this.activeAnnotation()));
+    const copyButton = actions.createEl("button", { text: "复制路径" });
+    copyButton.addEventListener("click", async () => {
+      await this.plugin.writeClipboardText(this.sourcePath || this.notePath);
+      new Notice("已复制路径。");
+    });
+    actions.createEl("button", { cls: "reading-capture-record-more", text: "..." });
+  }
+
+  async renderMarkdown(shell) {
+    const pane = shell.createDiv({ cls: "reading-capture-record-markdown markdown-preview-view" });
+    if (MarkdownRenderer && typeof MarkdownRenderer.render === "function") {
+      await MarkdownRenderer.render(this.app, this.markdown, pane, this.notePath, this);
+      return;
+    }
+    pane.createEl("pre", { text: this.markdown });
+  }
+
+  renderRecordMode(shell) {
+    const layout = shell.createDiv({ cls: "reading-capture-record-layout" });
+    const listPane = layout.createDiv({ cls: "reading-capture-record-list-pane" });
+    const detailPane = layout.createEl("aside", { cls: "reading-capture-record-detail-pane" });
+    this.renderRecordList(listPane);
+    this.renderRecordDetail(detailPane);
+  }
+
+  renderRecordList(listPane) {
+    const top = listPane.createDiv({ cls: "reading-capture-record-list-head" });
+    const title = top.createDiv({ cls: "reading-capture-record-list-title" });
+    title.createEl("h2", { text: "阅读沉淀" });
+    title.createEl("p", { text: this.recordSummaryText() });
+    top.createEl("button", { cls: "reading-capture-record-group-menu", text: "按类型分组" });
+    const filters = top.createDiv({ cls: "reading-capture-record-filter-row" });
+    filters.createEl("span", { text: `全部 ${this.items.length}` });
+    const counts = this.recordCounts();
+    for (const group of this.recordGroupDefinitions()) {
+      filters.createEl("span", { cls: group.cls, text: `${group.label} ${counts[group.key] || 0}` });
+    }
+
+    const list = listPane.createDiv({ cls: "reading-capture-record-list" });
+    const groups = this.groupedRecords();
+    if (!groups.length) {
+      const empty = list.createDiv({ cls: "reading-capture-record-empty-card" });
+      empty.createEl("strong", { text: "还没有记录" });
+      empty.createEl("span", { text: "可以回到原文，选中文字后记录想法、选题或待核查事实。" });
+      return;
+    }
+    for (const group of groups) {
+      const groupEl = list.createDiv({ cls: `reading-capture-record-group ${group.cls}` });
+      const groupTitle = groupEl.createDiv({ cls: "reading-capture-record-group-title" });
+      groupTitle.createEl("span", { text: group.label });
+      groupTitle.createEl("strong", { text: String(group.items.length) });
+      for (const item of group.items) {
+        const card = groupEl.createDiv({ cls: `reading-capture-record-card ${group.cls}` });
+        if (item.id === this.activeAnnotationId) card.addClass("is-active");
+        card.dataset.annotationId = item.id;
+        const meta = card.createDiv({ cls: "reading-capture-record-card-meta" });
+        meta.createEl("span", { cls: `reading-capture-type-pill ${group.cls}`, text: this.plugin.annotationLabel(item) });
+        if (this.plugin.shortTime(item.time)) meta.createEl("span", { text: this.plugin.shortTime(item.time) });
+        const text = item.note || item.quote || item.mediaAlt || item.mediaSrc || "未命名记录";
+        card.createEl("h3", { text: this.recordTitle(text) });
+        const body = item.note && item.quote ? item.quote : item.note || item.quote || item.mediaAlt || item.mediaSrc || "";
+        if (body) card.createEl("p", { text: this.plugin.previewSelectedText(body) });
+        card.createEl("button", { text: "..." });
+        card.addEventListener("click", () => this.setActiveAnnotation(item.id));
+      }
+    }
+  }
+
+  renderRecordDetail(detailPane) {
+    const item = this.activeAnnotation();
+    const header = detailPane.createDiv({ cls: "reading-capture-record-detail-head" });
+    header.createEl("h2", { text: "当前记录" });
+    if (!item) {
+      const empty = detailPane.createDiv({ cls: "reading-capture-record-empty-card" });
+      empty.createEl("strong", { text: "还没有可查看的记录" });
+      empty.createEl("span", { text: "回到原文后，可以先记录一条想法。" });
+      return;
+    }
+    const group = this.groupMetaForItem(item);
+    const meta = header.createDiv({ cls: "reading-capture-record-detail-meta" });
+    meta.createEl("span", { cls: `reading-capture-type-pill ${group.cls}`, text: this.plugin.annotationLabel(item) });
+    if (this.plugin.shortTime(item.time)) meta.createEl("span", { text: this.plugin.shortTime(item.time) });
+
+    if (item.quote) {
+      detailPane.createEl("h3", { text: "原文引用" });
+      detailPane.createEl("blockquote", { cls: group.cls, text: item.quote });
+    }
+    if (item.mediaType === "image") {
+      detailPane.createEl("h3", { text: "图片" });
+      detailPane.createEl("blockquote", { cls: group.cls, text: item.mediaAlt || item.mediaSrc || "图片记录" });
+    }
+    detailPane.createEl("h3", { text: "我的想法" });
+    detailPane.createEl("p", { text: item.note || "这条记录还没有补充想法。" });
+
+    const source = detailPane.createDiv({ cls: "reading-capture-record-source" });
+    source.createEl("h3", { text: "来源" });
+    const pathRow = source.createDiv({ cls: "reading-capture-record-source-row" });
+    pathRow.createEl("span", { text: "文章路径" });
+    pathRow.createEl("strong", { text: this.sourcePath || "未记录来源路径" });
+    const statusRow = source.createDiv({ cls: "reading-capture-record-source-row" });
+    statusRow.createEl("span", { text: "位置状态" });
+    statusRow.createEl("strong", { cls: "reading-capture-record-location-status", text: item.quote || item.mediaType ? "已定位到正文" : "关联到文章" });
+
+    const actions = detailPane.createDiv({ cls: "reading-capture-record-detail-actions" });
+    const jump = actions.createEl("button", { text: "回到原文位置" });
+    jump.addClass("mod-cta");
+    jump.addEventListener("click", () => this.openSourceForRecord(item));
+    const copyQuote = actions.createEl("button", { text: "复制引用" });
+    copyQuote.addEventListener("click", async () => {
+      await this.plugin.writeClipboardText(item.quote || item.note || "");
+      new Notice("已复制引用。");
+    });
+    const copyNote = actions.createEl("button", { text: "复制想法" });
+    copyNote.addEventListener("click", async () => {
+      await this.plugin.writeClipboardText(item.note || item.quote || "");
+      new Notice("已复制想法。");
+    });
+    const markdown = actions.createEl("button", { text: "打开原始 Markdown" });
+    markdown.addEventListener("click", () => this.setMode("markdown"));
+  }
+
+  recordTitle(value) {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    if (!text) return "未命名记录";
+    return text.length > 72 ? `${text.slice(0, 72)}...` : text;
+  }
+
+  async openSourceForRecord(item) {
+    if (!this.sourcePath) {
+      new Notice("这条阅读记录没有来源路径。");
+      return;
+    }
+    const sourceFile = this.app.vault.getAbstractFileByPath(this.sourcePath);
+    if (this.plugin.isFile(sourceFile)) {
+      await this.plugin.openReaderForFile(sourceFile, item && item.id ? item.id : "");
+      return;
+    }
+    await this.plugin.openFile(this.plugin.makeFileRef(this.sourcePath));
   }
 }
 
@@ -1218,7 +1526,7 @@ class ReadingCaptureTopicPoolView extends ItemView {
       const openNote = actions.createEl("button", { text: "阅读记录" });
       openNote.addEventListener("click", async () => {
         const file = this.plugin.app.vault.getAbstractFileByPath(item.readingNotePath);
-        await this.plugin.openFile(this.plugin.isFile(file) ? file : this.plugin.makeFileRef(item.readingNotePath));
+        await this.plugin.openReadingRecord(this.plugin.isFile(file) ? file : this.plugin.makeFileRef(item.readingNotePath), this.plugin.makeFileRef(item.sourcePath));
       });
     }
   }
@@ -1231,6 +1539,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     this.registerView(READER_VIEW_TYPE, (leaf) => new ReadingCaptureReaderView(leaf, this));
     this.registerView(ARTICLE_LIBRARY_VIEW_TYPE, (leaf) => new ReadingCaptureLibraryView(leaf, this));
     this.registerView(TOPIC_POOL_VIEW_TYPE, (leaf) => new ReadingCaptureTopicPoolView(leaf, this));
+    this.registerView(RECORD_VIEW_TYPE, (leaf) => new ReadingCaptureRecordView(leaf, this));
 
     this.registerEvent(
       this.app.workspace.on("editor-menu", (menu, editor, view) => {
@@ -1341,7 +1650,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
           return;
         }
         const noteFile = await this.getOrCreateReadingNote(file);
-        await this.openFile(noteFile);
+        await this.openReadingRecord(noteFile, file);
       },
     });
 
@@ -1369,7 +1678,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     });
   }
 
-  async openReaderForFile(file) {
+  async openReaderForFile(file, annotationId = "") {
     const leaf = this.app.workspace.getLeaf(false);
     await leaf.setViewState({
       type: READER_VIEW_TYPE,
@@ -1377,7 +1686,20 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     });
     const view = leaf.view;
     if (view && typeof view.setSource === "function") {
-      await view.setSource(file.path);
+      await view.setSource(file.path, annotationId);
+    }
+  }
+
+  async openReadingRecord(noteFile, sourceFile = null) {
+    if (!noteFile || !noteFile.path) return;
+    const leaf = this.app.workspace.getLeaf(false);
+    await leaf.setViewState({
+      type: RECORD_VIEW_TYPE,
+      active: true,
+    });
+    const view = leaf.view;
+    if (view && typeof view.setRecord === "function") {
+      await view.setRecord(noteFile.path, sourceFile && sourceFile.path ? sourceFile.path : "");
     }
   }
 
@@ -2303,7 +2625,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     new Notice("已保存到阅读记录。");
 
     if (this.settings.openNoteAfterCapture) {
-      await this.openFile(noteFile);
+      await this.openReadingRecord(noteFile, file);
     }
   }
 

@@ -927,6 +927,149 @@ async function testReaderSidebarKeepsAnnotationNavigationFocused() {
   assert.strictEqual(cards[0].children.some((child) => child.tag === "button" && child.text === "打开阅读记录"), false);
 }
 
+async function testReadingRecordViewGroupsAnnotationsAndSwitchesMarkdownInPlace() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const notePath = "Learning/reading-notes/2026/06/example.md";
+  const markdown = `---
+type: reading-note
+source_vault_path: "Learning/web/articles/example/article.md"
+source_title: "Example Article"
+status: reading
+---
+
+# 阅读记录：Example Article
+
+## 标注记录
+
+### ann_thought
+
+- time: 2026-06-10T10:30:00+08:00
+- type: highlight-with-note
+
+> 普通标注引用
+
+我的想法：
+普通想法
+
+## 可写选题
+
+### ann_topic
+
+- time: 2026-06-10T09:20:00+08:00
+- type: topic
+
+> 选题引用
+
+我的想法：
+可以写成选题
+
+## 事实待核查
+
+### ann_fact
+
+- time: 2026-06-10T10:25:00+08:00
+- type: fact-check
+
+> 待核查引用
+
+我的想法：
+需要核查
+`;
+  const noteFile = makeFile(notePath, markdown);
+  plugin.app = {
+    vault: {
+      getAbstractFileByPath(path) {
+        if (path === notePath) return noteFile;
+        if (path === "Learning/web/articles/example/article.md") return makeFile(path, "# Example");
+        return null;
+      },
+      async read(file) {
+        return markdown;
+      },
+    },
+    workspace: {
+      on() {
+        return {};
+      },
+      getActiveFile() {
+        return null;
+      },
+    },
+  };
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => {
+    registeredViews[type] = factory;
+  };
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-record"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.setRecord(notePath);
+
+  assert.strictEqual(JSON.stringify(view.groupedRecords().map((group) => group.key)), JSON.stringify(["topic", "fact", "thought"]));
+  assert.strictEqual(view.activeAnnotationId, "ann_topic");
+  let texts = fakeElementTexts(view.containerEl.children[1]);
+  assert.ok(texts.includes("阅读沉淀"));
+  assert.ok(texts.includes("可写选题"));
+  assert.ok(texts.includes("事实待核查"));
+  assert.ok(texts.includes("标注想法"));
+  assert.ok(texts.includes("当前记录"));
+  assert.ok(texts.includes("可以写成选题"));
+
+  await view.setMode("markdown");
+  texts = fakeElementTexts(view.containerEl.children[1]);
+  assert.ok(texts.some((text) => text.includes("ann_topic")));
+  assert.ok(texts.includes("记录视图"));
+}
+
+async function testOpeningReadingNoteUsesRecordViewInsteadOfRawMarkdown() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const views = {};
+  const noteFile = makeFile("Learning/reading-notes/example.md", "note");
+  const sourceFile = makeFile("Learning/web/articles/example.md", "# Example");
+  plugin.app = {
+    workspace: {
+      getLeaf() {
+        return {
+          async setViewState(state) {
+            this.state = state;
+            this.view = views[state.type];
+          },
+        };
+      },
+    },
+    vault: {
+      getAbstractFileByPath(path) {
+        if (path === noteFile.path) return noteFile;
+        if (path === sourceFile.path) return sourceFile;
+        return null;
+      },
+    },
+  };
+  const recordView = {
+    async setRecord(notePath, sourcePath) {
+      this.notePath = notePath;
+      this.sourcePath = sourcePath;
+    },
+  };
+  views["reading-capture-record"] = recordView;
+  let rawOpened = "";
+  plugin.openFile = async (file) => {
+    rawOpened = file.path;
+  };
+
+  await plugin.openReadingRecord(noteFile, sourceFile);
+
+  assert.strictEqual(recordView.notePath, noteFile.path);
+  assert.strictEqual(recordView.sourcePath, sourceFile.path);
+  assert.strictEqual(rawOpened, "");
+}
+
 testCaptureWritesAnnotationAndIndex()
   .then(testCaptureReusesExistingUnindexedFile)
   .then(testCaptureImageNote)
@@ -940,6 +1083,8 @@ testCaptureWritesAnnotationAndIndex()
   .then(testGenericDefaultSettings)
   .then(testVersionPathTooltipAndCopy)
   .then(testReaderSidebarKeepsAnnotationNavigationFocused)
+  .then(testReadingRecordViewGroupsAnnotationsAndSwitchesMarkdownInPlace)
+  .then(testOpeningReadingNoteUsesRecordViewInsteadOfRawMarkdown)
   .then(() => console.log("plugin capture test passed"))
   .catch((error) => {
     console.error(error);
