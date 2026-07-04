@@ -152,6 +152,73 @@ function makeFakeApp() {
   };
 }
 
+function makeFakeElement(tag = "div") {
+  const element = {
+    tag,
+    text: "",
+    attrs: {},
+    classes: new Set(),
+    children: [],
+    dataset: {},
+    listeners: {},
+    disabled: false,
+    empty() {
+      this.children = [];
+      this.text = "";
+    },
+    addClass(value) {
+      for (const item of String(value || "").split(/\s+/).filter(Boolean)) this.classes.add(item);
+    },
+    removeClass(value) {
+      this.classes.delete(value);
+    },
+    createDiv(options = {}) {
+      return this.createEl("div", options);
+    },
+    createEl(childTag, options = {}) {
+      const child = makeFakeElement(childTag);
+      if (options.cls) child.addClass(options.cls);
+      if (options.text) child.text = options.text;
+      if (options.attr) child.attrs = { ...child.attrs, ...options.attr };
+      this.children.push(child);
+      return child;
+    },
+    addEventListener(type, handler) {
+      this.listeners[type] = handler;
+    },
+    setAttr(key, value) {
+      this.attrs[key] = value;
+    },
+    querySelectorAll() {
+      return [];
+    },
+    querySelector() {
+      return null;
+    },
+  };
+  return element;
+}
+
+function fakeElementTexts(element) {
+  const texts = [];
+  const visit = (node) => {
+    if (node.text) texts.push(node.text);
+    for (const child of node.children || []) visit(child);
+  };
+  visit(element);
+  return texts;
+}
+
+function fakeElementsByClass(element, className) {
+  const matches = [];
+  const visit = (node) => {
+    if (node.classes && node.classes.has(className)) matches.push(node);
+    for (const child of node.children || []) visit(child);
+  };
+  visit(element);
+  return matches;
+}
+
 async function testCaptureWritesAnnotationAndIndex() {
   const PluginClass = loadPluginClass();
   const plugin = new PluginClass();
@@ -407,11 +474,19 @@ async function testArticleLibraryGrouping() {
   const original = makeFile("Learning/web/x_articles/20260608_loop/article.md", "# Loop Original\n\nOriginal version.");
   const pdf = makeFile("Learning/web/x_articles/20260608_loop/article_zh_enriched.pdf", "");
   const single = makeFile("Learning/research/20260609_single_note.md", "# Single Note\n\nA standalone research article.");
+  const nestedSingle = makeFile("Learning/research/single-folder/only.md", "# Nested Single\n\nA standalone article inside a folder.");
+  const firstTopic = makeFile("Learning/research/mixed-topics/first-topic.md", "# First Topic\n\nThis is the first independent article.");
+  const secondTopic = makeFile("Learning/research/mixed-topics/second-topic.md", "# Second Topic\n\nThis is the second independent article.");
+  const secondTopicPdf = makeFile("Learning/research/mixed-topics/second-topic.pdf", "");
   const digest = makeFile("Learning/web/x_articles/digest/digest_20260308_185542.md", "# X 博主最新动态\n\nDigest should not be treated as an article.");
   files.set(enriched.path, { file: enriched, content: "# Loop Enriched\n\nThis is the enriched Chinese version." });
   files.set(original.path, { file: original, content: "# Loop Original\n\nOriginal version." });
   files.set(pdf.path, { file: pdf, content: "" });
   files.set(single.path, { file: single, content: "# Single Note\n\nA standalone research article." });
+  files.set(nestedSingle.path, { file: nestedSingle, content: "# Nested Single\n\nA standalone article inside a folder." });
+  files.set(firstTopic.path, { file: firstTopic, content: "# First Topic\n\nThis is the first independent article." });
+  files.set(secondTopic.path, { file: secondTopic, content: "# Second Topic\n\nThis is the second independent article." });
+  files.set(secondTopicPdf.path, { file: secondTopicPdf, content: "" });
   files.set(digest.path, { file: digest, content: "# X 博主最新动态\n\nDigest should not be treated as an article." });
 
   const directoryInfo = plugin.resolveArticleGroupPath(enriched.path, plugin.getArticleLibraryRoots());
@@ -435,11 +510,23 @@ async function testArticleLibraryGrouping() {
   const groups = await plugin.buildArticleLibraryGroups();
   const directoryGroup = groups.find((group) => group.groupPath === "Learning/web/x_articles/20260608_loop");
   const singleGroup = groups.find((group) => group.groupPath === single.path);
+  const nestedSingleGroup = groups.find((group) => group.groupPath === nestedSingle.path);
+  const firstTopicGroup = groups.find((group) => group.groupPath === firstTopic.path);
+  const secondTopicGroup = groups.find((group) => group.groupPath === secondTopic.path);
   assert.ok(directoryGroup, "directory article group should be present");
   assert.ok(singleGroup, "single-file article group should be present");
+  assert.ok(nestedSingleGroup, "nested single-file article group should be present");
+  assert.ok(firstTopicGroup, "different-topic markdown files should not be merged by directory");
+  assert.ok(secondTopicGroup, "different-topic markdown files should not be merged by directory");
   assert.strictEqual(directoryGroup.bestVersion.path, enriched.path);
   assert.strictEqual(directoryGroup.versions.some((version) => version.kind === "pdf"), true);
   assert.strictEqual(singleGroup.groupType, "single-file");
+  assert.strictEqual(nestedSingleGroup.groupType, "single-file");
+  assert.strictEqual(firstTopicGroup.files.length, 1);
+  assert.strictEqual(firstTopicGroup.files[0].path, firstTopic.path);
+  assert.strictEqual(secondTopicGroup.files.length, 2);
+  assert.strictEqual(secondTopicGroup.files.some((file) => file.path === secondTopic.path), true);
+  assert.strictEqual(secondTopicGroup.files.some((file) => file.path === secondTopicPdf.path), true);
   assert.strictEqual(groups.some((group) => group.groupPath === "Learning/web/x_articles/digest"), false);
 }
 
@@ -570,16 +657,16 @@ async function testArticleLibraryUsesCacheUntilSourceFilesChange() {
 
   const first = await plugin.buildArticleLibraryGroups();
   const second = await plugin.buildArticleLibraryGroups();
-  const cachedGroup = second.find((group) => group.groupPath === "Learning/web/x_articles/20260703_cached");
+  const cachedGroup = second.find((group) => group.groupPath === article.path);
 
-  assert.ok(first.find((group) => group.groupPath === "Learning/web/x_articles/20260703_cached"));
+  assert.ok(first.find((group) => group.groupPath === article.path));
   assert.strictEqual(cachedGroup.title, "Cached Title");
   assert.strictEqual(sourceReadCount, 1);
 
   article.stat.mtime += 1;
   files.get(article.path).content = "# Fresh Title\n\nThis changed article should invalidate the cache.";
   const refreshed = await plugin.buildArticleLibraryGroups();
-  const refreshedGroup = refreshed.find((group) => group.groupPath === "Learning/web/x_articles/20260703_cached");
+  const refreshedGroup = refreshed.find((group) => group.groupPath === article.path);
 
   assert.strictEqual(refreshedGroup.title, "Fresh Title");
   assert.strictEqual(sourceReadCount, 2);
@@ -604,7 +691,7 @@ async function testArticleLibrarySnapshotPersistsForFastInitialRender() {
   await plugin.buildArticleLibraryGroups();
 
   const snapshot = plugin.getArticleLibrarySnapshot();
-  const snapshotGroup = snapshot.find((group) => group.groupPath === "Learning/web/x_articles/20260703_snapshot");
+  const snapshotGroup = snapshot.find((group) => group.groupPath === article.path);
   assert.ok(snapshotGroup, "article library snapshot should include built groups");
   assert.strictEqual(snapshotGroup.title, "Snapshot Title");
   assert.strictEqual(snapshotGroup.files[0].path, article.path);
@@ -614,7 +701,7 @@ async function testArticleLibrarySnapshotPersistsForFastInitialRender() {
   restored.loadData = async () => plugin.savedData;
   await restored.loadSettings();
 
-  const restoredGroup = restored.getArticleLibrarySnapshot().find((group) => group.groupPath === "Learning/web/x_articles/20260703_snapshot");
+  const restoredGroup = restored.getArticleLibrarySnapshot().find((group) => group.groupPath === article.path);
   assert.ok(restoredGroup, "saved article library snapshot should be restored on load");
   assert.strictEqual(restoredGroup.title, "Snapshot Title");
 }
@@ -773,6 +860,73 @@ async function testVersionPathTooltipAndCopy() {
   assert.strictEqual(copied, version.path);
 }
 
+async function testReaderSidebarKeepsAnnotationNavigationFocused() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  plugin.app = {
+    workspace: {
+      on() {
+        return {};
+      },
+      getActiveFile() {
+        return null;
+      },
+    },
+  };
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => {
+    registeredViews[type] = factory;
+  };
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-reader"]({});
+  view.sourcePath = "Learning/web/articles/example/article.md";
+  view.containerEl = makeFakeElement();
+
+  const sidebar = makeFakeElement("aside");
+  view.renderSidebar(
+    sidebar,
+    [
+      {
+        id: "ann_1",
+        section: "标注记录",
+        time: "2026-06-10T10:42:00+08:00",
+        type: "highlight-with-note",
+        quote: "值得做成一个创作者的研究工作流。",
+        note: "这个点可以展开写。",
+        located: true,
+      },
+      {
+        id: "ann_2",
+        section: "可写选题",
+        time: "2026-06-10T11:00:00+08:00",
+        type: "topic",
+        quote: "从非技术 builder 的角度理解 Codex。",
+        note: "",
+        located: true,
+      },
+    ],
+    makeFile(view.sourcePath)
+  );
+
+  const texts = fakeElementTexts(sidebar);
+  assert.ok(texts.includes("阅读标注"));
+  assert.ok(texts.includes("2 条记录"));
+  assert.ok(texts.includes("打开阅读记录"));
+  assert.ok(texts.includes("复制文章路径"));
+  assert.ok(texts.includes("点击标注卡片可跳转到正文位置。"));
+  assert.strictEqual(texts.includes("定位到正文"), false);
+
+  const cards = fakeElementsByClass(sidebar, "reading-capture-sidebar-card");
+  assert.strictEqual(cards.length, 2);
+  assert.strictEqual(cards[0].dataset.annotationId, "ann_1");
+  assert.strictEqual(typeof cards[0].listeners.click, "function");
+  assert.strictEqual(cards[0].children.some((child) => child.tag === "button" && child.text === "打开阅读记录"), false);
+}
+
 testCaptureWritesAnnotationAndIndex()
   .then(testCaptureReusesExistingUnindexedFile)
   .then(testCaptureImageNote)
@@ -785,6 +939,7 @@ testCaptureWritesAnnotationAndIndex()
   .then(testOpenLibraryVersionUsesReaderForMarkdownAndObsidianForPdf)
   .then(testGenericDefaultSettings)
   .then(testVersionPathTooltipAndCopy)
+  .then(testReaderSidebarKeepsAnnotationNavigationFocused)
   .then(() => console.log("plugin capture test passed"))
   .catch((error) => {
     console.error(error);

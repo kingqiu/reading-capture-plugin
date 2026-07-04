@@ -262,7 +262,11 @@ class ReadingCaptureReaderView extends ItemView {
   }
 
   getScrollContainer() {
-    return this.containerEl && this.containerEl.children ? this.containerEl.children[1] : null;
+    const container = this.containerEl && this.containerEl.children ? this.containerEl.children[1] : null;
+    if (container && typeof container.querySelector === "function") {
+      return container.querySelector(".reading-capture-reader-body") || container;
+    }
+    return container;
   }
 
   async renderKeepingScroll() {
@@ -297,7 +301,10 @@ class ReadingCaptureReaderView extends ItemView {
       return;
     }
 
-    const toolbar = container.createDiv({ cls: "reading-capture-reader-toolbar" });
+    const workspace = container.createDiv({ cls: "reading-capture-reader-workspace" });
+    if (this.sidebarCollapsed) workspace.addClass("is-sidebar-collapsed");
+    const mainPane = workspace.createDiv({ cls: "reading-capture-reader-main" });
+    const toolbar = mainPane.createDiv({ cls: "reading-capture-reader-toolbar" });
     const titleWrap = toolbar.createDiv({ cls: "reading-capture-reader-title-wrap" });
     titleWrap.createEl("div", { cls: "reading-capture-reader-kicker", text: "Reading Capture" });
     titleWrap.createEl("div", { cls: "reading-capture-reader-title", text: sourceFile.basename || sourceFile.name });
@@ -313,11 +320,10 @@ class ReadingCaptureReaderView extends ItemView {
       await this.renderKeepingScroll();
     });
 
-    const stage = container.createDiv({ cls: "reading-capture-reader-stage" });
-    if (this.sidebarCollapsed) stage.addClass("is-sidebar-collapsed");
-    const articlePanel = stage.createDiv({ cls: "reading-capture-reader-article-panel" });
+    const articlePanel = mainPane.createDiv({ cls: "reading-capture-reader-article-panel" });
     const body = articlePanel.createDiv({ cls: "reading-capture-reader-body markdown-preview-view" });
-    const sidebar = stage.createEl("aside", { cls: "reading-capture-reader-sidebar" });
+    const footer = mainPane.createDiv({ cls: "reading-capture-reader-footer" });
+    const sidebar = workspace.createEl("aside", { cls: "reading-capture-reader-sidebar" });
     if (this.sidebarCollapsed) sidebar.addClass("is-collapsed");
     const tooltip = container.createDiv({ cls: "reading-capture-floating-note" });
     const markdown = await this.plugin.readText(sourceFile.path);
@@ -327,8 +333,9 @@ class ReadingCaptureReaderView extends ItemView {
       await MarkdownRenderer.renderMarkdown(markdown, body, sourceFile.path, this);
     }
     this.indexReaderImages(body);
+    this.renderReaderFooter(footer, markdown, body);
     const annotations = await this.applyHighlights(body, sourceFile);
-    this.renderSidebar(sidebar, annotations);
+    this.renderSidebar(sidebar, annotations, sourceFile);
     this.bindHighlightInteractions(body, tooltip, sidebar, annotations);
 
     body.addEventListener("mouseup", () => {
@@ -347,6 +354,32 @@ class ReadingCaptureReaderView extends ItemView {
       event.preventDefault();
       this.captureSelectedText(sourceFile, selectedText);
     });
+  }
+
+  renderReaderFooter(footer, markdown, body) {
+    footer.empty();
+    const text = this.plugin.markdownTextForMatch(markdown || "").replace(/\s+/g, " ").trim();
+    const charCount = text.length;
+    const minutes = Math.max(1, Math.ceil(charCount / 360));
+    footer.createEl("span", { text: `字数 ${charCount.toLocaleString()}` });
+    footer.createEl("span", { text: `预计阅读 ${minutes} 分钟` });
+    const position = footer.createEl("span", { cls: "reading-capture-reader-position", text: `第 0 字 / 共 ${charCount.toLocaleString()} 字` });
+    const progress = footer.createDiv({ cls: "reading-capture-reader-progress" });
+    const bar = progress.createDiv({ cls: "reading-capture-reader-progress-bar" });
+    const percent = footer.createEl("span", { cls: "reading-capture-reader-percent", text: "0%" });
+    footer.createEl("span", { cls: "reading-capture-reader-saved", text: "阅读进度已自动保存" });
+
+    const update = () => {
+      const max = Math.max((body.scrollHeight || 0) - (body.clientHeight || 0), 0);
+      const ratio = max ? Math.min(Math.max((body.scrollTop || 0) / max, 0), 1) : 0;
+      const value = Math.round(ratio * 100);
+      const current = Math.min(Math.round(charCount * ratio), charCount);
+      bar.style.width = `${value}%`;
+      percent.textContent = `${value}%`;
+      position.textContent = `第 ${current.toLocaleString()} 字 / 共 ${charCount.toLocaleString()} 字`;
+    };
+    if (typeof body.addEventListener === "function") body.addEventListener("scroll", update);
+    update();
   }
 
   indexReaderImages(body) {
@@ -508,11 +541,10 @@ class ReadingCaptureReaderView extends ItemView {
     if (didHighlight && annotation) annotation.located = true;
   }
 
-  renderSidebar(sidebar, annotations) {
+  renderSidebar(sidebar, annotations, sourceFile = null) {
     sidebar.empty();
     const items = annotations || [];
     const header = sidebar.createDiv({ cls: "reading-capture-sidebar-header" });
-    header.createEl("div", { cls: "reading-capture-sidebar-kicker", text: "Notes" });
     header.createEl("h3", { text: "阅读标注" });
     header.createEl("div", { cls: "reading-capture-sidebar-count", text: `${items.length} 条记录` });
     this.renderSidebarFilters(sidebar, items);
@@ -520,7 +552,8 @@ class ReadingCaptureReaderView extends ItemView {
     if (!items.length) {
       const empty = sidebar.createDiv({ cls: "reading-capture-sidebar-empty" });
       empty.createEl("strong", { text: "还没有记录" });
-      empty.createEl("span", { text: "选中文字后记录，或直接写一条当前想法。" });
+      empty.createEl("span", { text: "选中文字后右键记录，或直接写一条当前想法。" });
+      this.renderSidebarGlobalActions(sidebar, sourceFile);
       return;
     }
 
@@ -533,14 +566,28 @@ class ReadingCaptureReaderView extends ItemView {
       return;
     }
     for (const item of visibleItems) {
-      const card = list.createDiv({ cls: "reading-capture-sidebar-card" });
+      const typeClass = this.plugin.typeClass(item);
+      const card = list.createDiv({ cls: `reading-capture-sidebar-card ${typeClass}` });
       card.dataset.annotationId = item.id;
       const top = card.createDiv({ cls: "reading-capture-sidebar-card-top" });
-      top.createEl("span", { cls: `reading-capture-type-pill ${this.plugin.typeClass(item)}`, text: this.plugin.annotationLabel(item) });
-      top.createEl("span", { cls: "reading-capture-sidebar-time", text: this.plugin.shortTime(item.time) });
+      const meta = top.createDiv({ cls: "reading-capture-sidebar-card-meta" });
+      meta.createEl("span", { cls: `reading-capture-type-pill ${typeClass}`, text: this.plugin.annotationLabel(item) });
+      meta.createEl("span", { cls: "reading-capture-sidebar-time", text: this.plugin.shortTime(item.time) });
+      const copy = top.createEl("button", {
+        cls: "reading-capture-sidebar-copy",
+        text: "...",
+        attr: { title: "复制引用", "aria-label": "复制引用" },
+      });
+      copy.addEventListener("click", async (event) => {
+        if (event && typeof event.stopPropagation === "function") event.stopPropagation();
+        const text = item.quote || item.note || item.mediaAlt || item.mediaSrc || "";
+        if (!text) return;
+        await this.plugin.writeClipboardText(text);
+        new Notice("已复制引用。");
+      });
       if (!item.located && (item.quote || item.mediaType)) {
         card.addClass("is-unlocated");
-        top.createEl("span", { cls: "reading-capture-location-pill", text: "未定位" });
+        meta.createEl("span", { cls: "reading-capture-location-pill", text: "未定位" });
       }
       if (item.quote) {
         card.createEl("blockquote", { cls: "reading-capture-sidebar-quote", text: this.plugin.previewSelectedText(item.quote) });
@@ -554,6 +601,28 @@ class ReadingCaptureReaderView extends ItemView {
       }
       card.addEventListener("click", () => this.activateAnnotation(item.id, true));
     }
+    sidebar.createEl("div", { cls: "reading-capture-sidebar-hint", text: "点击标注卡片可跳转到正文位置。" });
+    this.renderSidebarGlobalActions(sidebar, sourceFile);
+  }
+
+  renderSidebarGlobalActions(sidebar, sourceFile) {
+    const actions = sidebar.createDiv({ cls: "reading-capture-sidebar-global-actions" });
+    const openNote = actions.createEl("button", { text: "打开阅读记录" });
+    openNote.addEventListener("click", async () => {
+      if (!sourceFile) return;
+      const noteFile = await this.plugin.findReadingNoteForSource(sourceFile);
+      if (!noteFile) {
+        new Notice("还没有阅读记录。");
+        return;
+      }
+      await this.plugin.openFile(noteFile);
+    });
+    const copyPath = actions.createEl("button", { text: "复制文章路径" });
+    copyPath.addEventListener("click", async () => {
+      if (!sourceFile || !sourceFile.path) return;
+      await this.plugin.writeClipboardText(sourceFile.path);
+      new Notice("已复制文章路径。");
+    });
   }
 
   renderSidebarFilters(sidebar, items) {
@@ -1865,6 +1934,50 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     return "Markdown";
   }
 
+  shouldKeepDirectoryArticleGroup(group) {
+    const markdownFiles = group.files.filter((file) => sourceKindFromPath(file.path) === "markdown");
+    if (markdownFiles.length <= 1) return false;
+    return markdownFiles.every((file) => this.isCanonicalArticleVersionName(file.name));
+  }
+
+  isCanonicalArticleVersionName(fileName) {
+    const name = basename(fileName, extname(fileName)).toLowerCase();
+    return name === "article" || /^article[_-]/.test(name) || name === "translation" || name.includes("translation") || name.includes("enriched");
+  }
+
+  splitArticleDirectoryGroup(group) {
+    if (group.groupType !== "directory" || this.shouldKeepDirectoryArticleGroup(group)) return [group];
+    const markdownFiles = group.files.filter((file) => sourceKindFromPath(file.path) === "markdown");
+    if (!markdownFiles.length) return [group];
+    const markdownByStem = new Map(markdownFiles.map((file) => [this.fileStem(file.name), file]));
+    const fallbackMarkdown = markdownFiles.length === 1 ? markdownFiles[0] : null;
+    const groups = new Map();
+
+    for (const file of group.files) {
+      const fileStem = this.fileStem(file.name);
+      const pairedMarkdown = sourceKindFromPath(file.path) === "pdf" ? markdownByStem.get(fileStem) || fallbackMarkdown : file;
+      const groupPath = pairedMarkdown ? pairedMarkdown.path : file.path;
+      const id = `single-file:${groupPath}`;
+      if (!groups.has(id)) {
+        groups.set(id, {
+          id,
+          groupType: "single-file",
+          groupPath,
+          sourceRoot: group.sourceRoot,
+          sourceLabel: group.sourceLabel,
+          files: [],
+        });
+      }
+      groups.get(id).files.push(file);
+    }
+
+    return [...groups.values()];
+  }
+
+  fileStem(fileName) {
+    return basename(fileName, extname(fileName)).toLowerCase();
+  }
+
   async buildArticleLibraryGroups() {
     const roots = this.getArticleLibraryRoots();
     const files = this.getVaultFiles().filter((file) => this.isLibraryCandidate(file) && !this.isExcludedLibraryPath(file.path));
@@ -1891,7 +2004,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     const groups = [];
     const currentCache = this.normalizeArticleLibraryCache(this.articleLibraryCache);
     const nextCache = { version: ARTICLE_LIBRARY_CACHE_VERSION, groups: {} };
-    for (const group of grouped.values()) {
+    for (const group of [...grouped.values()].flatMap((item) => this.splitArticleDirectoryGroup(item))) {
       group.files.sort((left, right) => left.path.localeCompare(right.path));
       group.versions = group.files
         .map((file) => ({
