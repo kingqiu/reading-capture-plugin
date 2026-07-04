@@ -40,7 +40,7 @@ function testLibraryFiltersCanScroll() {
   const styles = fs.readFileSync(path.join(root, "plugin/styles.css"), "utf8");
   const rule = styles.match(/\.reading-capture-library-filters\s*\{(?<body>[^}]+)\}/);
   assert.ok(rule, "library filters should have a dedicated CSS rule");
-  assert.match(rule.groups.body, /max-height:\s*calc\(100vh - 170px\)/);
+  assert.match(rule.groups.body, /max-height:\s*calc\(100vh - \d+px\)/);
   assert.match(rule.groups.body, /overflow-y:\s*auto/);
 }
 

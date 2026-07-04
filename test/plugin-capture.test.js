@@ -534,7 +534,8 @@ async function testArticleLibraryFiltersAndSortsForResearchWorkflow() {
   view.groups[2].stats.codexStatus = "pending_summary";
   const progressCounts = Object.fromEntries(view.progressOptions().map(([value, label, count]) => [value, { label, count }]));
   assert.strictEqual(progressCounts.all.count, 3);
-  assert.strictEqual(progressCounts.reading.count, 1);
+  assert.strictEqual(progressCounts.reading.count, 0);
+  assert.strictEqual(progressCounts.annotated.count, 1);
   assert.strictEqual(progressCounts.unread.count, 1);
   assert.strictEqual(progressCounts["pending-summary"].count, 1);
   assert.strictEqual(progressCounts["writing-ready"], undefined);

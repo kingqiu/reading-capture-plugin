@@ -701,7 +701,9 @@ class ReadingCaptureLibraryView extends ItemView {
     container.addClass("reading-capture-library");
 
     const shell = container.createDiv({ cls: "reading-capture-library-shell" });
-    const top = shell.createDiv({ cls: "reading-capture-library-top" });
+    const workspace = shell.createDiv({ cls: "reading-capture-library-workspace" });
+    const primary = workspace.createDiv({ cls: "reading-capture-library-primary" });
+    const top = primary.createDiv({ cls: "reading-capture-library-top" });
     const title = top.createDiv({ cls: "reading-capture-library-title" });
     title.createEl("h1", { text: "知见录" });
     title.createEl("div", { cls: "reading-capture-library-subtitle", text: `${this.groups.length} 个文章组 · ${this.totalAnnotationCount()} 条阅读标注` });
@@ -734,7 +736,7 @@ class ReadingCaptureLibraryView extends ItemView {
         this.render();
       });
     }
-    this.renderMainLayout(shell);
+    this.renderMainLayout(primary, workspace);
   }
 
   applySearch() {
@@ -747,11 +749,11 @@ class ReadingCaptureLibraryView extends ItemView {
     this.render();
   }
 
-  renderMainLayout(shell) {
-    const layout = shell.createDiv({ cls: "reading-capture-library-layout" });
+  renderMainLayout(primary, workspace) {
+    const layout = primary.createDiv({ cls: "reading-capture-library-layout" });
     const filters = layout.createEl("aside", { cls: "reading-capture-library-filters" });
     const list = layout.createDiv({ cls: "reading-capture-library-list" });
-    const detail = layout.createEl("aside", { cls: "reading-capture-library-detail" });
+    const detail = workspace.createEl("aside", { cls: "reading-capture-library-detail" });
 
     this.renderFilters(filters);
     this.renderList(list);
@@ -804,7 +806,9 @@ class ReadingCaptureLibraryView extends ItemView {
     const section = container.createDiv({ cls: "reading-capture-library-filter-section" });
     section.createEl("h2", { text: title });
     for (const [value, label, count] of options) {
-      const button = section.createEl("button", { text: count === undefined ? label : `${label} ${count}` });
+      const button = section.createEl("button");
+      button.createEl("span", { cls: "reading-capture-library-filter-label", text: label });
+      if (count !== undefined) button.createEl("span", { cls: "reading-capture-library-filter-count", text: String(count) });
       if (activeValue === value) button.addClass("is-active");
       button.addEventListener("click", () => onSelect(value));
     }
@@ -906,20 +910,29 @@ class ReadingCaptureLibraryView extends ItemView {
     if (stats.status === "writing-ready") return "writing-ready";
     if (stats.status === "annotated" && stats.codexStatus === "pending_summary") return "pending-summary";
     if (stats.status === "annotated") return "annotated";
+    if (Number(stats.annotationCount || 0) > 0) return "annotated";
     return stats.status || "reading";
   }
 
   workflowStatusLabel(status) {
-    if (status === "unread") return "未读";
-    const option = WORKFLOW_STATUS_OPTIONS.find(([value]) => value === status);
-    return option ? option[1] : "阅读中";
+    const labels = {
+      unread: "未读",
+      reading: "阅读中",
+      annotated: "已标注",
+      "pending-summary": "待总结",
+      "writing-ready": "可写作",
+      used: "已使用",
+    };
+    return labels[status] || "阅读中";
+  }
+
+  workflowStatusClass(status) {
+    return `is-status-${String(status || "reading").replace(/[^a-z0-9-]/g, "-")}`;
   }
 
   renderList(list) {
     list.empty();
     const groups = this.visibleGroups();
-    const header = list.createDiv({ cls: "reading-capture-library-list-header" });
-    header.createEl("strong", { text: this.isLoading ? (groups.length ? `${groups.length} 个文章组 · 正在刷新` : "正在扫描文章...") : `${groups.length} 个文章组` });
     if (this.isLoading && !groups.length) {
       list.createDiv({ cls: "reading-capture-library-empty", text: "正在整理知见录，请稍等。" });
       return;
@@ -929,32 +942,54 @@ class ReadingCaptureLibraryView extends ItemView {
       return;
     }
     for (const group of groups) {
-      const card = list.createDiv({ cls: "reading-capture-library-card" });
+      const status = this.groupWorkflowStatus(group);
+      const statusClass = this.workflowStatusClass(status);
+      const card = list.createDiv({ cls: `reading-capture-library-card ${statusClass}` });
+      card.setAttr("role", "button");
+      card.setAttr("tabindex", "0");
       if (group.id === this.selectedGroupId) card.addClass("is-active");
       card.addEventListener("click", () => {
         this.selectedGroupId = group.id;
         this.render();
       });
+      card.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        this.selectedGroupId = group.id;
+        this.render();
+      });
 
-      const meta = card.createDiv({ cls: "reading-capture-library-card-meta" });
+      const top = card.createDiv({ cls: "reading-capture-library-card-top" });
+      const meta = top.createDiv({ cls: "reading-capture-library-card-meta" });
       meta.createEl("span", { text: group.sourceLabel });
       meta.createEl("span", { text: group.dateLabel });
       meta.createEl("span", { text: group.groupType === "single-file" ? "单文件" : "文章组" });
+      top.createEl("span", {
+        cls: `reading-capture-library-status-pill ${statusClass}`,
+        text: this.workflowStatusLabel(status),
+      });
       card.createEl("h2", { text: group.title });
       if (group.snippet) card.createEl("p", { text: group.snippet });
-      const versions = card.createDiv({ cls: "reading-capture-library-versions" });
-      for (const version of group.versions.slice(0, 4)) {
-        const pill = versions.createEl("span", { text: version.label });
-        this.plugin.decorateVersionPathElement(pill, version);
-      }
       const bottom = card.createDiv({ cls: "reading-capture-library-card-bottom" });
-      bottom.createEl("span", { text: `${group.stats.annotationCount} 条标注` });
-      bottom.createEl("span", { text: `${group.files.length} 个文件` });
+      const metrics = bottom.createDiv({ cls: "reading-capture-library-card-metrics" });
+      metrics.createEl("span", { text: `${group.stats.annotationCount} 条标注` });
+      metrics.createEl("span", { text: `${group.files.length} 个文件` });
       const open = bottom.createEl("button", { text: "阅读" });
       open.addEventListener("click", async (event) => {
         event.stopPropagation();
         await this.openBestVersion(group);
       });
+    }
+    if (this.isLoading) this.renderLoadingCards(list);
+  }
+
+  renderLoadingCards(list) {
+    for (let index = 0; index < 2; index += 1) {
+      const card = list.createDiv({ cls: "reading-capture-library-card reading-capture-library-skeleton" });
+      card.createDiv({ cls: "reading-capture-skeleton-line is-short" });
+      card.createDiv({ cls: "reading-capture-skeleton-line is-title" });
+      card.createDiv({ cls: "reading-capture-skeleton-line" });
+      card.createDiv({ cls: "reading-capture-skeleton-line is-bottom" });
     }
   }
 
@@ -966,16 +1001,29 @@ class ReadingCaptureLibraryView extends ItemView {
       return;
     }
 
-    detail.createEl("div", { cls: "reading-capture-library-detail-kicker", text: selected.sourceLabel });
-    detail.createEl("h2", { text: selected.title });
-    detail.createEl("p", { text: selected.groupPath });
-    const stats = detail.createDiv({ cls: "reading-capture-library-stats" });
+    const status = this.groupWorkflowStatus(selected);
+    const statusClass = this.workflowStatusClass(status);
+    detail.addClass(statusClass);
+    const detailHeader = detail.createDiv({ cls: "reading-capture-library-detail-header" });
+    detailHeader.createEl("div", { cls: "reading-capture-library-detail-kicker", text: `${String(selected.sourceLabel || "").toUpperCase()} / ${selected.dateLabel}` });
+    const titleRow = detailHeader.createDiv({ cls: "reading-capture-library-detail-title-row" });
+    titleRow.createEl("h2", { text: selected.title });
+    titleRow.createEl("span", {
+      cls: `reading-capture-library-detail-status ${statusClass}`,
+      text: this.workflowStatusLabel(status),
+    });
+    detailHeader.createEl("p", { cls: "reading-capture-library-detail-path", text: selected.groupPath });
+
+    const signalSection = detail.createDiv({ cls: "reading-capture-library-detail-section" });
+    signalSection.createEl("h3", { text: "信号" });
+    const stats = signalSection.createDiv({ cls: "reading-capture-library-stats" });
     stats.createEl("span", { text: `标注 ${selected.stats.annotationCount}` });
     stats.createEl("span", { text: `选题 ${selected.stats.topicCount}` });
     stats.createEl("span", { text: `待核查 ${selected.stats.factCount}` });
-    stats.createEl("span", { text: this.workflowStatusLabel(this.groupWorkflowStatus(selected)) });
 
-    const actions = detail.createDiv({ cls: "reading-capture-library-detail-actions" });
+    const actionSection = detail.createDiv({ cls: "reading-capture-library-detail-section" });
+    actionSection.createEl("h3", { text: "动作" });
+    const actions = actionSection.createDiv({ cls: "reading-capture-library-detail-actions" });
     const openBest = actions.createEl("button", { text: "打开最佳版本" });
     openBest.addClass("mod-cta");
     openBest.addEventListener("click", () => this.openBestVersion(selected));
@@ -991,8 +1039,12 @@ class ReadingCaptureLibraryView extends ItemView {
     const versions = detail.createDiv({ cls: "reading-capture-library-version-list" });
     for (const version of selected.versions) {
       const row = versions.createDiv({ cls: "reading-capture-library-version-row" });
+      const isBest = selected.bestVersion && version.path === selected.bestVersion.path;
+      if (isBest) row.addClass("is-best");
       this.plugin.decorateVersionPathElement(row, version);
-      row.createEl("span", { text: version.label });
+      const versionTop = row.createDiv({ cls: "reading-capture-library-version-top" });
+      versionTop.createEl("span", { text: version.label });
+      if (isBest) versionTop.createEl("span", { cls: "reading-capture-library-version-best", text: "最佳" });
       const name = row.createEl("strong", { text: version.name });
       this.plugin.decorateVersionPathElement(name, version);
       const button = row.createEl("button", { text: version.kind === "markdown" ? "阅读" : "打开" });
