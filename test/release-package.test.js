@@ -1,8 +1,10 @@
 const assert = require("assert");
+const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
 const root = path.join(__dirname, "..");
+const runtimeFiles = ["main.js", "manifest.json", "styles.css", "reading-core.js"];
 
 function readJson(relativePath) {
   return JSON.parse(fs.readFileSync(path.join(root, relativePath), "utf8"));
@@ -22,8 +24,49 @@ function testReleaseMetadata() {
 function testPackageScriptDeclaresRuntimeFiles() {
   const script = fs.readFileSync(path.join(root, "scripts/package-plugin.js"), "utf8");
 
-  for (const fileName of ["main.js", "manifest.json", "styles.css", "reading-core.js"]) {
+  for (const fileName of runtimeFiles) {
     assert.match(script, new RegExp(JSON.stringify(fileName).slice(1, -1)));
+  }
+}
+
+function testPackagedRuntimeFilesExist() {
+  const packageDir = path.join(root, "dist/reading-capture");
+  assert.ok(fs.existsSync(packageDir), "dist/reading-capture should exist after packaging");
+
+  for (const fileName of runtimeFiles) {
+    const filePath = path.join(packageDir, fileName);
+    assert.ok(fs.existsSync(filePath), `dist package should include ${fileName}`);
+    assert.ok(fs.statSync(filePath).size > 0, `${fileName} should not be empty`);
+  }
+
+  const manifest = readJson("plugin/manifest.json");
+  const packagedManifest = JSON.parse(fs.readFileSync(path.join(packageDir, "manifest.json"), "utf8"));
+  assert.strictEqual(packagedManifest.id, manifest.id);
+  assert.strictEqual(packagedManifest.version, manifest.version);
+}
+
+function testZipUsesExpectedFolderStructure() {
+  const zipPath = path.join(root, "dist/reading-capture.zip");
+  assert.ok(fs.existsSync(zipPath), "dist/reading-capture.zip should exist after packaging");
+  assert.ok(fs.statSync(zipPath).size > 0, "release zip should not be empty");
+
+  let entries;
+  try {
+    entries = execFileSync("unzip", ["-Z1", zipPath], { encoding: "utf8" })
+      .split(/\r?\n/)
+      .filter(Boolean);
+  } catch (error) {
+    throw new Error("Could not inspect release zip. Make sure the unzip command is available.");
+  }
+
+  assert.ok(entries.length > 0, "release zip should contain files");
+  for (const entry of entries) {
+    assert.match(entry, /^reading-capture\//, `zip entry should live under reading-capture/: ${entry}`);
+    assert.doesNotMatch(entry, /^reading-capture\/reading-capture\//, "zip should not contain a nested reading-capture folder");
+    assert.doesNotMatch(entry, /^dist\//, "zip should not include the dist folder itself");
+  }
+  for (const fileName of runtimeFiles) {
+    assert.ok(entries.includes(`reading-capture/${fileName}`), `zip should include reading-capture/${fileName}`);
   }
 }
 
@@ -127,6 +170,8 @@ function testReaderAnnotationTypesUseSharedPalette() {
 
 testReleaseMetadata();
 testPackageScriptDeclaresRuntimeFiles();
+testPackagedRuntimeFilesExist();
+testZipUsesExpectedFolderStructure();
 testPackagedMainIsBundled();
 testLibraryFiltersCanScroll();
 testReaderToolbarIsIntegratedWithWorkspace();

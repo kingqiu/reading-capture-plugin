@@ -348,7 +348,7 @@ function testRecordTargetAndHighlight() {
   assert.strictEqual(target.heading, "标注记录");
   assert.strictEqual(target.type, "highlight");
   target = plugin.resolveRecordTarget("topic", "note");
-  assert.strictEqual(target.heading, "可写选题");
+  assert.strictEqual(target.heading, "创作灵感");
   assert.strictEqual(target.type, "topic");
   target = plugin.resolveRecordTarget("fact-check", "note");
   assert.strictEqual(target.heading, "事实待核查");
@@ -452,7 +452,7 @@ topic idea
   assert.strictEqual(annotations[0].note, "note one");
   assert.strictEqual(plugin.annotationLabel(annotations[0]), "标注想法");
   assert.strictEqual(plugin.typeClass(annotations[1]), "is-topic");
-  assert.strictEqual(plugin.annotationLabel(annotations[1]), "可写选题");
+  assert.strictEqual(plugin.annotationLabel(annotations[1]), "创作灵感");
   assert.strictEqual(plugin.shortTime(annotations[1].time), "15:00");
   assert.strictEqual(plugin.annotationMatchesFilter(annotations[0], "thought"), true);
   assert.strictEqual(plugin.annotationMatchesFilter(annotations[1], "topic"), true);
@@ -1014,7 +1014,7 @@ status: reading
   assert.strictEqual(view.activeAnnotationId, "ann_topic");
   let texts = fakeElementTexts(view.containerEl.children[1]);
   assert.ok(texts.includes("阅读沉淀"));
-  assert.ok(texts.includes("可写选题"));
+  assert.ok(texts.includes("创作灵感"));
   assert.ok(texts.includes("事实待核查"));
   assert.ok(texts.includes("标注想法"));
   assert.ok(texts.includes("当前记录"));

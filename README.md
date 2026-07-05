@@ -2,9 +2,9 @@
 
 [简体中文](README.zh-CN.md) | English
 
-Reading Capture is an Obsidian plugin for people who save articles, read deeply, and turn reading into notes, writing ideas, and follow-up tasks.
+Reading Capture is an Obsidian plugin for people who save articles, read deeply, and turn reading into notes, creative ideas, and follow-up tasks.
 
-It gives you a focused reading space inside Obsidian, a library view for browsing saved articles, and a separate reading record for highlights, thoughts, writing topics, and fact-check items.
+It gives you a focused reading space inside Obsidian, a library view for browsing saved articles, and a separate reading record for highlights, thoughts, creative ideas, and fact-check items.
 
 Version: `0.4.3`
 
@@ -16,11 +16,39 @@ Version: `0.4.3`
 - Highlight passages and save your thoughts without turning the original article into a messy note.
 - Save three kinds of reading records:
   - general thoughts
-  - writing-topic ideas
+  - creative ideas
   - facts or claims to check later
 - View all records for an article in a dedicated reading-record page.
 - Jump from a saved record back to the original article position when the plugin can locate it.
 - Copy article paths, quotes, and thoughts when you need to reuse them.
+
+## Screenshots
+
+The screenshots below are layout-matched anonymous demo images. They show the current product flow without exposing any real vault content.
+
+### Article Library
+
+Browse saved articles, reading status, file versions, highlights, and creative ideas in one place.
+
+![Article library preview](docs/assets/screenshots/library.svg)
+
+### Reader And Capture
+
+Read in a quieter view and save highlights, thoughts, creative ideas, and fact-check items.
+
+![Reader preview](docs/assets/screenshots/reader.svg)
+
+### Reading Records
+
+Review all saved records for one article, copy useful material, or jump back to the original article.
+
+![Reading record preview](docs/assets/screenshots/record.svg)
+
+### Install And Settings
+
+For manual installation, the plugin folder should directly contain `main.js`, `manifest.json`, `styles.css`, and `reading-core.js`.
+
+![Install and settings preview](docs/assets/screenshots/settings.svg)
 
 ## Installation
 
@@ -63,6 +91,38 @@ Your Vault/.obsidian/plugins/reading-capture/
 4. Restart Obsidian, or disable and re-enable the plugin.
 
 Your reading records are stored in your vault as Markdown files. Replacing the plugin files should not delete your reading records.
+
+## Manual Install Troubleshooting
+
+### Reading Capture does not appear in Obsidian
+
+Check the folder location first. The final folder should be:
+
+```text
+Your Vault/.obsidian/plugins/reading-capture/
+```
+
+Inside that folder, you should directly see `main.js`, `manifest.json`, `styles.css`, and `reading-core.js`.
+
+If you see this instead, the folder is nested one level too deep:
+
+```text
+reading-capture/
+└── reading-capture/
+    ├── main.js
+    ├── manifest.json
+    └── styles.css
+```
+
+Move the inner `reading-capture` folder into `.obsidian/plugins/`.
+
+### The GitHub source code zip does not work
+
+Download `reading-capture.zip` from the GitHub Release page. Do not use GitHub's `Source code.zip` for normal installation. The source archive is meant for development and is not the ready-to-install plugin package.
+
+### The old interface still appears after updating
+
+Restart Obsidian, or disable and re-enable Reading Capture from `Settings` -> `Community plugins`.
 
 ## First-Time Setup
 
@@ -147,9 +207,9 @@ In the reader view:
 
 You can also save a thought without selecting text by using `记录当前想法`.
 
-### Save a Writing Topic
+### Save a Creative Idea
 
-Use `加入可写选题` when a passage or thought might become a future article idea.
+Use `加入创作灵感` when a passage or thought might become a future article, research question, or creative work.
 
 ### Save a Fact-Check Item
 
@@ -174,11 +234,12 @@ Open Obsidian's command palette and search for `Reading Capture`.
 Common commands:
 
 - `Reading Capture: 打开知见录`
+- `Reading Capture: 打开创作灵感`
 - `Reading Capture: 打开阅读器视图`
 - `Reading Capture: 标注选中文本并记录想法`
 - `Reading Capture: 快速高亮选中文本`
 - `Reading Capture: 记录当前想法`
-- `Reading Capture: 加入可写选题`
+- `Reading Capture: 加入创作灵感`
 - `Reading Capture: 加入事实待核查`
 - `Reading Capture: 打开当前文件的阅读记录`
 - `Reading Capture: 标记当前阅读为已完成`
@@ -188,7 +249,7 @@ Common commands:
 
 - Reading Capture works inside your Obsidian vault.
 - The plugin does not send your notes or articles to an online service.
-- AI topic mining is not built into this plugin. If you use AI workflows, they can read the structured Markdown records later.
+- AI topic mining is not built into this plugin and is not required. `创作灵感` only uses ideas you save manually while reading. If you use external AI workflows later, they can read the structured Markdown records.
 - Jumping back to the exact original position works best when the quoted text still exists in the article.
 - If you move article files after capturing records, you may need to rebuild the index or update paths.
 

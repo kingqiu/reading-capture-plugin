@@ -5,6 +5,8 @@ const READER_VIEW_TYPE = "reading-capture-reader";
 const ARTICLE_LIBRARY_VIEW_TYPE = "reading-capture-library";
 const TOPIC_POOL_VIEW_TYPE = "reading-capture-topic-pool";
 const RECORD_VIEW_TYPE = "reading-capture-record";
+const CREATIVE_IDEA_SECTION = "创作灵感";
+const LEGACY_TOPIC_SECTION = "可写选题";
 
 const { KNOWN_SOURCE_ROOTS, basename, extname, normalizeVaultPath, rootSlug, sourceKindFromPath, titleFromPath } = core;
 
@@ -53,7 +55,7 @@ class TextInputModal extends Modal {
       typeSelect = typeRow.createEl("select", { cls: "reading-capture-type-select" });
       [
         ["thought", "普通想法"],
-        ["topic", "可写选题"],
+        ["topic", CREATIVE_IDEA_SECTION],
         ["fact-check", "事实待核查"],
       ].forEach(([value, label]) => {
         typeSelect.createEl("option", { value, text: label });
@@ -637,7 +639,7 @@ class ReadingCaptureReaderView extends ItemView {
       ["all", "全部"],
       ["thought", "想法"],
       ["image", "图片"],
-      ["topic", "选题"],
+      ["topic", "灵感"],
       ["fact", "待核查"],
       ["unlocated", "未定位"],
     ];
@@ -906,7 +908,7 @@ class ReadingCaptureLibraryView extends ItemView {
       ["all", "全部", groups.length],
       ["annotated", "有标注", count((group) => group.stats.annotationCount > 0)],
       ["unannotated", "无标注", count((group) => group.stats.annotationCount <= 0)],
-      ["topic", "有选题", count((group) => group.stats.topicCount > 0)],
+      ["topic", "有灵感", count((group) => group.stats.topicCount > 0)],
       ["fact", "待核查", count((group) => group.stats.factCount > 0)],
       ["has-pdf", "有 PDF", count((group) => this.groupHasPdf(group))],
       ["has-zh", "有中文", count((group) => this.groupHasChineseVersion(group))],
@@ -1094,7 +1096,7 @@ class ReadingCaptureLibraryView extends ItemView {
     signalSection.createEl("h3", { text: "信号" });
     const stats = signalSection.createDiv({ cls: "reading-capture-library-stats" });
     stats.createEl("span", { text: `标注 ${selected.stats.annotationCount}` });
-    stats.createEl("span", { text: `选题 ${selected.stats.topicCount}` });
+    stats.createEl("span", { text: `灵感 ${selected.stats.topicCount}` });
     stats.createEl("span", { text: `待核查 ${selected.stats.factCount}` });
 
     const actionSection = detail.createDiv({ cls: "reading-capture-library-detail-section" });
@@ -1224,7 +1226,7 @@ class ReadingCaptureRecordView extends ItemView {
 
   recordGroupDefinitions() {
     return [
-      { key: "topic", label: "可写选题", cls: "is-topic" },
+      { key: "topic", label: CREATIVE_IDEA_SECTION, cls: "is-topic" },
       { key: "fact", label: "事实待核查", cls: "is-fact" },
       { key: "thought", label: "标注想法", cls: "is-thought" },
       { key: "image", label: "图片", cls: "is-image" },
@@ -1242,7 +1244,7 @@ class ReadingCaptureRecordView extends ItemView {
   recordSummaryText() {
     const counts = this.recordCounts();
     const parts = [`${this.items.length} 条记录`];
-    if (counts.topic) parts.push(`${counts.topic} 个选题`);
+    if (counts.topic) parts.push(`${counts.topic} 个灵感`);
     if (counts.fact) parts.push(`${counts.fact} 个待核查`);
     if (counts.image) parts.push(`${counts.image} 张图片`);
     return parts.join(" · ");
@@ -1351,7 +1353,7 @@ class ReadingCaptureRecordView extends ItemView {
     if (!groups.length) {
       const empty = list.createDiv({ cls: "reading-capture-record-empty-card" });
       empty.createEl("strong", { text: "还没有记录" });
-      empty.createEl("span", { text: "可以回到原文，选中文字后记录想法、选题或待核查事实。" });
+      empty.createEl("span", { text: "可以回到原文，选中文字后记录想法、创作灵感或待核查事实。" });
       return;
     }
     for (const group of groups) {
@@ -1462,7 +1464,7 @@ class ReadingCaptureTopicPoolView extends ItemView {
   }
 
   getDisplayText() {
-    return "选题池";
+    return CREATIVE_IDEA_SECTION;
   }
 
   getIcon() {
@@ -1492,8 +1494,8 @@ class ReadingCaptureTopicPoolView extends ItemView {
     const shell = container.createDiv({ cls: "reading-capture-topic-shell" });
     const top = shell.createDiv({ cls: "reading-capture-library-top" });
     const title = top.createDiv({ cls: "reading-capture-library-title" });
-    title.createEl("h1", { text: "选题池" });
-    title.createEl("div", { cls: "reading-capture-library-subtitle", text: this.isLoading ? "正在整理可写选题..." : `${this.items.length} 个可写选题` });
+    title.createEl("h1", { text: CREATIVE_IDEA_SECTION });
+    title.createEl("div", { cls: "reading-capture-library-subtitle", text: this.isLoading ? "正在整理创作灵感..." : `${this.items.length} 个创作灵感` });
     const tools = top.createDiv({ cls: "reading-capture-library-tools" });
     const refresh = tools.createEl("button", { text: this.isLoading ? "刷新中..." : "刷新" });
     refresh.disabled = this.isLoading;
@@ -1501,11 +1503,11 @@ class ReadingCaptureTopicPoolView extends ItemView {
 
     const list = shell.createDiv({ cls: "reading-capture-topic-list" });
     if (this.isLoading && !this.items.length) {
-      list.createDiv({ cls: "reading-capture-library-empty", text: "正在整理选题池，请稍等。" });
+      list.createDiv({ cls: "reading-capture-library-empty", text: "正在整理创作灵感，请稍等。" });
       return;
     }
     if (!this.items.length) {
-      list.createDiv({ cls: "reading-capture-library-empty", text: "还没有可写选题。你可以在阅读器里把想法加入“可写选题”。" });
+      list.createDiv({ cls: "reading-capture-library-empty", text: "还没有创作灵感。你可以在阅读器里把值得继续写、继续研究的想法加入“创作灵感”。" });
       return;
     }
 
@@ -1514,7 +1516,7 @@ class ReadingCaptureTopicPoolView extends ItemView {
       const meta = card.createDiv({ cls: "reading-capture-library-card-meta" });
       meta.createEl("span", { text: item.sourceRoot || "source" });
       if (item.time) meta.createEl("span", { text: item.time });
-      card.createEl("h2", { text: item.note || item.quote || "未命名选题" });
+      card.createEl("h2", { text: item.note || item.quote || "未命名灵感" });
       if (item.quote) card.createEl("blockquote", { text: item.quote });
       card.createEl("p", { text: item.sourceTitle || item.sourcePath });
       const actions = card.createDiv({ cls: "reading-capture-library-detail-actions" });
@@ -1578,7 +1580,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
 
     this.addCommand({
       id: "open-topic-pool",
-      name: "打开选题池",
+      name: "打开创作灵感",
       callback: async () => this.openTopicPool(),
     });
 
@@ -1630,7 +1632,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
 
     this.addCommand({
       id: "add-writing-topic",
-      name: "加入可写选题",
+      name: "加入创作灵感",
       callback: async () => this.captureTypedEntryFromActiveContext("topic"),
     });
 
@@ -1847,8 +1849,8 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     const isTopic = recordType === "topic";
     new TextInputModal(
       this.app,
-      isTopic ? "加入可写选题" : "加入事实待核查",
-      isTopic ? "写下这个选题或补充说明。" : "写下需要核查的问题或说明。",
+      isTopic ? "加入创作灵感" : "加入事实待核查",
+      isTopic ? "写下这个灵感、问题或补充说明。" : "写下需要核查的问题或说明。",
       async (note) => {
         const finalNote = note || selectedText;
         if (!finalNote && !selectedText) {
@@ -1859,7 +1861,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
           selectedText,
           note: finalNote,
           type: recordType,
-          heading: isTopic ? "可写选题" : "事实待核查",
+          heading: isTopic ? CREATIVE_IDEA_SECTION : "事实待核查",
         });
         if (afterSave) await afterSave();
       },
@@ -1887,7 +1889,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
 
   resolveRecordTarget(recordType, note) {
     if (recordType === "topic") {
-      return { heading: "可写选题", type: "topic" };
+      return { heading: CREATIVE_IDEA_SECTION, type: "topic" };
     }
     if (recordType === "fact-check") {
       return { heading: "事实待核查", type: "fact-check" };
@@ -2572,7 +2574,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
           });
         }
       } catch (error) {
-        // A missing or malformed reading note should not block the topic pool.
+        // A missing or malformed reading note should not block the creative ideas view.
       }
     }
     return items.sort((left, right) => String(right.time || "").localeCompare(String(left.time || "")));
@@ -2787,8 +2789,8 @@ module.exports = class ReadingCapturePlugin extends Plugin {
 
   annotationLabel(item) {
     if (!item) return "记录";
-    if (item.mediaType === "image") return item.type === "topic" ? "图片选题" : item.type === "fact-check" ? "图片待核查" : "图片想法";
-    if (item.section === "可写选题" || item.type === "topic") return "可写选题";
+    if (item.mediaType === "image") return item.type === "topic" ? "图片灵感" : item.type === "fact-check" ? "图片待核查" : "图片想法";
+    if (this.isTopicSection(item.section) || item.type === "topic") return CREATIVE_IDEA_SECTION;
     if (item.section === "事实待核查" || item.type === "fact-check") return "事实待核查";
     if (item.type === "idea" || !item.quote) return "想法";
     if (item.note) return "标注想法";
@@ -2798,7 +2800,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
   typeClass(item) {
     if (!item) return "is-thought";
     if (item.mediaType === "image") return "is-image";
-    if (item.section === "可写选题" || item.type === "topic") return "is-topic";
+    if (this.isTopicSection(item.section) || item.type === "topic") return "is-topic";
     if (item.section === "事实待核查" || item.type === "fact-check") return "is-fact";
     if (!item.quote || item.type === "idea") return "is-idea";
     return "is-thought";
@@ -2809,10 +2811,14 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     if (!filter || filter === "all") return true;
     if (filter === "unlocated") return !item.located && !!(item.quote || item.mediaType);
     if (filter === "image") return item.mediaType === "image";
-    if (filter === "topic") return item.section === "可写选题" || item.type === "topic";
+    if (filter === "topic") return this.isTopicSection(item.section) || item.type === "topic";
     if (filter === "fact") return item.section === "事实待核查" || item.type === "fact-check";
-    if (filter === "thought") return item.mediaType !== "image" && !(item.section === "可写选题" || item.type === "topic") && !(item.section === "事实待核查" || item.type === "fact-check");
+    if (filter === "thought") return item.mediaType !== "image" && !(this.isTopicSection(item.section) || item.type === "topic") && !(item.section === "事实待核查" || item.type === "fact-check");
     return true;
+  }
+
+  isTopicSection(section) {
+    return section === CREATIVE_IDEA_SECTION || section === LEGACY_TOPIC_SECTION;
   }
 
   shortTime(value) {

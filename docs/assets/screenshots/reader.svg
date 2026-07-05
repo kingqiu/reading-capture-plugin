@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="960" viewBox="0 0 1600 960" role="img" aria-label="Reading Capture reader demo screenshot">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#08120d"/><stop offset="1" stop-color="#050806"/></linearGradient>
+    <linearGradient id="article" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#101d15"/><stop offset="1" stop-color="#08100b"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000" flood-opacity=".35"/></filter>
+    <style>
+      .ui { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+      .serif { font-family: Georgia, "Times New Roman", serif; }
+      .title { fill:#f2efe3; font-size:46px; font-weight:800; }
+      .h2 { fill:#f2efe3; font-size:28px; font-weight:800; }
+      .body { fill:#d9ddd2; font-size:23px; line-height:1.6; }
+      .muted { fill:#91a092; font-size:16px; }
+      .label { fill:#8ea091; font-size:14px; font-weight:800; letter-spacing:.06em; }
+      .button { fill:#f3f5ec; font-size:16px; font-weight:800; }
+      .chip { fill:#cfd8cf; font-size:14px; font-weight:800; }
+      .panel { fill:#08100b; stroke:#26382b; stroke-width:1.3; }
+    </style>
+  </defs>
+  <rect width="1600" height="960" fill="#111"/>
+  <rect x="18" y="18" width="1564" height="924" rx="20" fill="url(#bg)" filter="url(#shadow)"/>
+  <rect x="18" y="18" width="1564" height="44" rx="20" fill="#242625"/>
+  <circle cx="42" cy="40" r="7" fill="#ff6b5f"/><circle cx="64" cy="40" r="7" fill="#f6c351"/><circle cx="86" cy="40" r="7" fill="#55c36a"/>
+  <rect x="114" y="16" width="245" height="48" rx="10" fill="#121816" stroke="#334039"/><text class="ui" x="146" y="46" fill="#e7ece4" font-size="17">Reading Capture Reader</text>
+  <rect x="18" y="62" width="48" height="880" fill="#151a18"/>
+  <text class="ui muted" x="35" y="112" text-anchor="middle">↩</text><text class="ui muted" x="35" y="158" text-anchor="middle">⌕</text><text class="ui muted" x="35" y="204" text-anchor="middle">▧</text><text class="ui muted" x="35" y="250" text-anchor="middle">☷</text>
+
+  <rect x="66" y="86" width="1060" height="70" fill="#08100b" stroke="#223226"/>
+  <text class="ui label" x="106" y="118">READING CAPTURE</text>
+  <text class="ui" x="106" y="142" fill="#f0eee4" font-size="18" font-weight="800">demo_article_zh_enriched</text>
+  <rect x="752" y="104" width="100" height="36" rx="9" fill="#0e1711" stroke="#2c3a2f"/><text class="ui button" x="802" y="127" text-anchor="middle">记录想法</text>
+  <rect x="866" y="104" width="128" height="36" rx="9" fill="#4b694d"/><text class="ui button" x="930" y="127" text-anchor="middle">记录选中内容</text>
+  <rect x="1008" y="104" width="94" height="36" rx="9" fill="#0e1711" stroke="#2c3a2f"/><text class="ui button" x="1055" y="127" text-anchor="middle">隐藏标注</text>
+
+  <rect x="1126" y="86" width="408" height="790" fill="#07100b" stroke="#203126"/>
+  <text class="ui h2" x="1162" y="134">阅读标注</text>
+  <text class="ui muted" x="1162" y="160">3 条记录</text>
+  <rect x="1162" y="190" width="58" height="34" rx="8" fill="#18203a" stroke="#4f7cff"/><text class="ui chip" x="1179" y="212">全部</text>
+  <rect x="1232" y="190" width="70" height="34" rx="8" fill="#101912" stroke="#29392d"/><text class="ui chip" x="1248" y="212">想法 2</text>
+  <rect x="1314" y="190" width="82" height="34" rx="8" fill="#101912" stroke="#29392d"/><text class="ui chip" x="1330" y="212">灵感 1</text>
+
+  <g transform="translate(1162 254)">
+    <rect width="326" height="142" rx="12" fill="#0c1610" stroke="#4f7cff"/>
+    <rect x="18" y="18" width="74" height="24" rx="7" fill="#17315f"/><text class="ui chip" x="32" y="35" fill="#7da2ff">标注想法</text>
+    <text class="ui muted" x="266" y="36">10:24</text>
+    <rect x="18" y="58" width="3" height="50" fill="#4f7cff"/>
+    <text class="ui" x="34" y="72" fill="#dbe2d8" font-size="15">“AI is useful when it becomes</text>
+    <text class="ui" x="34" y="94" fill="#dbe2d8" font-size="15">part of the workflow.”</text>
+    <text class="ui muted" x="34" y="122">这个判断可以展开成方法论。</text>
+  </g>
+  <g transform="translate(1162 416)">
+    <rect width="326" height="126" rx="12" fill="#0c1610" stroke="#56c46f"/>
+    <rect x="18" y="18" width="74" height="24" rx="7" fill="#17371d"/><text class="ui chip" x="32" y="35" fill="#8eea95">创作灵感</text>
+    <text class="ui muted" x="266" y="36">09:58</text>
+    <text class="ui" x="18" y="70" fill="#e7ece3" font-size="16" font-weight="700">把阅读变成稳定创作系统</text>
+    <text class="ui muted" x="18" y="100">适合写成一篇工作流文章。</text>
+  </g>
+  <rect x="1162" y="766" width="152" height="44" rx="10" fill="#0e1711" stroke="#2c3a2f"/><text class="ui button" x="1238" y="794" text-anchor="middle">打开阅读记录</text>
+  <rect x="1330" y="766" width="158" height="44" rx="10" fill="#0e1711" stroke="#2c3a2f"/><text class="ui button" x="1409" y="794" text-anchor="middle">复制文章路径</text>
+
+  <rect x="116" y="184" width="930" height="620" rx="16" fill="url(#article)" stroke="#233226"/>
+  <text class="serif title" x="210" y="284">Building Better Reading Habits</text>
+  <text class="serif body" x="210" y="356">A good reading system does not start with collecting more.</text>
+  <text class="serif body" x="210" y="396">It starts with deciding what is worth returning to.</text>
+  <line x1="210" y1="454" x2="840" y2="454" stroke="#2a392f"/>
+  <text class="serif h2" x="210" y="524">1. Capture the moment of judgment</text>
+  <text class="serif body" x="210" y="584">The most valuable part of reading is often the small moment</text>
+  <text class="serif body" x="210" y="624">when a sentence becomes useful for your own work.</text>
+  <rect x="210" y="674" width="630" height="56" rx="8" fill="#0b1b28" stroke="#4f7cff"/>
+  <text class="serif body" x="234" y="710">“Save the idea while it still has heat.”</text>
+  <rect x="116" y="840" width="930" height="44" fill="#07100b" stroke="#213126"/>
+  <text class="ui muted" x="154" y="868">字数 3,240</text><text class="ui muted" x="300" y="868">预计阅读 12 分钟</text>
+  <rect x="684" y="858" width="210" height="5" rx="3" fill="#1d2b21"/><rect x="684" y="858" width="78" height="5" rx="3" fill="#8ad28a"/>
+  <text class="ui muted" x="912" y="868">37%</text>
+</svg>

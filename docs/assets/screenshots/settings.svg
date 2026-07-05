@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="960" viewBox="0 0 1600 960" role="img" aria-label="Reading Capture settings and installation demo screenshot">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#07100b"/><stop offset="1" stop-color="#050806"/></linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000" flood-opacity=".35"/></filter>
+    <style>
+      .ui { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+      .title { fill:#f2efe4; font-size:34px; font-weight:850; }
+      .h2 { fill:#f2efe4; font-size:24px; font-weight:850; }
+      .text { fill:#dfe5d9; font-size:18px; }
+      .muted { fill:#90a091; font-size:15px; }
+      .label { fill:#8ea091; font-size:14px; font-weight:800; letter-spacing:.05em; }
+      .button { fill:#f3f5ec; font-size:16px; font-weight:800; }
+      .code { fill:#dfe5d9; font-size:17px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      .panel { fill:#08100b; stroke:#243527; stroke-width:1.3; }
+    </style>
+  </defs>
+  <rect width="1600" height="960" fill="#111"/>
+  <rect x="18" y="18" width="1564" height="924" rx="20" fill="url(#bg)" filter="url(#shadow)"/>
+  <rect x="18" y="18" width="1564" height="44" rx="20" fill="#242625"/>
+  <circle cx="42" cy="40" r="7" fill="#ff6b5f"/><circle cx="64" cy="40" r="7" fill="#f6c351"/><circle cx="86" cy="40" r="7" fill="#55c36a"/>
+  <rect x="18" y="62" width="48" height="880" fill="#151a18"/>
+  <text class="ui muted" x="35" y="112" text-anchor="middle">⚙</text><text class="ui muted" x="35" y="158" text-anchor="middle">⌕</text><text class="ui muted" x="35" y="204" text-anchor="middle">▧</text>
+
+  <text class="ui title" x="110" y="122">Manual install and setup</text>
+  <text class="ui muted" x="110" y="154">A clean demo for non-technical users. No private vault data is shown.</text>
+
+  <rect class="panel" x="110" y="196" width="650" height="650" rx="18"/>
+  <text class="ui h2" x="146" y="246">1. Put the plugin in the right folder</text>
+  <text class="ui muted" x="146" y="280">The final folder should contain the plugin files directly.</text>
+  <rect x="146" y="318" width="570" height="268" rx="12" fill="#0c1610" stroke="#2b3b2f"/>
+  <text class="ui code" x="174" y="360">Your Vault/</text>
+  <text class="ui code" x="204" y="398">.obsidian/</text>
+  <text class="ui code" x="234" y="436">plugins/</text>
+  <text class="ui code" x="264" y="474" fill="#f4c24d">reading-capture/</text>
+  <text class="ui code" x="304" y="512">main.js</text>
+  <text class="ui code" x="304" y="546">manifest.json</text>
+  <text class="ui code" x="304" y="580">styles.css</text>
+  <text class="ui code" x="304" y="614">reading-core.js</text>
+  <rect x="146" y="630" width="570" height="68" rx="12" fill="#25180f" stroke="#f0a33a"/>
+  <text class="ui text" x="174" y="660" fill="#ffc46b">Avoid nested folders:</text>
+  <text class="ui muted" x="174" y="686">reading-capture/reading-capture/main.js will not load correctly.</text>
+  <rect x="146" y="734" width="206" height="48" rx="10" fill="#4b694d"/><text class="ui button" x="249" y="764" text-anchor="middle">Download release zip</text>
+
+  <rect class="panel" x="810" y="196" width="650" height="650" rx="18"/>
+  <text class="ui h2" x="846" y="246">2. Configure Reading Capture</text>
+  <text class="ui muted" x="846" y="280">Open Obsidian settings, enable the plugin, then add article folders.</text>
+  <rect x="846" y="318" width="570" height="74" rx="12" fill="#0c1610" stroke="#2b3b2f"/>
+  <text class="ui label" x="874" y="350">Community plugins</text>
+  <text class="ui text" x="874" y="376">Reading Capture</text>
+  <rect x="1284" y="338" width="92" height="34" rx="17" fill="#4b694d"/><circle cx="1356" cy="355" r="14" fill="#f2efe4"/>
+  <rect x="846" y="432" width="570" height="246" rx="12" fill="#0c1610" stroke="#2b3b2f"/>
+  <text class="ui label" x="874" y="466">知见录扫描目录</text>
+  <text class="ui muted" x="874" y="496">Add one folder per line. Use paths relative to your vault.</text>
+  <rect x="874" y="526" width="514" height="116" rx="10" fill="#07100b" stroke="#304335"/>
+  <text class="ui code" x="900" y="562">Articles</text>
+  <text class="ui code" x="900" y="596">Reading</text>
+  <text class="ui code" x="900" y="630">Research/saved-articles</text>
+  <rect x="846" y="722" width="164" height="48" rx="10" fill="#4b694d"/><text class="ui button" x="928" y="752" text-anchor="middle">打开知见录</text>
+  <rect x="1024" y="722" width="164" height="48" rx="10" fill="#0d1711" stroke="#2b3b2f"/><text class="ui button" x="1106" y="752" text-anchor="middle">重新扫描</text>
+</svg>

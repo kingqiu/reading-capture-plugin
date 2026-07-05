@@ -1,0 +1,278 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="960" viewBox="0 0 1600 960" role="img" aria-label="Reading Capture article library demo screenshot">
+  <defs>
+    <linearGradient id="appBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#070907"/>
+      <stop offset=".55" stop-color="#0c100d"/>
+      <stop offset="1" stop-color="#111810"/>
+    </linearGradient>
+    <radialGradient id="washA" cx="78%" cy="4%" r="42%">
+      <stop offset="0" stop-color="#41523f" stop-opacity=".24"/>
+      <stop offset="1" stop-color="#41523f" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="washB" cx="20%" cy="14%" r="34%">
+      <stop offset="0" stop-color="#3a4539" stop-opacity=".16"/>
+      <stop offset="1" stop-color="#3a4539" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="20" stdDeviation="26" flood-color="#000" flood-opacity=".34"/>
+    </filter>
+    <style>
+      .ui { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif; }
+      .serif { font-family:"PingFang SC","Songti SC","Noto Serif SC",serif; }
+      .ink { fill:#e6e4dc; }
+      .muted { fill:#969f95; }
+      .faint { fill:#687366; }
+      .label { fill:#687366; font-size:14px; font-weight:850; letter-spacing:0; }
+      .button { fill:#f4f6ee; font-size:14px; font-weight:850; }
+      .chip { fill:#9fa99d; font-size:12px; font-weight:750; }
+      .small { font-size:13px; }
+      .panel { fill:#0d120e; stroke:#2a332a; stroke-width:1.2; }
+      .card { fill:#111711; stroke:#2a332a; stroke-width:1.2; }
+      .divider { stroke:#1d251e; stroke-width:1; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="960" fill="#111"/>
+  <rect x="18" y="18" width="1564" height="924" rx="20" fill="url(#appBg)" filter="url(#shadow)"/>
+  <rect x="18" y="18" width="1564" height="44" rx="20" fill="#2a2c2b"/>
+  <circle cx="42" cy="40" r="7" fill="#ff6b5f"/>
+  <circle cx="64" cy="40" r="7" fill="#f6c351"/>
+  <circle cx="86" cy="40" r="7" fill="#55c36a"/>
+  <rect x="116" y="17" width="214" height="47" rx="10" fill="#171b19" stroke="#343b36"/>
+  <text class="ui ink" x="150" y="46" font-size="16" font-weight="720">知见录</text>
+  <text class="ui muted" x="804" y="47" font-size="15" font-weight="760" text-anchor="middle">知见录</text>
+  <rect x="18" y="62" width="52" height="880" fill="#151a18"/>
+  <text class="ui muted" x="44" y="112" text-anchor="middle" font-size="20">↩</text>
+  <text class="ui muted" x="44" y="158" text-anchor="middle" font-size="20">⌕</text>
+  <text class="ui muted" x="44" y="204" text-anchor="middle" font-size="20">▧</text>
+  <text class="ui muted" x="44" y="250" text-anchor="middle" font-size="20">☷</text>
+
+  <rect x="70" y="62" width="1512" height="880" fill="url(#washA)"/>
+  <rect x="70" y="62" width="1512" height="880" fill="url(#washB)"/>
+
+  <!-- Library workspace: primary area + independent detail column. -->
+  <g transform="translate(92 92)">
+    <g id="primary">
+      <rect class="panel" x="0" y="0" width="1018" height="88" rx="10" fill="#0d120e" opacity=".96"/>
+      <text class="serif ink" x="24" y="43" font-size="34" font-weight="850">知见录</text>
+      <text class="ui muted" x="24" y="68" font-size="15" font-weight="700">1,027 个文章组 · 119 条阅读标注</text>
+      <rect x="430" y="22" width="358" height="44" rx="12" fill="#111611" stroke="#2a332a"/>
+      <text class="ui faint" x="452" y="50" font-size="14" font-weight="650">搜索标题、路径、摘要...</text>
+      <rect x="800" y="22" width="74" height="44" rx="10" fill="#121713" stroke="#2a332a"/>
+      <text class="ui button" x="837" y="50" text-anchor="middle">搜索</text>
+      <rect x="886" y="22" width="108" height="44" rx="10" fill="#121713" stroke="#2a332a"/>
+      <text class="ui button" x="940" y="50" text-anchor="middle">重新扫描</text>
+
+      <g transform="translate(0 112)">
+        <rect class="panel" x="0" y="0" width="230" height="744" rx="10"/>
+        <text class="ui label" x="18" y="34">来源</text>
+        <g transform="translate(18 52)">
+          <rect x="0" y="0" width="194" height="42" rx="10" fill="#182118" stroke="#f6a044"/>
+          <rect x="0" y="0" width="4" height="42" rx="4" fill="#f6a044"/>
+          <text class="ui ink" x="14" y="27" font-size="15" font-weight="850">全部</text>
+          <text class="ui" x="150" y="27" fill="#ffb45f" font-size="15" font-weight="850" text-anchor="end">1027</text>
+          <circle cx="174" cy="21" r="3.5" fill="#f6a044"/>
+        </g>
+        <g class="ui" font-size="15" font-weight="780">
+          <rect x="18" y="104" width="194" height="42" rx="10" fill="#111711" stroke="#2a332a"/>
+          <text class="ink" x="34" y="131">articles</text><text class="muted" x="178" y="131" text-anchor="end">150</text>
+          <rect x="18" y="156" width="194" height="42" rx="10" fill="#111711" stroke="#2a332a"/>
+          <text class="ink" x="34" y="183">Raw</text><text class="muted" x="178" y="183" text-anchor="end">10</text>
+          <rect x="18" y="208" width="194" height="42" rx="10" fill="#111711" stroke="#2a332a"/>
+          <text class="ink" x="34" y="235">research</text><text class="muted" x="178" y="235" text-anchor="end">117</text>
+          <rect x="18" y="260" width="194" height="42" rx="10" fill="#111711" stroke="#2a332a"/>
+          <text class="ink" x="34" y="287">wechat_articles</text><text class="muted" x="178" y="287" text-anchor="end">33</text>
+          <rect x="18" y="312" width="194" height="42" rx="10" fill="#111711" stroke="#2a332a"/>
+          <text class="ink" x="34" y="339">x_articles</text><text class="muted" x="178" y="339" text-anchor="end">688</text>
+        </g>
+        <line class="divider" x1="18" y1="386" x2="212" y2="386"/>
+        <text class="ui label" x="18" y="424">状态</text>
+        <g class="ui" font-size="15" font-weight="780">
+          <rect x="18" y="442" width="194" height="42" rx="10" fill="#182118" stroke="#f6a044"/>
+          <rect x="18" y="442" width="4" height="42" rx="4" fill="#f6a044"/>
+          <text class="ink" x="34" y="469">全部</text><text x="178" y="469" fill="#ffb45f" text-anchor="end">1027</text>
+          <rect x="18" y="494" width="194" height="42" rx="10" fill="#111711" stroke="#2a332a"/>
+          <text class="ink" x="34" y="521">有标注</text><text class="muted" x="178" y="521" text-anchor="end">23</text>
+          <rect x="18" y="546" width="194" height="42" rx="10" fill="#111711" stroke="#2a332a"/>
+          <text class="ink" x="34" y="573">有灵感</text><text class="muted" x="178" y="573" text-anchor="end">1</text>
+          <rect x="18" y="598" width="194" height="42" rx="10" fill="#111711" stroke="#2a332a"/>
+          <text class="ink" x="34" y="625">待核查</text><text class="muted" x="178" y="625" text-anchor="end">6</text>
+        </g>
+        <line class="divider" x1="18" y1="674" x2="212" y2="674"/>
+        <text class="ui label" x="18" y="712">排序</text>
+      </g>
+
+      <g transform="translate(248 112)">
+        <g transform="translate(0 0)">
+          <rect class="card" width="364" height="214" rx="10"/>
+          <rect x="0" y="12" width="4" height="190" rx="4" fill="#4c78ff"/>
+          <rect x="24" y="22" width="82" height="26" rx="6" fill="transparent" stroke="#2a332a"/>
+          <text class="ui chip" x="44" y="39">research</text>
+          <rect x="116" y="22" width="92" height="26" rx="6" fill="transparent" stroke="#2a332a"/>
+          <text class="ui chip" x="134" y="39">2026-07-05</text>
+          <rect x="218" y="22" width="68" height="26" rx="6" fill="transparent" stroke="#2a332a"/>
+          <text class="ui chip" x="235" y="39">文章组</text>
+          <rect x="306" y="22" width="44" height="26" rx="6" fill="#1c2b52" stroke="#4c78ff"/>
+          <text class="ui" x="328" y="39" fill="#83a2ff" font-size="12" font-weight="850" text-anchor="middle">未读</text>
+          <text class="serif ink" x="24" y="82" font-size="20" font-weight="850">Don't Train the Model,</text>
+          <text class="serif ink" x="24" y="108" font-size="20" font-weight="850">Evolve the Harness</text>
+          <text class="ui muted" x="24" y="138" font-size="13">一篇关于 AI 工作流和系统边界的长文...</text>
+          <line class="divider" x1="24" y1="164" x2="340" y2="164"/>
+          <text class="ui faint" x="24" y="190" font-size="13" font-weight="700">0 条标注</text>
+          <text class="ui faint" x="108" y="190" font-size="13" font-weight="700">3 个文件</text>
+          <rect x="302" y="172" width="48" height="34" rx="9" fill="#121713" stroke="#2a332a"/>
+          <text class="ui button" x="326" y="194" text-anchor="middle">阅读</text>
+        </g>
+
+        <g transform="translate(384 0)">
+          <rect class="card" width="364" height="214" rx="10"/>
+          <rect x="0" y="12" width="4" height="190" rx="4" fill="#4c78ff"/>
+          <rect x="24" y="22" width="78" height="26" rx="6" fill="transparent" stroke="#2a332a"/>
+          <text class="ui chip" x="44" y="39">articles</text>
+          <rect x="112" y="22" width="92" height="26" rx="6" fill="transparent" stroke="#2a332a"/>
+          <text class="ui chip" x="130" y="39">2026-07-03</text>
+          <rect x="214" y="22" width="68" height="26" rx="6" fill="transparent" stroke="#2a332a"/>
+          <text class="ui chip" x="231" y="39">文章组</text>
+          <rect x="306" y="22" width="44" height="26" rx="6" fill="#1c2b52" stroke="#4c78ff"/>
+          <text class="ui" x="328" y="39" fill="#83a2ff" font-size="12" font-weight="850" text-anchor="middle">未读</text>
+          <text class="serif ink" x="24" y="82" font-size="20" font-weight="850">Natalia Quintero × Codex:</text>
+          <text class="serif ink" x="24" y="108" font-size="20" font-weight="850">非技术 builder 的 AI 实践</text>
+          <text class="ui muted" x="24" y="138" font-size="13">讨论 Codex 如何改变个人工作...</text>
+          <line class="divider" x1="24" y1="164" x2="340" y2="164"/>
+          <text class="ui faint" x="24" y="190" font-size="13" font-weight="700">0 条标注</text>
+          <text class="ui faint" x="108" y="190" font-size="13" font-weight="700">5 个文件</text>
+          <rect x="302" y="172" width="48" height="34" rx="9" fill="#121713" stroke="#2a332a"/>
+          <text class="ui button" x="326" y="194" text-anchor="middle">阅读</text>
+        </g>
+
+        <g transform="translate(0 232)">
+          <rect width="364" height="226" rx="10" fill="#111711" stroke="#f6a044"/>
+          <rect x="0" y="12" width="4" height="202" rx="4" fill="#f6a044"/>
+          <rect x="24" y="22" width="78" height="26" rx="6" fill="transparent" stroke="#2a332a"/>
+          <text class="ui chip" x="44" y="39">articles</text>
+          <rect x="112" y="22" width="92" height="26" rx="6" fill="transparent" stroke="#2a332a"/>
+          <text class="ui chip" x="130" y="39">2026-07-03</text>
+          <rect x="214" y="22" width="68" height="26" rx="6" fill="transparent" stroke="#2a332a"/>
+          <text class="ui chip" x="231" y="39">文章组</text>
+          <rect x="298" y="22" width="52" height="26" rx="6" fill="#3c2814" stroke="#f6a044"/>
+          <text class="ui" x="324" y="39" fill="#ffb45f" font-size="12" font-weight="850" text-anchor="middle">已标注</text>
+          <text class="serif ink" x="24" y="82" font-size="20" font-weight="850">Naval × 三位创始人 67 分钟</text>
+          <text class="serif ink" x="24" y="108" font-size="20" font-weight="850">访谈深度解构</text>
+          <text class="ui muted" x="24" y="138" font-size="13">关于 AGI 焦虑、组织结构和判断...</text>
+          <line class="divider" x1="24" y1="176" x2="340" y2="176"/>
+          <text class="ui faint" x="24" y="202" font-size="13" font-weight="700">2 条标注</text>
+          <text class="ui faint" x="108" y="202" font-size="13" font-weight="700">5 个文件</text>
+          <rect x="302" y="184" width="48" height="34" rx="9" fill="#121713" stroke="#2a332a"/>
+          <text class="ui button" x="326" y="206" text-anchor="middle">阅读</text>
+        </g>
+
+        <g transform="translate(384 232)">
+          <rect class="card" width="364" height="226" rx="10"/>
+          <rect x="0" y="12" width="4" height="202" rx="4" fill="#4c78ff"/>
+          <rect x="24" y="22" width="78" height="26" rx="6" fill="transparent" stroke="#2a332a"/>
+          <text class="ui chip" x="44" y="39">articles</text>
+          <rect x="112" y="22" width="92" height="26" rx="6" fill="transparent" stroke="#2a332a"/>
+          <text class="ui chip" x="130" y="39">2026-07-03</text>
+          <rect x="214" y="22" width="58" height="26" rx="6" fill="transparent" stroke="#2a332a"/>
+          <text class="ui chip" x="232" y="39">单文件</text>
+          <rect x="306" y="22" width="44" height="26" rx="6" fill="#1c2b52" stroke="#4c78ff"/>
+          <text class="ui" x="328" y="39" fill="#83a2ff" font-size="12" font-weight="850" text-anchor="middle">未读</text>
+          <text class="serif ink" x="24" y="82" font-size="20" font-weight="850">Exclusive: Meta's AI agent</text>
+          <text class="serif ink" x="24" y="108" font-size="20" font-weight="850">progressing slower than expected</text>
+          <text class="ui muted" x="24" y="138" font-size="13">一篇适合后续核查的行业报道...</text>
+          <line class="divider" x1="24" y1="176" x2="340" y2="176"/>
+          <text class="ui faint" x="24" y="202" font-size="13" font-weight="700">0 条标注</text>
+          <text class="ui faint" x="108" y="202" font-size="13" font-weight="700">1 个文件</text>
+          <rect x="302" y="184" width="48" height="34" rx="9" fill="#121713" stroke="#2a332a"/>
+          <text class="ui button" x="326" y="206" text-anchor="middle">阅读</text>
+        </g>
+
+        <g transform="translate(0 476)">
+          <rect class="card" width="364" height="214" rx="10" opacity=".92"/>
+          <rect x="0" y="12" width="4" height="190" rx="4" fill="#62c95d"/>
+          <rect x="24" y="22" width="86" height="26" rx="6" fill="transparent" stroke="#2a332a"/>
+          <text class="ui chip" x="42" y="39">x_articles</text>
+          <rect x="120" y="22" width="92" height="26" rx="6" fill="transparent" stroke="#2a332a"/>
+          <text class="ui chip" x="138" y="39">2026-05-28</text>
+          <rect x="222" y="22" width="68" height="26" rx="6" fill="transparent" stroke="#2a332a"/>
+          <text class="ui chip" x="239" y="39">文章组</text>
+          <rect x="296" y="22" width="54" height="26" rx="6" fill="#1f351f" stroke="#62c95d"/>
+          <text class="ui" x="323" y="39" fill="#8ee48a" font-size="12" font-weight="850" text-anchor="middle">已使用</text>
+          <text class="serif ink" x="24" y="82" font-size="20" font-weight="850">Codex 进阶用法最佳实践</text>
+          <text class="ui muted" x="24" y="114" font-size="13">围绕 power user 工作流的整理...</text>
+          <line class="divider" x1="24" y1="164" x2="340" y2="164"/>
+          <text class="ui faint" x="24" y="190" font-size="13" font-weight="700">0 条标注</text>
+          <text class="ui faint" x="108" y="190" font-size="13" font-weight="700">4 个文件</text>
+          <rect x="302" y="172" width="48" height="34" rx="9" fill="#121713" stroke="#2a332a"/>
+          <text class="ui button" x="326" y="194" text-anchor="middle">阅读</text>
+        </g>
+
+        <g transform="translate(384 476)">
+          <rect class="card" width="364" height="214" rx="10"/>
+          <rect x="0" y="12" width="4" height="190" rx="4" fill="#4c78ff"/>
+          <text class="serif ink" x="24" y="82" font-size="20" font-weight="850">技能工程与反对一键式 AI 设计</text>
+          <text class="ui muted" x="24" y="114" font-size="13">从工具使用到判断力训练...</text>
+          <line class="divider" x1="24" y1="164" x2="340" y2="164"/>
+          <text class="ui faint" x="24" y="190" font-size="13" font-weight="700">0 条标注</text>
+          <text class="ui faint" x="108" y="190" font-size="13" font-weight="700">3 个文件</text>
+          <rect x="302" y="172" width="48" height="34" rx="9" fill="#121713" stroke="#2a332a"/>
+          <text class="ui button" x="326" y="194" text-anchor="middle">阅读</text>
+        </g>
+      </g>
+    </g>
+
+    <g id="detail" transform="translate(1036 0)">
+      <rect class="panel" x="0" y="0" width="390" height="856" rx="10" fill="#0d120e" opacity=".98"/>
+      <rect x="0" y="0" width="390" height="208" rx="10" fill="#0d120e" stroke="#2a332a"/>
+      <text class="ui label" x="20" y="36">ARTICLES / 2026-07-03</text>
+      <text class="serif ink" x="20" y="76" font-size="24" font-weight="850">Naval × 三位创始人 67 分钟</text>
+      <text class="serif ink" x="20" y="108" font-size="24" font-weight="850">访谈深度解构</text>
+      <rect x="314" y="24" width="56" height="30" rx="8" fill="#3c2814" stroke="#f6a044"/>
+      <text class="ui" x="342" y="44" fill="#ffb45f" font-size="12" font-weight="850" text-anchor="middle">已标注</text>
+      <text class="ui muted" x="20" y="140" font-size="13">Learning/web/articles/2026-07-03_naval-riding-</text>
+      <text class="ui muted" x="20" y="162" font-size="13">agi-ai-anxiety</text>
+      <line class="divider" x1="0" y1="208" x2="390" y2="208"/>
+
+      <text class="ui label" x="20" y="252">信号</text>
+      <g transform="translate(20 268)">
+        <rect x="0" y="0" width="66" height="28" rx="7" fill="#182018" stroke="#2a332a"/>
+        <text class="ui chip" x="33" y="19" text-anchor="middle">标注 2</text>
+        <rect x="78" y="0" width="66" height="28" rx="7" fill="#182018" stroke="#2a332a"/>
+        <text class="ui chip" x="111" y="19" text-anchor="middle">灵感 0</text>
+        <rect x="156" y="0" width="78" height="28" rx="7" fill="#182018" stroke="#2a332a"/>
+        <text class="ui chip" x="195" y="19" text-anchor="middle">待核查 1</text>
+      </g>
+
+      <text class="ui label" x="20" y="338">动作</text>
+      <rect x="20" y="356" width="178" height="44" rx="9" fill="#42684a" stroke="#62c95d"/>
+      <text class="ui button" x="109" y="384" text-anchor="middle">打开最佳版本</text>
+      <rect x="210" y="356" width="160" height="44" rx="9" fill="#121713" stroke="#2a332a"/>
+      <text class="ui button" x="290" y="384" text-anchor="middle">阅读记录</text>
+
+      <text class="ui label" x="20" y="462">版本</text>
+      <g transform="translate(20 480)">
+        <rect width="350" height="112" rx="10" fill="#131813" stroke="#f08a3c"/>
+        <text class="ui" x="14" y="28" fill="#ffb45f" font-size="12" font-weight="850">扩展版</text>
+        <rect x="304" y="14" width="34" height="22" rx="6" fill="#f6a044"/>
+        <text class="ui" x="321" y="29" fill="#1c1008" font-size="11" font-weight="850" text-anchor="middle">最佳</text>
+        <text class="ui ink" x="14" y="58" font-size="15" font-weight="800">article_zh_enriched.md</text>
+        <rect x="14" y="74" width="322" height="30" rx="8" fill="#42684a" stroke="#62c95d"/>
+        <text class="ui button" x="175" y="94" text-anchor="middle">阅读</text>
+      </g>
+      <g transform="translate(20 606)">
+        <rect width="350" height="102" rx="10" fill="#131813" stroke="#2a332a"/>
+        <text class="ui" x="14" y="28" fill="#ffb45f" font-size="12" font-weight="850">中文版</text>
+        <text class="ui ink" x="14" y="58" font-size="15" font-weight="800">article_zh.md</text>
+        <rect x="14" y="72" width="322" height="24" rx="7" fill="#121713" stroke="#2a332a"/>
+        <text class="ui button" x="175" y="89" font-size="12" text-anchor="middle">阅读</text>
+      </g>
+      <g transform="translate(20 722)">
+        <rect width="350" height="92" rx="10" fill="#131813" stroke="#2a332a"/>
+        <text class="ui" x="14" y="28" fill="#ffb45f" font-size="12" font-weight="850">原文 PDF</text>
+        <text class="ui ink" x="14" y="58" font-size="15" font-weight="800">article.pdf</text>
+        <rect x="252" y="48" width="84" height="28" rx="8" fill="#121713" stroke="#2a332a"/>
+        <text class="ui button" x="294" y="67" font-size="12" text-anchor="middle">打开</text>
+      </g>
+    </g>
+  </g>
+</svg>
