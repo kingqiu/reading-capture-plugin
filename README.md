@@ -1,65 +1,65 @@
 # Reading Capture
 
-[简体中文](README.zh-CN.md) | English
+简体中文 | [English](README.en.md)
 
-Reading Capture is an Obsidian plugin for people who save articles, read deeply, and turn reading into notes, creative ideas, and follow-up tasks.
+Reading Capture 是一个 Obsidian 插件，适合经常保存文章、做深度阅读、写笔记、积累创作灵感和素材的人使用。
 
-It gives you a focused reading space inside Obsidian, a library view for browsing saved articles, and a separate reading record for highlights, thoughts, creative ideas, and fact-check items.
+它会在 Obsidian 里提供一个更适合阅读的界面，一个用来浏览文章的 `知见录`，以及一个专门查看阅读标注和想法的阅读记录页。
 
-Version: `0.4.3`
+当前版本：`0.4.3`
 
-## What You Can Do
+## 这个插件能做什么
 
-- Browse saved articles in the `知见录` article library.
-- Open Markdown articles in a cleaner reading view.
-- Open PDFs from the same article group when they are available.
-- Highlight passages and save your thoughts without turning the original article into a messy note.
-- Save three kinds of reading records:
-  - general thoughts
-  - creative ideas
-  - facts or claims to check later
-- View all records for an article in a dedicated reading-record page.
-- Jump from a saved record back to the original article position when the plugin can locate it.
-- Copy article paths, quotes, and thoughts when you need to reuse them.
+- 在 `知见录` 里集中浏览你保存过的文章。
+- 用更安静的阅读视图打开 Markdown 文章。
+- 如果文章目录下有 PDF，也可以从插件里打开 PDF。
+- 选中文字后保存标注和想法，同时尽量不把原文弄得很乱。
+- 保存三类阅读记录：
+  - 普通想法
+  - 创作灵感
+  - 事实待核查
+- 在单独的阅读记录页面里查看一篇文章的所有记录。
+- 从某一条记录跳回原文对应位置，能定位时会自动定位。
+- 复制文章路径、原文引用和自己的想法，方便后续写作使用。
 
-## Screenshots
+## 界面预览
 
-The screenshots below are layout-matched anonymous demo images. They show the current product flow without exposing any real vault content.
+下面是按当前界面布局重绘的匿名 demo 图，用来展示插件的真实使用流程，不包含真实用户数据。
 
-### Article Library
+### 知见录
 
-Browse saved articles, reading status, file versions, highlights, and creative ideas in one place.
+集中浏览文章、阅读状态、文件版本，以及已有标注和创作灵感。
 
-![Article library preview](docs/assets/screenshots/library.svg)
+![知见录界面预览](docs/assets/screenshots/library.svg)
 
-### Reader And Capture
+### 阅读器和标注
 
-Read in a quieter view and save highlights, thoughts, creative ideas, and fact-check items.
+在更安静的阅读界面里保存标注、想法、创作灵感和待核查事实。
 
-![Reader preview](docs/assets/screenshots/reader.svg)
+![阅读器界面预览](docs/assets/screenshots/reader.svg)
 
-### Reading Records
+### 阅读记录
 
-Review all saved records for one article, copy useful material, or jump back to the original article.
+把一篇文章里的所有记录整理成可浏览、可复制、可回到原文的位置。
 
-![Reading record preview](docs/assets/screenshots/record.svg)
+![阅读记录界面预览](docs/assets/screenshots/record.svg)
 
-### Install And Settings
+### 安装和设置
 
-For manual installation, the plugin folder should directly contain `main.js`, `manifest.json`, `styles.css`, and `reading-core.js`.
+手动安装时，插件目录里应该直接看到 `main.js`、`manifest.json`、`styles.css` 和 `reading-core.js`。
 
-![Install and settings preview](docs/assets/screenshots/settings.svg)
+![安装和设置预览](docs/assets/screenshots/settings.svg)
 
-## Installation
+## 安装方式
 
-This plugin is currently meant for manual installation from GitHub. It is not yet published in the official Obsidian community plugin directory.
+这个插件目前主要通过 GitHub 手动安装，还没有发布到 Obsidian 官方社区插件市场。
 
-1. Download `reading-capture.zip` from the latest GitHub Release.
-2. Unzip it.
-3. Put the unzipped `reading-capture` folder into your Obsidian vault:
+1. 从 GitHub Release 下载最新版 `reading-capture.zip`。
+2. 解压这个文件。
+3. 把解压出来的 `reading-capture` 文件夹放到你的 Obsidian 仓库里：
 
 ```text
-Your Vault/
+你的 Obsidian 仓库/
 └── .obsidian/
     └── plugins/
         └── reading-capture/
@@ -69,42 +69,42 @@ Your Vault/
             └── styles.css
 ```
 
-4. Open Obsidian.
-5. Go to `Settings` -> `Community plugins`.
-6. Make sure community plugins are enabled.
-7. Find and enable `Reading Capture`.
+4. 打开 Obsidian。
+5. 进入 `设置` -> `第三方插件`。
+6. 确认第三方插件已经开启。
+7. 找到并启用 `Reading Capture`。
 
-If Obsidian was already open while you copied the files, reload Obsidian or disable and re-enable the plugin.
+如果你复制插件文件时 Obsidian 已经打开，请重启 Obsidian，或者先关闭再重新启用这个插件。
 
-## Updating
+## 更新插件
 
-To update a manual installation:
+手动安装的插件更新方式也很简单：
 
-1. Download the newest `reading-capture.zip`.
-2. Unzip it.
-3. Replace the old plugin files in:
-
-```text
-Your Vault/.obsidian/plugins/reading-capture/
-```
-
-4. Restart Obsidian, or disable and re-enable the plugin.
-
-Your reading records are stored in your vault as Markdown files. Replacing the plugin files should not delete your reading records.
-
-## Manual Install Troubleshooting
-
-### Reading Capture does not appear in Obsidian
-
-Check the folder location first. The final folder should be:
+1. 下载最新版 `reading-capture.zip`。
+2. 解压。
+3. 用新的插件文件覆盖旧目录里的文件：
 
 ```text
-Your Vault/.obsidian/plugins/reading-capture/
+你的 Obsidian 仓库/.obsidian/plugins/reading-capture/
 ```
 
-Inside that folder, you should directly see `main.js`, `manifest.json`, `styles.css`, and `reading-core.js`.
+4. 重启 Obsidian，或者关闭并重新启用 Reading Capture。
 
-If you see this instead, the folder is nested one level too deep:
+你的阅读记录会作为 Markdown 文件保存在 Obsidian 仓库里。正常覆盖插件文件不会删除这些阅读记录。
+
+## 手动安装常见问题
+
+### 插件列表里看不到 Reading Capture
+
+请先检查文件夹位置。最终目录应该是：
+
+```text
+你的 Obsidian 仓库/.obsidian/plugins/reading-capture/
+```
+
+这个目录里应该直接看到 `main.js`、`manifest.json`、`styles.css` 和 `reading-core.js`。
+
+如果你看到的是下面这种结构，就说明多套了一层文件夹：
 
 ```text
 reading-capture/
@@ -114,23 +114,23 @@ reading-capture/
     └── styles.css
 ```
 
-Move the inner `reading-capture` folder into `.obsidian/plugins/`.
+把里面那层 `reading-capture` 移到 `.obsidian/plugins/` 下面即可。
 
-### The GitHub source code zip does not work
+### 下载 GitHub 源码后插件不能用
 
-Download `reading-capture.zip` from the GitHub Release page. Do not use GitHub's `Source code.zip` for normal installation. The source archive is meant for development and is not the ready-to-install plugin package.
+请下载 Release 里的 `reading-capture.zip`，不要下载 GitHub 页面上的 `Source code.zip`。源码包不是给普通安装用的，里面缺少整理好的插件结构。
 
-### The old interface still appears after updating
+### 更新后还是旧界面
 
-Restart Obsidian, or disable and re-enable Reading Capture from `Settings` -> `Community plugins`.
+重启 Obsidian，或者在 `设置` -> `第三方插件` 里关闭再重新开启 Reading Capture。
 
-## First-Time Setup
+## 第一次使用
 
-After enabling the plugin, open `Settings` -> `Reading Capture`.
+启用插件后，先进入 `设置` -> `Reading Capture`。
 
-The most important setting is `知见录扫描目录`. Add the folders where you keep saved articles.
+最重要的是配置 `知见录扫描目录`。这里要填写你平时保存文章的文件夹。
 
-Examples:
+例如：
 
 ```text
 Articles
@@ -139,99 +139,113 @@ Saved Articles
 Research Notes
 ```
 
-Use paths relative to your Obsidian vault. For example, if an article is here:
+这里填写的是相对于 Obsidian 仓库的路径。
+
+比如文章实际放在：
 
 ```text
-Your Vault/Saved Articles/example/article.md
+你的 Obsidian 仓库/Saved Articles/example/article.md
 ```
 
-then you can add:
+那你可以填写：
 
 ```text
 Saved Articles
 ```
 
-After setting the scan folders, run `Reading Capture: 打开知见录` from the Obsidian command palette.
-
-## Main Settings
-
-### 阅读笔记根目录
-
-This is where Reading Capture saves your reading records.
-
-Default:
-
-```text
-Reading Capture/notes
-```
-
-You usually do not need to change this unless you want the records to live in a different folder.
-
-### 知见录扫描目录
-
-These are the folders that the article library scans.
-
-Add one folder per line. The plugin will look for Markdown and PDF files inside these folders.
-
-### 知见录排除目录
-
-These folders are ignored while scanning.
-
-The plugin already skips the reading-record folder and Obsidian's own `.obsidian` folder. You can add more folders if you have archives, drafts, or temporary files that should not appear in the article library.
-
-## Daily Use
-
-### Open the Article Library
-
-Run:
+设置好后，在 Obsidian 命令面板里运行：
 
 ```text
 Reading Capture: 打开知见录
 ```
 
-The library shows your article groups, their reading status, available files, and saved reading signals.
+## 主要配置说明
 
-### Open an Article
+### 阅读笔记根目录
 
-In `知见录`, click `阅读` or `打开最佳版本`.
+这里决定 Reading Capture 把阅读记录保存到哪里。
 
-When several versions exist, Reading Capture tries to choose the most useful Markdown version first. If there is only one Markdown file, it can still open that file as a single article.
+默认是：
 
-### Save a Highlight or Thought
+```text
+Reading Capture/notes
+```
 
-In the reader view:
+一般不需要修改。除非你希望把阅读记录放在自己的某个固定目录里。
 
-1. Select a passage.
-2. Right-click, or use the Reading Capture command.
-3. Choose the record type and write your thought.
+### 知见录扫描目录
 
-You can also save a thought without selecting text by using `记录当前想法`.
+这里填写你希望插件扫描的文章目录。
 
-### Save a Creative Idea
+每行填写一个目录。插件会在这些目录里寻找 Markdown 和 PDF 文件。
 
-Use `加入创作灵感` when a passage or thought might become a future article, research question, or creative work.
+### 知见录排除目录
 
-### Save a Fact-Check Item
+这里填写不希望插件扫描的目录。
 
-Use `加入事实待核查` when something sounds important but needs verification later.
+插件默认会跳过阅读记录目录和 Obsidian 自己的 `.obsidian` 目录。如果你有归档、草稿、临时文件夹，也可以加到这里。
 
-### View Reading Records
+## 日常怎么用
 
-Click `阅读记录` from the article detail panel or from the reader sidebar.
+### 打开知见录
 
-The reading-record page lets you:
+在 Obsidian 命令面板里运行：
 
-- browse records by type
-- read the original quote and your thought side by side
-- switch between the designed record view and the original Markdown
-- jump back to the original article position when possible
-- copy quotes, thoughts, or the article path
+```text
+Reading Capture: 打开知见录
+```
 
-## Useful Commands
+`知见录` 会展示你的文章组、阅读状态、已有文件版本，以及这篇文章有没有标注、创作灵感和待核查内容。
 
-Open Obsidian's command palette and search for `Reading Capture`.
+### 打开文章
 
-Common commands:
+在 `知见录` 里点击 `阅读` 或 `打开最佳版本`。
+
+如果同一篇文章有多个版本，插件会尽量选择更适合阅读的 Markdown 版本。如果只有一个 Markdown 文件，也可以作为单篇文章打开。
+
+### 保存标注或想法
+
+在阅读器里：
+
+1. 选中一段文字。
+2. 右键，或使用 Reading Capture 的命令。
+3. 选择记录类型，并写下你的想法。
+
+如果你只是想记录当前灵感，不想选中文字，也可以使用 `记录当前想法`。
+
+### 保存创作灵感
+
+当你觉得某段内容或某个想法以后可能能继续研究、写成文章，或变成后续作品，可以使用：
+
+```text
+Reading Capture: 加入创作灵感
+```
+
+### 保存事实待核查
+
+当你看到一个重要但还需要确认的信息，可以使用：
+
+```text
+Reading Capture: 加入事实待核查
+```
+
+### 查看阅读记录
+
+可以从 `知见录` 的右侧详情，或者从阅读器右侧栏点击 `阅读记录`。
+
+阅读记录页可以帮你：
+
+- 按类型浏览一篇文章里的所有记录。
+- 查看原文引用和你的想法。
+- 在整理后的记录视图和原始 Markdown 之间切换。
+- 回到原文对应位置。
+- 复制引用、想法或文章路径。
+
+## 常用命令
+
+打开 Obsidian 命令面板，搜索 `Reading Capture`。
+
+常用命令包括：
 
 - `Reading Capture: 打开知见录`
 - `Reading Capture: 打开创作灵感`
@@ -245,14 +259,14 @@ Common commands:
 - `Reading Capture: 标记当前阅读为已完成`
 - `Reading Capture: 重建阅读索引`
 
-## Notes and Limitations
+## 使用注意事项
 
-- Reading Capture works inside your Obsidian vault.
-- The plugin does not send your notes or articles to an online service.
-- AI topic mining is not built into this plugin and is not required. `创作灵感` only uses ideas you save manually while reading. If you use external AI workflows later, they can read the structured Markdown records.
-- Jumping back to the exact original position works best when the quoted text still exists in the article.
-- If you move article files after capturing records, you may need to rebuild the index or update paths.
+- Reading Capture 主要在你的 Obsidian 仓库内部工作。
+- 插件本身不会把你的文章或笔记发送到在线服务。
+- 这个插件本身不内置 AI 选题功能，也不需要额外安装 Topic Miner 之类的自动化工具。“创作灵感”只来自你在阅读时手动保存的记录。如果你后续有自己的 AI 自动化流程，也可以读取这些结构化的 Markdown 阅读记录。
+- “回到原文位置”依赖原文中还能找到当初标注的文字。如果原文被大幅修改，可能只能打开原文，不能精确定位。
+- 如果你移动了文章文件，可能需要运行 `重建阅读索引`，或者手动调整相关路径。
 
-## License
+## 许可证
 
-Apache License 2.0. See [LICENSE](LICENSE).
+Apache License 2.0。详见 [LICENSE](LICENSE)。

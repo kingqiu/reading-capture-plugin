@@ -1,6 +1,6 @@
 # Reading Capture
 
-简体中文 | [English](README.md)
+简体中文 | [English](README.en.md)
 
 Reading Capture 是一个 Obsidian 插件，适合经常保存文章、做深度阅读、写笔记、积累创作灵感和素材的人使用。
 
