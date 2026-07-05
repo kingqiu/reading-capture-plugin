@@ -135,20 +135,20 @@ Examples:
 ```text
 Articles
 Reading
-Learning/web/articles
-Learning/web/x_articles
+Saved Articles
+Research Notes
 ```
 
 Use paths relative to your Obsidian vault. For example, if an article is here:
 
 ```text
-Your Vault/Learning/web/articles/example/article.md
+Your Vault/Saved Articles/example/article.md
 ```
 
 then you can add:
 
 ```text
-Learning/web/articles
+Saved Articles
 ```
 
 After setting the scan folders, run `Reading Capture: 打开知见录` from the Obsidian command palette.

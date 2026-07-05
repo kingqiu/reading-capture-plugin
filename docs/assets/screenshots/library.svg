@@ -81,9 +81,9 @@
           <rect x="18" y="208" width="194" height="42" rx="10" fill="#111711" stroke="#2a332a"/>
           <text class="ink" x="34" y="235">research</text><text class="muted" x="178" y="235" text-anchor="end">117</text>
           <rect x="18" y="260" width="194" height="42" rx="10" fill="#111711" stroke="#2a332a"/>
-          <text class="ink" x="34" y="287">wechat_articles</text><text class="muted" x="178" y="287" text-anchor="end">33</text>
+          <text class="ink" x="34" y="287">newsletters</text><text class="muted" x="178" y="287" text-anchor="end">33</text>
           <rect x="18" y="312" width="194" height="42" rx="10" fill="#111711" stroke="#2a332a"/>
-          <text class="ink" x="34" y="339">x_articles</text><text class="muted" x="178" y="339" text-anchor="end">688</text>
+          <text class="ink" x="34" y="339">saved_web</text><text class="muted" x="178" y="339" text-anchor="end">688</text>
         </g>
         <line class="divider" x1="18" y1="386" x2="212" y2="386"/>
         <text class="ui label" x="18" y="424">状态</text>
@@ -191,7 +191,7 @@
           <rect class="card" width="364" height="214" rx="10" opacity=".92"/>
           <rect x="0" y="12" width="4" height="190" rx="4" fill="#62c95d"/>
           <rect x="24" y="22" width="86" height="26" rx="6" fill="transparent" stroke="#2a332a"/>
-          <text class="ui chip" x="42" y="39">x_articles</text>
+          <text class="ui chip" x="42" y="39">saved_web</text>
           <rect x="120" y="22" width="92" height="26" rx="6" fill="transparent" stroke="#2a332a"/>
           <text class="ui chip" x="138" y="39">2026-05-28</text>
           <rect x="222" y="22" width="68" height="26" rx="6" fill="transparent" stroke="#2a332a"/>
@@ -229,8 +229,8 @@
       <text class="serif ink" x="20" y="108" font-size="24" font-weight="850">访谈深度解构</text>
       <rect x="314" y="24" width="56" height="30" rx="8" fill="#3c2814" stroke="#f6a044"/>
       <text class="ui" x="342" y="44" fill="#ffb45f" font-size="12" font-weight="850" text-anchor="middle">已标注</text>
-      <text class="ui muted" x="20" y="140" font-size="13">Learning/web/articles/2026-07-03_naval-riding-</text>
-      <text class="ui muted" x="20" y="162" font-size="13">agi-ai-anxiety</text>
+      <text class="ui muted" x="20" y="140" font-size="13">Saved Articles/interviews/2026-07-03_founder-</text>
+      <text class="ui muted" x="20" y="162" font-size="13">roundtable/article_zh_enriched.md</text>
       <line class="divider" x1="0" y1="208" x2="390" y2="208"/>
 
       <text class="ui label" x="20" y="252">信号</text>

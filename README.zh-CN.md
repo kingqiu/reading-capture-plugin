@@ -135,8 +135,8 @@ reading-capture/
 ```text
 Articles
 Reading
-Learning/web/articles
-Learning/web/x_articles
+Saved Articles
+Research Notes
 ```
 
 这里填写的是相对于 Obsidian 仓库的路径。
@@ -144,13 +144,13 @@ Learning/web/x_articles
 比如文章实际放在：
 
 ```text
-你的 Obsidian 仓库/Learning/web/articles/example/article.md
+你的 Obsidian 仓库/Saved Articles/example/article.md
 ```
 
 那你可以填写：
 
 ```text
-Learning/web/articles
+Saved Articles
 ```
 
 设置好后，在 Obsidian 命令面板里运行：
