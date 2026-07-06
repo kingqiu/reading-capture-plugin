@@ -6,7 +6,7 @@ Reading Capture 是一个 Obsidian 插件，适合经常保存文章、做深度
 
 它会在 Obsidian 里提供一个更适合阅读的界面，一个用来浏览文章的 `知见录`，以及一个专门查看阅读标注和想法的阅读记录页。
 
-当前版本：`0.4.3`
+当前版本：`0.4.4`
 
 ## 这个插件能做什么
 
@@ -123,6 +123,24 @@ reading-capture/
 ### 更新后还是旧界面
 
 重启 Obsidian，或者在 `设置` -> `第三方插件` 里关闭再重新开启 Reading Capture。
+
+### 插件加载失败或保存标注失败
+
+如果插件可以启用，但打开视图、划线或保存标注时失败，请在 Obsidian 命令面板里运行：
+
+```text
+Reading Capture: 导出诊断日志
+```
+
+插件会生成一份诊断报告：
+
+```text
+Reading Capture/diagnostics/diagnostic-report.md
+```
+
+把这份报告内容发给插件作者即可。诊断报告只包含插件版本、Obsidian 版本、操作系统信息、插件配置和最近的错误记录，不会主动上传你的文章内容。
+
+如果插件一启用就立刻显示“插件加载失败”，通常还是安装包或文件夹位置问题。请先确认你下载的是 Release 里的 `reading-capture.zip`，并且插件目录里直接能看到 `main.js`、`manifest.json`、`styles.css` 和 `reading-core.js`。
 
 ## 第一次使用
 
@@ -258,6 +276,7 @@ Reading Capture: 加入事实待核查
 - `Reading Capture: 打开当前文件的阅读记录`
 - `Reading Capture: 标记当前阅读为已完成`
 - `Reading Capture: 重建阅读索引`
+- `Reading Capture: 导出诊断日志`
 
 ## 使用注意事项
 

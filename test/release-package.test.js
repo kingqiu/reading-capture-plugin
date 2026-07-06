@@ -168,6 +168,20 @@ function testReaderAnnotationTypesUseSharedPalette() {
   assert.match(styles, /border-left:\s*2px solid var\(--rc-annotation-border\)/);
 }
 
+function testDiagnosticReportCommandExists() {
+  const main = fs.readFileSync(path.join(root, "plugin/main.js"), "utf8");
+  const readme = fs.readFileSync(path.join(root, "README.md"), "utf8");
+
+  assert.match(main, /DIAGNOSTIC_LOG_PATH\s*=\s*"Reading Capture\/diagnostics\/diagnostic-log\.md"/);
+  assert.match(main, /DIAGNOSTIC_REPORT_PATH\s*=\s*"Reading Capture\/diagnostics\/diagnostic-report\.md"/);
+  assert.match(main, /id:\s*"export-diagnostic-report"/);
+  assert.match(main, /name:\s*"导出诊断日志"/);
+  assert.match(main, /plugin-load-complete/);
+  assert.match(main, /window-error/);
+  assert.match(readme, /Reading Capture: 导出诊断日志/);
+  assert.match(readme, /Reading Capture\/diagnostics\/diagnostic-report\.md/);
+}
+
 testReleaseMetadata();
 testPackageScriptDeclaresRuntimeFiles();
 testPackagedRuntimeFilesExist();
@@ -178,5 +192,6 @@ testReaderToolbarIsIntegratedWithWorkspace();
 testReaderUsesFixedWorkspaceWithIndependentScrollAreas();
 testReaderMatchesApprovedTwoPaneDesignStructure();
 testReaderAnnotationTypesUseSharedPalette();
+testDiagnosticReportCommandExists();
 
 console.log("release package tests passed");

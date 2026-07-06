@@ -17,6 +17,10 @@ const ALWAYS_EXCLUDED_LIBRARY_ROOTS = [
 
 const ARTICLE_LIBRARY_ROOTS_PLACEHOLDER = ["Articles", "Reading", "Sources"].join("\n");
 const ARTICLE_LIBRARY_CACHE_VERSION = 1;
+const DIAGNOSTIC_LOG_PATH = "Reading Capture/diagnostics/diagnostic-log.md";
+const DIAGNOSTIC_REPORT_PATH = "Reading Capture/diagnostics/diagnostic-report.md";
+const DIAGNOSTIC_LOG_MAX_CHARS = 120000;
+const RUNTIME_FILE_NAMES = ["manifest.json", "main.js", "styles.css", "reading-core.js"];
 const WORKFLOW_STATUS_OPTIONS = [
   ["reading", "阅读中"],
   ["annotated", "已标注"],
@@ -38,6 +42,7 @@ class TextInputModal extends Modal {
     this.onSubmit = onSubmit;
     this.includeTypeSelect = !!options.includeTypeSelect;
     this.previewText = options.previewText || "";
+    this.onError = typeof options.onError === "function" ? options.onError : null;
     this.submitted = false;
   }
 
@@ -94,6 +99,7 @@ class TextInputModal extends Modal {
         this.close();
       } catch (error) {
         console.error("Reading Capture save failed", error);
+        if (this.onError) await this.onError(error);
         new Notice(`Reading Capture 保存失败：${error && error.message ? error.message : String(error)}`, 8000);
         this.submitted = false;
         saveButton.disabled = false;
@@ -419,7 +425,7 @@ class ReadingCaptureReaderView extends ItemView {
         });
         await this.renderKeepingScroll();
       },
-      { includeTypeSelect: true }
+      { includeTypeSelect: true, onError: (error) => this.plugin.writeDiagnosticEvent("error", "reader-free-thought-save", this.plugin.errorToDiagnostic(error)) }
     ).open();
   }
 
@@ -447,7 +453,11 @@ class ReadingCaptureReaderView extends ItemView {
         });
         await this.renderKeepingScroll();
       },
-      { includeTypeSelect: true, previewText: this.plugin.previewSelectedText(selectedText) }
+      {
+        includeTypeSelect: true,
+        previewText: this.plugin.previewSelectedText(selectedText),
+        onError: (error) => this.plugin.writeDiagnosticEvent("error", "reader-selection-save", this.plugin.errorToDiagnostic(error)),
+      }
     ).open();
   }
 
@@ -472,7 +482,11 @@ class ReadingCaptureReaderView extends ItemView {
         });
         await this.renderKeepingScroll();
       },
-      { includeTypeSelect: true, previewText: this.plugin.imagePreviewText(media) }
+      {
+        includeTypeSelect: true,
+        previewText: this.plugin.imagePreviewText(media),
+        onError: (error) => this.plugin.writeDiagnosticEvent("error", "reader-image-save", this.plugin.errorToDiagnostic(error)),
+      }
     ).open();
   }
 
@@ -1536,12 +1550,19 @@ class ReadingCaptureTopicPoolView extends ItemView {
 
 module.exports = class ReadingCapturePlugin extends Plugin {
   async onload() {
-    await this.loadSettings();
-    this.addSettingTab(new ReadingCaptureSettingTab(this.app, this));
-    this.registerView(READER_VIEW_TYPE, (leaf) => new ReadingCaptureReaderView(leaf, this));
-    this.registerView(ARTICLE_LIBRARY_VIEW_TYPE, (leaf) => new ReadingCaptureLibraryView(leaf, this));
-    this.registerView(TOPIC_POOL_VIEW_TYPE, (leaf) => new ReadingCaptureTopicPoolView(leaf, this));
-    this.registerView(RECORD_VIEW_TYPE, (leaf) => new ReadingCaptureRecordView(leaf, this));
+    try {
+      await this.loadSettings();
+      await this.writeDiagnosticEvent("info", "plugin-load-start", this.getRuntimeInfo());
+      this.registerGlobalErrorHandlers();
+      this.addSettingTab(new ReadingCaptureSettingTab(this.app, this));
+      this.registerView(READER_VIEW_TYPE, (leaf) => new ReadingCaptureReaderView(leaf, this));
+      this.registerView(ARTICLE_LIBRARY_VIEW_TYPE, (leaf) => new ReadingCaptureLibraryView(leaf, this));
+      this.registerView(TOPIC_POOL_VIEW_TYPE, (leaf) => new ReadingCaptureTopicPoolView(leaf, this));
+      this.registerView(RECORD_VIEW_TYPE, (leaf) => new ReadingCaptureRecordView(leaf, this));
+    } catch (error) {
+      await this.writeDiagnosticEvent("error", "plugin-load-failed", this.errorToDiagnostic(error));
+      throw error;
+    }
 
     this.registerEvent(
       this.app.workspace.on("editor-menu", (menu, editor, view) => {
@@ -1553,7 +1574,9 @@ module.exports = class ReadingCapturePlugin extends Plugin {
             .setTitle("Reading Capture: 标注选中文本并记录想法")
             .setIcon("highlighter")
             .onClick(() => {
-              this.openCaptureModal(view.file, editor, selectedText, this.getSelectionRange(editor));
+              this.runWithDiagnostics("editor-menu-capture", async () => {
+                this.openCaptureModal(view.file, editor, selectedText, this.getSelectionRange(editor));
+              });
             });
         });
       })
@@ -1562,44 +1585,44 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     this.addCommand({
       id: "open-reader-view",
       name: "打开阅读器视图",
-      callback: async () => {
+      callback: this.withDiagnostics("open-reader-view", async () => {
         const file = this.app.workspace.getActiveFile();
         if (!this.isFile(file)) {
           new Notice("请先打开一篇 Markdown 文章。");
           return;
         }
         await this.openReaderForFile(file);
-      },
+      }),
     });
 
     this.addCommand({
       id: "open-article-library",
       name: "打开知见录",
-      callback: async () => this.openArticleLibrary(),
+      callback: this.withDiagnostics("open-article-library", async () => this.openArticleLibrary()),
     });
 
     this.addCommand({
       id: "open-topic-pool",
       name: "打开创作灵感",
-      callback: async () => this.openTopicPool(),
+      callback: this.withDiagnostics("open-topic-pool", async () => this.openTopicPool()),
     });
 
     this.addCommand({
       id: "capture-selection-with-note",
       name: "标注选中文本并记录想法",
-      callback: async () => this.captureSelectionFromActiveContext(),
+      callback: this.withDiagnostics("capture-selection-with-note", async () => this.captureSelectionFromActiveContext()),
     });
 
     this.addCommand({
       id: "quick-highlight-selection",
       name: "快速高亮选中文本",
-      callback: async () => this.quickHighlightFromActiveContext(),
+      callback: this.withDiagnostics("quick-highlight-selection", async () => this.quickHighlightFromActiveContext()),
     });
 
     this.addCommand({
       id: "capture-current-thought",
       name: "记录当前想法",
-      callback: async () => {
+      callback: this.withDiagnostics("capture-current-thought", async () => {
         const reader = this.getActiveReaderView();
         if (reader) {
           const file = reader.getSourceFile();
@@ -1615,37 +1638,43 @@ module.exports = class ReadingCapturePlugin extends Plugin {
           new Notice("没有找到当前文件。");
           return;
         }
-        new TextInputModal(this.app, "记录当前想法", "这条想法会关联到当前打开的文件。", async (note) => {
-          if (!note) {
-            new Notice("没有输入内容。");
-            return;
-          }
-          await this.captureForFile(file, {
-            selectedText: "",
-            note,
-            type: "idea",
-            heading: "标注记录",
-          });
-        }).open();
-      },
+        new TextInputModal(
+          this.app,
+          "记录当前想法",
+          "这条想法会关联到当前打开的文件。",
+          async (note) => {
+            if (!note) {
+              new Notice("没有输入内容。");
+              return;
+            }
+            await this.captureForFile(file, {
+              selectedText: "",
+              note,
+              type: "idea",
+              heading: "标注记录",
+            });
+          },
+          { onError: (error) => this.writeDiagnosticEvent("error", "current-thought-save", this.errorToDiagnostic(error)) }
+        ).open();
+      }),
     });
 
     this.addCommand({
       id: "add-writing-topic",
       name: "加入创作灵感",
-      callback: async () => this.captureTypedEntryFromActiveContext("topic"),
+      callback: this.withDiagnostics("add-writing-topic", async () => this.captureTypedEntryFromActiveContext("topic")),
     });
 
     this.addCommand({
       id: "add-fact-check",
       name: "加入事实待核查",
-      callback: async () => this.captureTypedEntryFromActiveContext("fact-check"),
+      callback: this.withDiagnostics("add-fact-check", async () => this.captureTypedEntryFromActiveContext("fact-check")),
     });
 
     this.addCommand({
       id: "open-reading-note",
       name: "打开当前文件的阅读记录",
-      callback: async () => {
+      callback: this.withDiagnostics("open-reading-note", async () => {
         const file = this.app.workspace.getActiveFile();
         if (!file) {
           new Notice("没有找到当前文件。");
@@ -1653,13 +1682,13 @@ module.exports = class ReadingCapturePlugin extends Plugin {
         }
         const noteFile = await this.getOrCreateReadingNote(file);
         await this.openReadingRecord(noteFile, file);
-      },
+      }),
     });
 
     this.addCommand({
       id: "mark-reading-complete",
       name: "标记当前阅读为已完成",
-      callback: async () => {
+      callback: this.withDiagnostics("mark-reading-complete", async () => {
         const noteFile = await this.resolveCurrentReadingNote();
         if (!noteFile) {
           new Notice("没有找到可标记的阅读记录。");
@@ -1667,16 +1696,27 @@ module.exports = class ReadingCapturePlugin extends Plugin {
         }
         await this.updateReadingStatus(noteFile, "annotated", "pending_summary");
         new Notice("已标记为已完成阅读。");
-      },
+      }),
     });
 
     this.addCommand({
       id: "rebuild-reading-index",
       name: "重建阅读索引",
-      callback: async () => {
+      callback: this.withDiagnostics("rebuild-reading-index", async () => {
         const count = await this.rebuildIndex();
         new Notice(`阅读索引已重建：${count} 条记录。`);
-      },
+      }),
+    });
+
+    this.addCommand({
+      id: "export-diagnostic-report",
+      name: "导出诊断日志",
+      callback: this.withDiagnostics("export-diagnostic-report", async () => this.exportDiagnosticReport()),
+    });
+
+    await this.writeDiagnosticEvent("info", "plugin-load-complete", {
+      commands: 12,
+      views: [READER_VIEW_TYPE, ARTICLE_LIBRARY_VIEW_TYPE, TOPIC_POOL_VIEW_TYPE, RECORD_VIEW_TYPE],
     });
   }
 
@@ -1865,7 +1905,10 @@ module.exports = class ReadingCapturePlugin extends Plugin {
         });
         if (afterSave) await afterSave();
       },
-      { previewText: this.previewSelectedText(selectedText) }
+      {
+        previewText: this.previewSelectedText(selectedText),
+        onError: (error) => this.writeDiagnosticEvent("error", `${recordType}-save`, this.errorToDiagnostic(error)),
+      }
     ).open();
   }
 
@@ -1883,7 +1926,11 @@ module.exports = class ReadingCapturePlugin extends Plugin {
           heading: target.heading,
         });
       },
-      { includeTypeSelect: true, previewText: this.previewSelectedText(selectedText) }
+      {
+        includeTypeSelect: true,
+        previewText: this.previewSelectedText(selectedText),
+        onError: (error) => this.writeDiagnosticEvent("error", "markdown-selection-save", this.errorToDiagnostic(error)),
+      }
     ).open();
   }
 
@@ -2599,6 +2646,193 @@ module.exports = class ReadingCapturePlugin extends Plugin {
         articleLibrarySnapshot: this.getArticleLibrarySnapshot(),
       })
     );
+  }
+
+  withDiagnostics(action, callback) {
+    return async (...args) => this.runWithDiagnostics(action, () => callback(...args));
+  }
+
+  async runWithDiagnostics(action, callback) {
+    try {
+      return await callback();
+    } catch (error) {
+      console.error(`Reading Capture failed: ${action}`, error);
+      await this.writeDiagnosticEvent("error", action, this.errorToDiagnostic(error));
+      new Notice(`Reading Capture 操作失败：${this.describeError(error)}`, 8000);
+      return null;
+    }
+  }
+
+  registerGlobalErrorHandlers() {
+    if (typeof window === "undefined" || !window || typeof window.addEventListener !== "function") return;
+    const onError = (event) => {
+      const message = event && event.message ? event.message : "Unhandled window error";
+      this.writeDiagnosticEvent("error", "window-error", {
+        message,
+        filename: event && event.filename ? event.filename : "",
+        line: event && event.lineno ? event.lineno : "",
+        column: event && event.colno ? event.colno : "",
+        error: this.errorToDiagnostic(event && event.error ? event.error : message),
+      });
+    };
+    const onUnhandledRejection = (event) => {
+      this.writeDiagnosticEvent("error", "unhandled-rejection", this.errorToDiagnostic(event && event.reason ? event.reason : "Unhandled promise rejection"));
+    };
+
+    if (typeof this.registerDomEvent === "function") {
+      this.registerDomEvent(window, "error", onError);
+      this.registerDomEvent(window, "unhandledrejection", onUnhandledRejection);
+      return;
+    }
+
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    if (typeof this.register === "function") {
+      this.register(() => {
+        window.removeEventListener("error", onError);
+        window.removeEventListener("unhandledrejection", onUnhandledRejection);
+      });
+    }
+  }
+
+  async writeDiagnosticEvent(level, action, details = {}) {
+    if (!this.app || !this.app.vault) return;
+    try {
+      const entry = {
+        time: this.now(),
+        level,
+        action,
+        details,
+      };
+      const previous = await this.readDiagnosticLog();
+      const next = `${previous}${previous ? "\n" : ""}${JSON.stringify(entry)}`;
+      const trimmed = next.length > DIAGNOSTIC_LOG_MAX_CHARS ? next.slice(next.length - DIAGNOSTIC_LOG_MAX_CHARS) : next;
+      await this.ensureFolderForPath(DIAGNOSTIC_LOG_PATH);
+      await this.writeText(DIAGNOSTIC_LOG_PATH, trimmed.endsWith("\n") ? trimmed : `${trimmed}\n`);
+    } catch (error) {
+      // Diagnostics must never block normal plugin usage.
+    }
+  }
+
+  async readDiagnosticLog() {
+    try {
+      if (!(await this.pathExists(DIAGNOSTIC_LOG_PATH))) return "";
+      return await this.readText(DIAGNOSTIC_LOG_PATH);
+    } catch (error) {
+      return "";
+    }
+  }
+
+  async exportDiagnosticReport() {
+    const report = await this.buildDiagnosticReport();
+    await this.ensureFolderForPath(DIAGNOSTIC_REPORT_PATH);
+    await this.writeText(DIAGNOSTIC_REPORT_PATH, report);
+    const file = this.app.vault.getAbstractFileByPath(DIAGNOSTIC_REPORT_PATH) || this.makeFileRef(DIAGNOSTIC_REPORT_PATH);
+    await this.openFile(file);
+    new Notice("Reading Capture 诊断报告已生成。");
+  }
+
+  async buildDiagnosticReport() {
+    const runtimeInfo = this.getRuntimeInfo();
+    const runtimeFiles = await this.getRuntimeFileStatus();
+    const log = await this.readDiagnosticLog();
+    const settings = this.getSanitizedSettings();
+    return [
+      "# Reading Capture 诊断报告",
+      "",
+      "请把这份文件内容发给插件作者，用于排查插件加载、划线、保存标注或打开视图失败的问题。",
+      "",
+      "## 基本信息",
+      "",
+      `- 生成时间：${this.now()}`,
+      `- 插件版本：${runtimeInfo.pluginVersion}`,
+      `- Obsidian 版本：${runtimeInfo.obsidianVersion}`,
+      `- 操作系统 / 客户端：${runtimeInfo.platform}`,
+      `- 用户代理：${runtimeInfo.userAgent}`,
+      `- 插件 ID：${runtimeInfo.pluginId}`,
+      `- 插件目录：${runtimeInfo.pluginDir}`,
+      `- Vault 名称：${runtimeInfo.vaultName}`,
+      "",
+      "## 当前配置",
+      "",
+      "```json",
+      JSON.stringify(settings, null, 2),
+      "```",
+      "",
+      "## 运行文件检查",
+      "",
+      "```json",
+      JSON.stringify(runtimeFiles, null, 2),
+      "```",
+      "",
+      "## 最近诊断日志",
+      "",
+      "```jsonl",
+      log.trim() || "暂无诊断日志。",
+      "```",
+      "",
+    ].join("\n");
+  }
+
+  getRuntimeInfo() {
+    const manifest = this.manifest || {};
+    const appVersion = this.app && typeof this.app.getVersion === "function" ? this.app.getVersion() : "";
+    const vaultName = this.app && this.app.vault && typeof this.app.vault.getName === "function" ? this.app.vault.getName() : "";
+    return {
+      pluginId: manifest.id || "reading-capture",
+      pluginVersion: manifest.version || "unknown",
+      pluginDir: manifest.dir || "",
+      obsidianVersion: appVersion || "unknown",
+      platform: this.getPlatformInfo(),
+      userAgent: typeof navigator !== "undefined" && navigator.userAgent ? navigator.userAgent : "",
+      vaultName,
+    };
+  }
+
+  getPlatformInfo() {
+    if (typeof navigator === "undefined" || !navigator) return "unknown";
+    return [navigator.platform || "", navigator.userAgentData && navigator.userAgentData.platform ? navigator.userAgentData.platform : ""].filter(Boolean).join(" / ") || "unknown";
+  }
+
+  getSanitizedSettings() {
+    return {
+      readingRoot: this.settings && this.settings.readingRoot ? this.settings.readingRoot : DEFAULT_SETTINGS.readingRoot,
+      openNoteAfterCapture: !!(this.settings && this.settings.openNoteAfterCapture),
+      articleLibraryRoots: this.settings && this.settings.articleLibraryRoots ? this.settings.articleLibraryRoots : "",
+      articleLibraryExcludeRoots: this.settings && this.settings.articleLibraryExcludeRoots ? this.settings.articleLibraryExcludeRoots : "",
+    };
+  }
+
+  async getRuntimeFileStatus() {
+    const manifest = this.manifest || {};
+    const pluginId = manifest.id || "reading-capture";
+    const pluginDir = manifest.dir || `.obsidian/plugins/${pluginId}`;
+    const candidates = RUNTIME_FILE_NAMES.map((fileName) => normalizePath(`${pluginDir}/${fileName}`));
+    const status = {};
+    for (const filePath of candidates) {
+      status[filePath] = await this.pathExists(filePath);
+    }
+    return status;
+  }
+
+  errorToDiagnostic(error) {
+    if (error instanceof Error) {
+      return {
+        name: error.name,
+        message: error.message,
+        stack: error.stack || "",
+      };
+    }
+    return {
+      name: typeof error,
+      message: String(error),
+      stack: "",
+    };
+  }
+
+  describeError(error) {
+    if (error && error.message) return String(error.message).slice(0, 120);
+    return String(error).slice(0, 120);
   }
 
   async captureForFile(file, { selectedText, note, type, heading, media = null }) {

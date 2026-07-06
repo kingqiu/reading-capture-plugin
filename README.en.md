@@ -6,7 +6,7 @@ Reading Capture is an Obsidian plugin for people who save articles, read deeply,
 
 It gives you a focused reading space inside Obsidian, a library view for browsing saved articles, and a separate reading record for highlights, thoughts, creative ideas, and fact-check items.
 
-Version: `0.4.3`
+Version: `0.4.4`
 
 ## What You Can Do
 
@@ -123,6 +123,24 @@ Download `reading-capture.zip` from the GitHub Release page. Do not use GitHub's
 ### The old interface still appears after updating
 
 Restart Obsidian, or disable and re-enable Reading Capture from `Settings` -> `Community plugins`.
+
+### Plugin load, view, or highlight capture fails
+
+If the plugin can be enabled, but opening a view, highlighting text, or saving a record fails, run this command from Obsidian's command palette:
+
+```text
+Reading Capture: 导出诊断日志
+```
+
+The plugin will create a diagnostic report at:
+
+```text
+Reading Capture/diagnostics/diagnostic-report.md
+```
+
+Send that report to the plugin author. It contains plugin version, Obsidian version, operating-system/client information, plugin settings, and recent error records. It does not upload your article content.
+
+If Obsidian immediately shows "plugin failed to load" when enabling Reading Capture, the most common cause is still an installation package or folder-location issue. Make sure you downloaded `reading-capture.zip` from GitHub Releases, and that the plugin folder directly contains `main.js`, `manifest.json`, `styles.css`, and `reading-core.js`.
 
 ## First-Time Setup
 
@@ -244,6 +262,7 @@ Common commands:
 - `Reading Capture: 打开当前文件的阅读记录`
 - `Reading Capture: 标记当前阅读为已完成`
 - `Reading Capture: 重建阅读索引`
+- `Reading Capture: 导出诊断日志`
 
 ## Notes and Limitations
 
