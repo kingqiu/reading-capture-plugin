@@ -32,7 +32,30 @@ const DEFAULT_SETTINGS = {
   openNoteAfterCapture: false,
   articleLibraryRoots: "",
   articleLibraryExcludeRoots: ".obsidian",
+  readerFontSize: 18,
+  readerLineHeight: 1.72,
 };
+
+const READER_FONT_SIZE_MIN = 14;
+const READER_FONT_SIZE_MAX = 28;
+const READER_LINE_HEIGHTS = [
+  { id: "compact", label: "紧凑", value: 1.55 },
+  { id: "standard", label: "标准", value: 1.72 },
+  { id: "relaxed", label: "舒展", value: 1.9 },
+];
+
+function clampReaderFontSize(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return DEFAULT_SETTINGS.readerFontSize;
+  return Math.min(Math.max(Math.round(number), READER_FONT_SIZE_MIN), READER_FONT_SIZE_MAX);
+}
+
+function normalizeReaderLineHeight(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return DEFAULT_SETTINGS.readerLineHeight;
+  const match = READER_LINE_HEIGHTS.find((item) => Math.abs(item.value - number) < 0.01);
+  return match ? match.value : DEFAULT_SETTINGS.readerLineHeight;
+}
 
 class TextInputModal extends Modal {
   constructor(app, title, placeholder, onSubmit, options = {}) {
@@ -332,6 +355,8 @@ class ReadingCaptureReaderView extends ItemView {
 
     const articlePanel = mainPane.createDiv({ cls: "reading-capture-reader-article-panel" });
     const body = articlePanel.createDiv({ cls: "reading-capture-reader-body markdown-preview-view" });
+    this.applyReaderDisplaySettings(body);
+    this.renderReaderDisplayControls(actions, body);
     const footer = mainPane.createDiv({ cls: "reading-capture-reader-footer" });
     const sidebar = workspace.createEl("aside", { cls: "reading-capture-reader-sidebar" });
     if (this.sidebarCollapsed) sidebar.addClass("is-collapsed");
@@ -369,6 +394,103 @@ class ReadingCaptureReaderView extends ItemView {
       event.preventDefault();
       this.captureSelectedText(sourceFile, selectedText);
     });
+  }
+
+  applyReaderDisplaySettings(body) {
+    if (!body || !body.style || typeof body.style.setProperty !== "function") return;
+    const fontSize = clampReaderFontSize(this.plugin.settings.readerFontSize);
+    const lineHeight = normalizeReaderLineHeight(this.plugin.settings.readerLineHeight);
+    body.style.setProperty("--rc-reader-font-size", `${fontSize}px`);
+    body.style.setProperty("--rc-reader-line-height", String(lineHeight));
+  }
+
+  renderReaderDisplayControls(actions, body) {
+    const settings = actions.createDiv({ cls: "reading-capture-reader-settings" });
+    const trigger = settings.createEl("button", {
+      cls: "reading-capture-reader-settings-trigger",
+      text: "Aa",
+      attr: { "aria-label": "阅读设置", title: "阅读设置" },
+    });
+    const panel = settings.createDiv({ cls: "reading-capture-reader-settings-popover is-hidden" });
+    panel.createEl("div", { cls: "reading-capture-reader-settings-title", text: "阅读设置" });
+
+    const sizeRow = panel.createDiv({ cls: "reading-capture-reader-settings-row" });
+    sizeRow.createEl("span", { cls: "reading-capture-reader-settings-label", text: "字号" });
+    const sizeValue = sizeRow.createEl("span", { cls: "reading-capture-reader-settings-value", text: `${clampReaderFontSize(this.plugin.settings.readerFontSize)}px` });
+
+    const sliderRow = panel.createDiv({ cls: "reading-capture-reader-settings-slider-row" });
+    const minusButton = sliderRow.createEl("button", { cls: "reading-capture-reader-settings-step", text: "A-" });
+    const slider = sliderRow.createEl("input", {
+      cls: "reading-capture-reader-settings-slider",
+      attr: {
+        type: "range",
+        min: String(READER_FONT_SIZE_MIN),
+        max: String(READER_FONT_SIZE_MAX),
+        step: "1",
+        value: String(clampReaderFontSize(this.plugin.settings.readerFontSize)),
+        "aria-label": "正文字号",
+      },
+    });
+    slider.value = String(clampReaderFontSize(this.plugin.settings.readerFontSize));
+    const plusButton = sliderRow.createEl("button", { cls: "reading-capture-reader-settings-step", text: "A+" });
+
+    panel.createEl("div", { cls: "reading-capture-reader-settings-label", text: "行距" });
+    const lineHeightRow = panel.createDiv({ cls: "reading-capture-reader-line-height-row" });
+    const lineHeightButtons = READER_LINE_HEIGHTS.map((item) => {
+      const button = lineHeightRow.createEl("button", { cls: "reading-capture-reader-line-height-option", text: item.label });
+      button.dataset.lineHeight = String(item.value);
+      return { item, button };
+    });
+
+    const resetButton = panel.createEl("button", { cls: "reading-capture-reader-settings-reset", text: "恢复默认" });
+
+    const setPanelOpen = (isOpen) => {
+      if (isOpen) panel.removeClass("is-hidden");
+      else panel.addClass("is-hidden");
+    };
+    const updateLineHeightButtons = () => {
+      const current = normalizeReaderLineHeight(this.plugin.settings.readerLineHeight);
+      lineHeightButtons.forEach(({ item, button }) => {
+        if (Math.abs(item.value - current) < 0.01) button.addClass("is-active");
+        else button.removeClass("is-active");
+      });
+    };
+    const updateDisplay = async (fontSize, lineHeight = this.plugin.settings.readerLineHeight) => {
+      const nextFontSize = clampReaderFontSize(fontSize);
+      const nextLineHeight = normalizeReaderLineHeight(lineHeight);
+      this.plugin.settings.readerFontSize = nextFontSize;
+      this.plugin.settings.readerLineHeight = nextLineHeight;
+      slider.value = String(nextFontSize);
+      sizeValue.text = `${nextFontSize}px`;
+      sizeValue.textContent = `${nextFontSize}px`;
+      this.applyReaderDisplaySettings(body);
+      updateLineHeightButtons();
+      await this.plugin.saveSettings();
+    };
+
+    trigger.addEventListener("click", () => {
+      const isHidden = panel.classes && typeof panel.classes.has === "function" ? panel.classes.has("is-hidden") : panel.classList.contains("is-hidden");
+      setPanelOpen(isHidden);
+    });
+    slider.addEventListener("input", async (event) => {
+      await updateDisplay(event.target && event.target.value ? event.target.value : slider.value);
+    });
+    minusButton.addEventListener("click", async () => {
+      await updateDisplay(clampReaderFontSize(this.plugin.settings.readerFontSize) - 1);
+    });
+    plusButton.addEventListener("click", async () => {
+      await updateDisplay(clampReaderFontSize(this.plugin.settings.readerFontSize) + 1);
+    });
+    lineHeightButtons.forEach(({ item, button }) => {
+      button.addEventListener("click", async () => {
+        await updateDisplay(this.plugin.settings.readerFontSize, item.value);
+      });
+    });
+    resetButton.addEventListener("click", async () => {
+      await updateDisplay(DEFAULT_SETTINGS.readerFontSize, DEFAULT_SETTINGS.readerLineHeight);
+    });
+
+    updateLineHeightButtons();
   }
 
   renderReaderFooter(footer, markdown, body) {
@@ -2637,6 +2759,8 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     this.settings.readingRoot = normalizePath(this.settings.readingRoot || DEFAULT_SETTINGS.readingRoot);
     this.settings.articleLibraryRoots = this.settings.articleLibraryRoots || DEFAULT_SETTINGS.articleLibraryRoots;
     this.settings.articleLibraryExcludeRoots = this.settings.articleLibraryExcludeRoots || DEFAULT_SETTINGS.articleLibraryExcludeRoots;
+    this.settings.readerFontSize = clampReaderFontSize(this.settings.readerFontSize);
+    this.settings.readerLineHeight = normalizeReaderLineHeight(this.settings.readerLineHeight);
   }
 
   async saveSettings() {

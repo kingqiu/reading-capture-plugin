@@ -301,6 +301,96 @@
   border-color: rgba(var(--rc-mint-rgb), 0.7);
 }
 
+.reading-capture-reader-settings {
+  position: relative;
+}
+
+.reading-capture-reader-settings-trigger {
+  min-width: 42px;
+}
+
+.reading-capture-reader-settings-popover {
+  background: rgba(9, 18, 12, 0.98);
+  border: 1px solid rgba(var(--rc-mint-rgb), 0.25);
+  border-radius: 10px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.36);
+  color: #d8ddd4;
+  display: grid;
+  gap: 10px;
+  min-width: 260px;
+  padding: 14px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  z-index: 20;
+}
+
+.reading-capture-reader-settings-popover.is-hidden {
+  display: none;
+}
+
+.reading-capture-reader-settings-title {
+  color: #eef2e8;
+  font-size: 13px;
+  font-weight: 820;
+}
+
+.reading-capture-reader-settings-row,
+.reading-capture-reader-settings-slider-row,
+.reading-capture-reader-line-height-row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.reading-capture-reader-settings-row {
+  justify-content: space-between;
+}
+
+.reading-capture-reader-settings-label {
+  color: #8f9c91;
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.reading-capture-reader-settings-value {
+  color: #f0c36d;
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.reading-capture-reader-settings-slider {
+  accent-color: #4f7dff;
+  cursor: pointer;
+  flex: 1 1 auto;
+  min-width: 120px;
+}
+
+.reading-capture-reader-actions .reading-capture-reader-settings-step,
+.reading-capture-reader-actions .reading-capture-reader-line-height-option,
+.reading-capture-reader-actions .reading-capture-reader-settings-reset {
+  border-radius: 7px;
+  font-size: 12px;
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.reading-capture-reader-line-height-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.reading-capture-reader-actions .reading-capture-reader-line-height-option.is-active {
+  background: rgba(var(--rc-mint-rgb), 0.38);
+  border-color: rgba(var(--rc-mint-rgb), 0.62);
+  color: #eff5ec;
+}
+
+.reading-capture-reader-actions .reading-capture-reader-settings-reset {
+  color: #f0c36d;
+  width: 100%;
+}
+
 .reading-capture-library button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
@@ -357,8 +447,8 @@
   background: transparent !important;
   color: #d1d6ce !important;
   font-family: "Songti SC", "Noto Serif SC", "Kaiti SC", ui-serif, Georgia, serif !important;
-  font-size: 17px !important;
-  line-height: 1.72 !important;
+  font-size: var(--rc-reader-font-size, 18px) !important;
+  line-height: var(--rc-reader-line-height, 1.72) !important;
   box-sizing: border-box;
   height: 100%;
   margin: 0 auto;

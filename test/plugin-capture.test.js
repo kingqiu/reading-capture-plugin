@@ -162,9 +162,16 @@ function makeFakeElement(tag = "div") {
     dataset: {},
     listeners: {},
     disabled: false,
+    value: "",
     empty() {
       this.children = [];
       this.text = "";
+    },
+    style: {
+      properties: {},
+      setProperty(key, value) {
+        this.properties[key] = value;
+      },
     },
     addClass(value) {
       for (const item of String(value || "").split(/\s+/).filter(Boolean)) this.classes.add(item);
@@ -180,6 +187,8 @@ function makeFakeElement(tag = "div") {
       if (options.cls) child.addClass(options.cls);
       if (options.text) child.text = options.text;
       if (options.attr) child.attrs = { ...child.attrs, ...options.attr };
+      if (Object.prototype.hasOwnProperty.call(options, "value")) child.value = options.value;
+      if (child.attrs && Object.prototype.hasOwnProperty.call(child.attrs, "value")) child.value = child.attrs.value;
       this.children.push(child);
       return child;
     },
@@ -217,6 +226,30 @@ function fakeElementsByClass(element, className) {
   };
   visit(element);
   return matches;
+}
+
+function fakeElementsByTag(element, tagName) {
+  const matches = [];
+  const visit = (node) => {
+    if (node.tag === tagName) matches.push(node);
+    for (const child of node.children || []) visit(child);
+  };
+  visit(element);
+  return matches;
+}
+
+function fakeElementByText(element, text) {
+  let match = null;
+  const visit = (node) => {
+    if (match) return;
+    if (node.text === text) {
+      match = node;
+      return;
+    }
+    for (const child of node.children || []) visit(child);
+  };
+  visit(element);
+  return match;
 }
 
 async function testCaptureWritesAnnotationAndIndex() {
@@ -927,6 +960,84 @@ async function testReaderSidebarKeepsAnnotationNavigationFocused() {
   assert.strictEqual(cards[0].children.some((child) => child.tag === "button" && child.text === "打开阅读记录"), false);
 }
 
+async function testReaderDisplayControlsAdjustFontSizeAndLineHeight() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  plugin.app = {
+    workspace: {
+      on() {
+        return {};
+      },
+      getActiveFile() {
+        return null;
+      },
+    },
+  };
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => {
+    registeredViews[type] = factory;
+  };
+  let saveCount = 0;
+  plugin.saveSettings = async () => {
+    saveCount += 1;
+  };
+  await plugin.onload();
+  plugin.settings.readerFontSize = 17;
+  plugin.settings.readerLineHeight = 1.72;
+  const view = registeredViews["reading-capture-reader"]({});
+  const actions = makeFakeElement();
+  const body = makeFakeElement();
+
+  view.renderReaderDisplayControls(actions, body);
+  view.applyReaderDisplaySettings(body);
+
+  const texts = fakeElementTexts(actions);
+  assert.ok(texts.includes("Aa"), "reader toolbar should expose reading settings");
+  assert.strictEqual(body.style.properties["--rc-reader-font-size"], "17px");
+  assert.strictEqual(body.style.properties["--rc-reader-line-height"], "1.72");
+
+  const settingsButton = fakeElementByText(actions, "Aa");
+  assert.strictEqual(typeof settingsButton.listeners.click, "function");
+  settingsButton.listeners.click();
+
+  const range = fakeElementsByTag(actions, "input").find((input) => input.attrs.type === "range");
+  assert.ok(range, "reader settings should include a font-size slider");
+  assert.strictEqual(range.attrs.min, "14");
+  assert.strictEqual(range.attrs.max, "28");
+  range.value = "23";
+  await range.listeners.input({ target: range });
+  assert.strictEqual(plugin.settings.readerFontSize, 23);
+  assert.strictEqual(body.style.properties["--rc-reader-font-size"], "23px");
+  assert.ok(saveCount >= 1);
+
+  const plusButton = fakeElementByText(actions, "A+");
+  await plusButton.listeners.click();
+  assert.strictEqual(plugin.settings.readerFontSize, 24);
+  assert.strictEqual(body.style.properties["--rc-reader-font-size"], "24px");
+
+  const relaxedButton = fakeElementByText(actions, "舒展");
+  await relaxedButton.listeners.click();
+  assert.strictEqual(plugin.settings.readerLineHeight, 1.9);
+  assert.strictEqual(body.style.properties["--rc-reader-line-height"], "1.9");
+
+  const resetButton = fakeElementByText(actions, "恢复默认");
+  await resetButton.listeners.click();
+  assert.strictEqual(plugin.settings.readerFontSize, 18);
+  assert.strictEqual(plugin.settings.readerLineHeight, 1.72);
+  assert.strictEqual(body.style.properties["--rc-reader-font-size"], "18px");
+}
+
+function testReaderBodyUsesDisplaySettingVariables() {
+  const css = fs.readFileSync(path.join(__dirname, "../plugin/styles.css"), "utf8");
+  assert.match(css, /--rc-reader-font-size/, "reader CSS should expose a font-size variable");
+  assert.match(css, /font-size:\s*var\(--rc-reader-font-size/, "reader body should use the saved font-size variable");
+  assert.match(css, /line-height:\s*var\(--rc-reader-line-height/, "reader body should use the saved line-height variable");
+  assert.match(css, /reading-capture-reader-settings-slider/, "reader settings slider should have dedicated styling");
+}
+
 async function testReadingRecordViewGroupsAnnotationsAndSwitchesMarkdownInPlace() {
   const PluginClass = loadPluginClass();
   const plugin = new PluginClass();
@@ -1083,6 +1194,8 @@ testCaptureWritesAnnotationAndIndex()
   .then(testGenericDefaultSettings)
   .then(testVersionPathTooltipAndCopy)
   .then(testReaderSidebarKeepsAnnotationNavigationFocused)
+  .then(testReaderDisplayControlsAdjustFontSizeAndLineHeight)
+  .then(testReaderBodyUsesDisplaySettingVariables)
   .then(testReadingRecordViewGroupsAnnotationsAndSwitchesMarkdownInPlace)
   .then(testOpeningReadingNoteUsesRecordViewInsteadOfRawMarkdown)
   .then(() => console.log("plugin capture test passed"))
