@@ -21,6 +21,15 @@ const DIAGNOSTIC_LOG_PATH = "Reading Capture/diagnostics/diagnostic-log.md";
 const DIAGNOSTIC_REPORT_PATH = "Reading Capture/diagnostics/diagnostic-report.md";
 const DIAGNOSTIC_LOG_MAX_CHARS = 120000;
 const RUNTIME_FILE_NAMES = ["manifest.json", "main.js", "styles.css", "reading-core.js"];
+const TOPIC_MINER_ROOT = "Learning/reading-notes/topic-miner";
+const TOPIC_MINER_FEEDBACK_PATH = `${TOPIC_MINER_ROOT}/feedback.jsonl`;
+const TOPIC_FEEDBACK_OPTIONS = ["待定", "想写", "暂存", "不要", "已写"];
+const TOPIC_SORT_OPTIONS = [
+  ["workflow", "工作流排序"],
+  ["content", "最新内容"],
+  ["feedback", "最新反馈"],
+];
+const TOPIC_DEFAULT_COLLAPSED_FEEDBACKS = ["不要", "已写"];
 const WORKFLOW_STATUS_OPTIONS = [
   ["reading", "阅读中"],
   ["annotated", "已标注"],
@@ -32,7 +41,30 @@ const DEFAULT_SETTINGS = {
   openNoteAfterCapture: false,
   articleLibraryRoots: "",
   articleLibraryExcludeRoots: ".obsidian",
+  readerFontSize: 18,
+  readerLineHeight: 1.72,
 };
+
+const READER_FONT_SIZE_MIN = 14;
+const READER_FONT_SIZE_MAX = 28;
+const READER_LINE_HEIGHTS = [
+  { id: "compact", label: "紧凑", value: 1.55 },
+  { id: "standard", label: "标准", value: 1.72 },
+  { id: "relaxed", label: "舒展", value: 1.9 },
+];
+
+function clampReaderFontSize(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return DEFAULT_SETTINGS.readerFontSize;
+  return Math.min(Math.max(Math.round(number), READER_FONT_SIZE_MIN), READER_FONT_SIZE_MAX);
+}
+
+function normalizeReaderLineHeight(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return DEFAULT_SETTINGS.readerLineHeight;
+  const match = READER_LINE_HEIGHTS.find((item) => Math.abs(item.value - number) < 0.01);
+  return match ? match.value : DEFAULT_SETTINGS.readerLineHeight;
+}
 
 class TextInputModal extends Modal {
   constructor(app, title, placeholder, onSubmit, options = {}) {
@@ -332,6 +364,8 @@ class ReadingCaptureReaderView extends ItemView {
 
     const articlePanel = mainPane.createDiv({ cls: "reading-capture-reader-article-panel" });
     const body = articlePanel.createDiv({ cls: "reading-capture-reader-body markdown-preview-view" });
+    this.applyReaderDisplaySettings(body);
+    this.renderReaderDisplayControls(actions, body);
     const footer = mainPane.createDiv({ cls: "reading-capture-reader-footer" });
     const sidebar = workspace.createEl("aside", { cls: "reading-capture-reader-sidebar" });
     if (this.sidebarCollapsed) sidebar.addClass("is-collapsed");
@@ -369,6 +403,103 @@ class ReadingCaptureReaderView extends ItemView {
       event.preventDefault();
       this.captureSelectedText(sourceFile, selectedText);
     });
+  }
+
+  applyReaderDisplaySettings(body) {
+    if (!body || !body.style || typeof body.style.setProperty !== "function") return;
+    const fontSize = clampReaderFontSize(this.plugin.settings.readerFontSize);
+    const lineHeight = normalizeReaderLineHeight(this.plugin.settings.readerLineHeight);
+    body.style.setProperty("--rc-reader-font-size", `${fontSize}px`);
+    body.style.setProperty("--rc-reader-line-height", String(lineHeight));
+  }
+
+  renderReaderDisplayControls(actions, body) {
+    const settings = actions.createDiv({ cls: "reading-capture-reader-settings" });
+    const trigger = settings.createEl("button", {
+      cls: "reading-capture-reader-settings-trigger",
+      text: "Aa",
+      attr: { "aria-label": "阅读设置", title: "阅读设置" },
+    });
+    const panel = settings.createDiv({ cls: "reading-capture-reader-settings-popover is-hidden" });
+    panel.createEl("div", { cls: "reading-capture-reader-settings-title", text: "阅读设置" });
+
+    const sizeRow = panel.createDiv({ cls: "reading-capture-reader-settings-row" });
+    sizeRow.createEl("span", { cls: "reading-capture-reader-settings-label", text: "字号" });
+    const sizeValue = sizeRow.createEl("span", { cls: "reading-capture-reader-settings-value", text: `${clampReaderFontSize(this.plugin.settings.readerFontSize)}px` });
+
+    const sliderRow = panel.createDiv({ cls: "reading-capture-reader-settings-slider-row" });
+    const minusButton = sliderRow.createEl("button", { cls: "reading-capture-reader-settings-step", text: "A-" });
+    const slider = sliderRow.createEl("input", {
+      cls: "reading-capture-reader-settings-slider",
+      attr: {
+        type: "range",
+        min: String(READER_FONT_SIZE_MIN),
+        max: String(READER_FONT_SIZE_MAX),
+        step: "1",
+        value: String(clampReaderFontSize(this.plugin.settings.readerFontSize)),
+        "aria-label": "正文字号",
+      },
+    });
+    slider.value = String(clampReaderFontSize(this.plugin.settings.readerFontSize));
+    const plusButton = sliderRow.createEl("button", { cls: "reading-capture-reader-settings-step", text: "A+" });
+
+    panel.createEl("div", { cls: "reading-capture-reader-settings-label", text: "行距" });
+    const lineHeightRow = panel.createDiv({ cls: "reading-capture-reader-line-height-row" });
+    const lineHeightButtons = READER_LINE_HEIGHTS.map((item) => {
+      const button = lineHeightRow.createEl("button", { cls: "reading-capture-reader-line-height-option", text: item.label });
+      button.dataset.lineHeight = String(item.value);
+      return { item, button };
+    });
+
+    const resetButton = panel.createEl("button", { cls: "reading-capture-reader-settings-reset", text: "恢复默认" });
+
+    const setPanelOpen = (isOpen) => {
+      if (isOpen) panel.removeClass("is-hidden");
+      else panel.addClass("is-hidden");
+    };
+    const updateLineHeightButtons = () => {
+      const current = normalizeReaderLineHeight(this.plugin.settings.readerLineHeight);
+      lineHeightButtons.forEach(({ item, button }) => {
+        if (Math.abs(item.value - current) < 0.01) button.addClass("is-active");
+        else button.removeClass("is-active");
+      });
+    };
+    const updateDisplay = async (fontSize, lineHeight = this.plugin.settings.readerLineHeight) => {
+      const nextFontSize = clampReaderFontSize(fontSize);
+      const nextLineHeight = normalizeReaderLineHeight(lineHeight);
+      this.plugin.settings.readerFontSize = nextFontSize;
+      this.plugin.settings.readerLineHeight = nextLineHeight;
+      slider.value = String(nextFontSize);
+      sizeValue.text = `${nextFontSize}px`;
+      sizeValue.textContent = `${nextFontSize}px`;
+      this.applyReaderDisplaySettings(body);
+      updateLineHeightButtons();
+      await this.plugin.saveSettings();
+    };
+
+    trigger.addEventListener("click", () => {
+      const isHidden = panel.classes && typeof panel.classes.has === "function" ? panel.classes.has("is-hidden") : panel.classList.contains("is-hidden");
+      setPanelOpen(isHidden);
+    });
+    slider.addEventListener("input", async (event) => {
+      await updateDisplay(event.target && event.target.value ? event.target.value : slider.value);
+    });
+    minusButton.addEventListener("click", async () => {
+      await updateDisplay(clampReaderFontSize(this.plugin.settings.readerFontSize) - 1);
+    });
+    plusButton.addEventListener("click", async () => {
+      await updateDisplay(clampReaderFontSize(this.plugin.settings.readerFontSize) + 1);
+    });
+    lineHeightButtons.forEach(({ item, button }) => {
+      button.addEventListener("click", async () => {
+        await updateDisplay(this.plugin.settings.readerFontSize, item.value);
+      });
+    });
+    resetButton.addEventListener("click", async () => {
+      await updateDisplay(DEFAULT_SETTINGS.readerFontSize, DEFAULT_SETTINGS.readerLineHeight);
+    });
+
+    updateLineHeightButtons();
   }
 
   renderReaderFooter(footer, markdown, body) {
@@ -816,6 +947,14 @@ class ReadingCaptureLibraryView extends ItemView {
     searchButton.addEventListener("click", () => {
       this.searchDraft = search.value;
       this.applySearch();
+    });
+    const topicButton = tools.createEl("button", {
+      cls: "reading-capture-topic-entry-button",
+      text: CREATIVE_IDEA_SECTION,
+      attr: { title: "打开创作灵感工作台" },
+    });
+    topicButton.addEventListener("click", async () => {
+      await this.plugin.openTopicPool();
     });
     const refresh = tools.createEl("button", { text: this.isLoading ? "扫描中..." : "重新扫描" });
     refresh.disabled = this.isLoading;
@@ -1471,6 +1610,14 @@ class ReadingCaptureTopicPoolView extends ItemView {
     this.plugin = plugin;
     this.items = [];
     this.isLoading = false;
+    this.selectedId = "";
+    this.sourceFilter = "all";
+    this.feedbackFilter = "all";
+    this.topicSortMode = "workflow";
+    this.collapsedTopicFeedbacks = new Set(TOPIC_DEFAULT_COLLAPSED_FEEDBACKS);
+    this.topicCardEls = new Map();
+    this.topicDetailEl = null;
+    this.topicListEl = null;
   }
 
   getViewType() {
@@ -1489,14 +1636,29 @@ class ReadingCaptureTopicPoolView extends ItemView {
     await this.reload();
   }
 
-  async reload() {
+  async reload(options = {}) {
+    const previousListScrollTop = options.preserveListScroll && this.topicListEl ? this.topicListEl.scrollTop : null;
+    const previousSelectedId = options.preserveSelectedId || "";
     this.isLoading = true;
-    await this.render();
+    if (!options.skipLoadingRender) await this.render();
     try {
       this.items = await this.plugin.buildTopicPoolItems();
+      if (previousSelectedId) this.selectedId = previousSelectedId;
     } finally {
       this.isLoading = false;
       await this.render();
+      this.restoreTopicListScroll(previousListScrollTop);
+    }
+    if (options.notify) new Notice("创作灵感已刷新。");
+  }
+
+  restoreTopicListScroll(scrollTop) {
+    if (!Number.isFinite(scrollTop) || !this.topicListEl) return;
+    this.topicListEl.scrollTop = scrollTop;
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => {
+        if (this.topicListEl) this.topicListEl.scrollTop = scrollTop;
+      });
     }
   }
 
@@ -1506,16 +1668,41 @@ class ReadingCaptureTopicPoolView extends ItemView {
     container.addClass("reading-capture-topic-pool");
 
     const shell = container.createDiv({ cls: "reading-capture-topic-shell" });
-    const top = shell.createDiv({ cls: "reading-capture-library-top" });
-    const title = top.createDiv({ cls: "reading-capture-library-title" });
+    const top = shell.createDiv({ cls: "reading-capture-topic-hero" });
+    const title = top.createDiv({ cls: "reading-capture-topic-title" });
+    title.createEl("div", { cls: "reading-capture-library-kicker", text: "READING CAPTURE / TOPIC MINER" });
     title.createEl("h1", { text: CREATIVE_IDEA_SECTION });
-    title.createEl("div", { cls: "reading-capture-library-subtitle", text: this.isLoading ? "正在整理创作灵感..." : `${this.items.length} 个创作灵感` });
-    const tools = top.createDiv({ cls: "reading-capture-library-tools" });
-    const refresh = tools.createEl("button", { text: this.isLoading ? "刷新中..." : "刷新" });
+    title.createEl("div", { cls: "reading-capture-library-subtitle", text: this.isLoading ? "正在整理创作灵感..." : this.summaryText() });
+    const tools = top.createDiv({ cls: "reading-capture-topic-tools" });
+    const refresh = tools.createEl("button", { attr: { type: "button" }, text: this.isLoading ? "刷新中..." : "刷新" });
     refresh.disabled = this.isLoading;
-    refresh.addEventListener("click", () => this.reload());
+    refresh.addEventListener("click", () => this.reload({ notify: true }));
+    const report = tools.createEl("button", { attr: { type: "button" }, text: "打开今日报告" });
+    report.addEventListener("click", () => this.openLatestTopicMinerReport());
+    const back = tools.createEl("button", { attr: { type: "button" }, text: "回到知见录" });
+    back.addEventListener("click", async () => this.plugin.openArticleLibrary());
 
-    const list = shell.createDiv({ cls: "reading-capture-topic-list" });
+    const workspace = shell.createDiv({ cls: "reading-capture-topic-workspace" });
+    const filters = workspace.createDiv({ cls: "reading-capture-topic-filters" });
+    this.renderTopicFilters(filters);
+
+    const main = workspace.createDiv({ cls: "reading-capture-topic-main" });
+    const listTop = main.createDiv({ cls: "reading-capture-topic-list-top" });
+    listTop.createEl("h2", { text: "候选列表" });
+    const listControls = listTop.createDiv({ cls: "reading-capture-topic-list-controls" });
+    listControls.createEl("span", { text: `${this.visibleItems().length} 条` });
+    const sortSelect = listControls.createEl("select", { cls: "reading-capture-topic-sort-select", attr: { "aria-label": "创作灵感排序方式" } });
+    for (const [value, label] of TOPIC_SORT_OPTIONS) {
+      const option = sortSelect.createEl("option", { text: label, attr: { value } });
+      if (value === this.topicSortMode) option.setAttr("selected", "selected");
+    }
+    sortSelect.value = this.topicSortMode;
+    sortSelect.addEventListener("change", async () => {
+      this.topicSortMode = sortSelect.value || "workflow";
+      await this.render();
+    });
+    const list = main.createDiv({ cls: "reading-capture-topic-list" });
+    this.topicListEl = list;
     if (this.isLoading && !this.items.length) {
       list.createDiv({ cls: "reading-capture-library-empty", text: "正在整理创作灵感，请稍等。" });
       return;
@@ -1525,26 +1712,298 @@ class ReadingCaptureTopicPoolView extends ItemView {
       return;
     }
 
-    for (const item of this.items) {
-      const card = list.createDiv({ cls: "reading-capture-topic-card" });
-      const meta = card.createDiv({ cls: "reading-capture-library-card-meta" });
-      meta.createEl("span", { text: item.sourceRoot || "source" });
-      if (item.time) meta.createEl("span", { text: item.time });
-      card.createEl("h2", { text: item.note || item.quote || "未命名灵感" });
-      if (item.quote) card.createEl("blockquote", { text: item.quote });
-      card.createEl("p", { text: item.sourceTitle || item.sourcePath });
-      const actions = card.createDiv({ cls: "reading-capture-library-detail-actions" });
-      const openSource = actions.createEl("button", { text: "打开来源" });
-      openSource.addEventListener("click", async () => {
-        const file = this.plugin.app.vault.getAbstractFileByPath(item.sourcePath);
-        if (this.plugin.isFile(file)) await this.plugin.openReaderForFile(file);
-      });
-      const openNote = actions.createEl("button", { text: "阅读记录" });
-      openNote.addEventListener("click", async () => {
-        const file = this.plugin.app.vault.getAbstractFileByPath(item.readingNotePath);
-        await this.plugin.openReadingRecord(this.plugin.isFile(file) ? file : this.plugin.makeFileRef(item.readingNotePath), this.plugin.makeFileRef(item.sourcePath));
-      });
+    const visibleItems = this.visibleItems();
+    if (!visibleItems.some((item) => item.id === this.selectedId)) this.selectedId = visibleItems[0] ? visibleItems[0].id : "";
+    if (!visibleItems.length) {
+      list.createDiv({ cls: "reading-capture-library-empty", text: "当前筛选下没有创作灵感。" });
+      this.renderTopicDetail(workspace.createDiv({ cls: "reading-capture-topic-detail" }), null);
+      return;
     }
+
+    this.topicCardEls = new Map();
+    if (this.shouldGroupTopicItems()) {
+      this.renderTopicGroups(list, visibleItems);
+    } else {
+      this.renderTopicCards(list, visibleItems);
+    }
+    this.topicDetailEl = workspace.createDiv({ cls: "reading-capture-topic-detail" });
+    this.renderTopicDetail(this.topicDetailEl, visibleItems.find((item) => item.id === this.selectedId) || visibleItems[0]);
+  }
+
+  renderTopicGroups(container, items) {
+    const groups = new Map();
+    for (const item of items) {
+      const feedback = this.topicFeedback(item);
+      if (!groups.has(feedback)) groups.set(feedback, []);
+      groups.get(feedback).push(item);
+    }
+    for (const feedback of TOPIC_FEEDBACK_OPTIONS) {
+      const groupItems = groups.get(feedback) || [];
+      if (!groupItems.length) continue;
+      const collapsed = this.collapsedTopicFeedbacks.has(feedback);
+      const header = container.createEl("button", {
+        cls: `reading-capture-topic-group-header ${collapsed ? "is-collapsed" : ""}`,
+        attr: { type: "button" },
+      });
+      const title = header.createDiv({ cls: "reading-capture-topic-group-title" });
+      title.createEl("span", { cls: `reading-capture-topic-group-dot ${this.feedbackClass(feedback)}` });
+      title.createEl("strong", { text: feedback });
+      title.createEl("span", { text: `${groupItems.length}` });
+      header.createEl("span", { cls: "reading-capture-topic-group-action", text: collapsed ? "展开" : "收起" });
+      header.addEventListener("click", async () => {
+        if (collapsed) this.collapsedTopicFeedbacks.delete(feedback);
+        else this.collapsedTopicFeedbacks.add(feedback);
+        await this.render();
+      });
+      if (!collapsed) this.renderTopicCards(container, groupItems);
+    }
+  }
+
+  renderTopicCards(container, items) {
+    for (const item of items) {
+      this.renderTopicCard(container, item);
+    }
+  }
+
+  renderTopicCard(container, item) {
+    const card = container.createDiv({ cls: `reading-capture-topic-card ${item.id === this.selectedId ? "is-selected" : ""} ${item.kind === "ai" ? "is-ai" : "is-manual"}` });
+    this.topicCardEls.set(item.id, card);
+    card.addEventListener("click", async () => {
+      this.selectTopicItem(item);
+    });
+    const meta = card.createDiv({ cls: "reading-capture-library-card-meta" });
+    meta.createEl("span", { cls: item.kind === "ai" ? "is-ai" : "is-manual", text: item.originLabel || (item.kind === "ai" ? "AI 推荐" : "人工灵感") });
+    if (item.feedback) meta.createEl("span", { cls: `is-feedback ${this.feedbackClass(item.feedback)}`, text: item.feedback });
+    if (item.sourceType) meta.createEl("span", { text: item.sourceType });
+    card.createEl("h2", { text: this.itemTitle(item) });
+    const summary = item.judgment || item.reason || item.note || item.quote || item.sourceTitle || item.sourcePath || "";
+    if (summary) card.createEl("p", { text: this.truncate(summary, 120) });
+    const footer = card.createDiv({ cls: "reading-capture-topic-card-footer" });
+    footer.createEl("span", { text: item.duplicationRisk ? `重复风险 ${item.duplicationRisk}` : item.sourceTitle || item.reportDate || "" });
+    footer.createEl("span", { text: item.firstAction ? "有第一动作" : item.kind === "manual" ? "来自阅读标注" : "等待反馈" });
+  }
+
+  selectTopicItem(item) {
+    if (!item) return;
+    this.selectedId = item.id;
+    for (const [id, card] of this.topicCardEls.entries()) {
+      if (id === item.id) card.addClass("is-selected");
+      else card.removeClass("is-selected");
+    }
+    if (this.topicDetailEl) {
+      this.topicDetailEl.empty();
+      this.renderTopicDetail(this.topicDetailEl, item);
+    }
+  }
+
+  renderTopicFilters(container) {
+    this.renderFilterSection(container, "来源", [
+      ["all", `全部 ${this.items.length}`],
+      ["manual", `人工灵感 ${this.items.filter((item) => item.kind === "manual").length}`],
+      ["ai", `AI 推荐 ${this.items.filter((item) => item.kind === "ai").length}`],
+    ], this.sourceFilter, async (value) => {
+      this.sourceFilter = value;
+      await this.render();
+    });
+    this.renderFilterSection(container, "状态", [
+      ["all", `全部 ${this.items.length}`],
+      ...TOPIC_FEEDBACK_OPTIONS.map((value) => [value, `${value} ${this.items.filter((item) => (item.feedback || "待定") === value).length}`]),
+    ], this.feedbackFilter, async (value) => {
+      this.feedbackFilter = value;
+      await this.render();
+    });
+  }
+
+  renderFilterSection(container, title, options, active, onSelect) {
+    const section = container.createDiv({ cls: "reading-capture-topic-filter-section" });
+    section.createEl("h3", { text: title });
+    for (const [value, label] of options) {
+      const button = section.createEl("button", { cls: value === active ? "is-active" : "", text: label });
+      button.addEventListener("click", () => onSelect(value));
+    }
+  }
+
+  renderTopicDetail(container, item) {
+    if (!item) {
+      container.createEl("h2", { text: "当前选题" });
+      container.createDiv({ cls: "reading-capture-library-empty", text: "选择一个候选后，可以在这里查看详情和写给 AI 的补充。" });
+      return;
+    }
+
+    container.createEl("div", { cls: "reading-capture-library-kicker", text: item.kind === "ai" ? `AI 推荐 / ${item.reportDate || "Topic Miner"}` : "人工灵感" });
+    const heading = container.createDiv({ cls: "reading-capture-topic-detail-heading" });
+    heading.createEl("h2", { text: this.itemTitle(item) });
+    heading.createEl("span", { cls: `reading-capture-topic-feedback-pill ${this.feedbackClass(item.feedback || "待定")}`, text: item.feedback || "待定" });
+
+    this.renderDetailBlock(container, "核心判断", this.detailPrimaryText(item));
+    if (item.whyNow) this.renderDetailBlock(container, "为什么现在值得写", item.whyNow);
+    const sourceSummary = this.sourceSummary(item);
+    if (sourceSummary) this.renderDetailBlock(container, "素材来源", sourceSummary);
+    if (item.relationship) this.renderDetailBlock(container, "与已发布内容关系", item.relationship);
+    if (item.firstAction || item.reason) this.renderDetailBlock(container, "第一动作", item.firstAction || item.reason);
+
+    const feedbackPanel = container.createDiv({ cls: "reading-capture-topic-feedback-panel" });
+    feedbackPanel.createEl("h3", { text: "反馈给 AI" });
+    feedbackPanel.createEl("p", { cls: "reading-capture-topic-feedback-hint", text: "补充备注不是必填。没有额外想法时，只选状态并保存也可以。" });
+    let selectedFeedback = item.feedback || "待定";
+    const buttons = feedbackPanel.createDiv({ cls: "reading-capture-topic-feedback-buttons" });
+    const buttonEls = [];
+    for (const value of TOPIC_FEEDBACK_OPTIONS) {
+      const button = buttons.createEl("button", { cls: value === selectedFeedback ? "is-active" : "", text: value });
+      button.addEventListener("click", () => {
+        selectedFeedback = value;
+        for (const itemButton of buttonEls) itemButton.removeClass("is-active");
+        button.addClass("is-active");
+      });
+      buttonEls.push(button);
+    }
+    const textarea = feedbackPanel.createEl("textarea", {
+      cls: "reading-capture-topic-feedback-note",
+      attr: { placeholder: "可选：补充你对这个选题的判断、关联文章、扩展方向或搜索建议。" },
+    });
+    textarea.value = item.feedbackNote || "";
+    const save = feedbackPanel.createEl("button", { cls: "reading-capture-topic-save-button", text: "保存给 AI" });
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      save.textContent = "保存中...";
+      try {
+        await this.plugin.saveTopicMinerFeedback(item, selectedFeedback, textarea.value);
+        if (TOPIC_DEFAULT_COLLAPSED_FEEDBACKS.includes(selectedFeedback)) this.collapsedTopicFeedbacks.delete(selectedFeedback);
+        await this.reload({ preserveListScroll: true, preserveSelectedId: item.id, skipLoadingRender: true });
+        new Notice("已保存给 Topic Miner 的反馈。");
+      } catch (error) {
+        save.disabled = false;
+        save.textContent = "保存给 AI";
+        new Notice(`保存失败：${error && error.message ? error.message : "请稍后重试"}`);
+      }
+    });
+
+    const actions = container.createDiv({ cls: "reading-capture-topic-detail-actions" });
+    const sourceButton = actions.createEl("button", { text: item.kind === "ai" ? "打开来源文章" : "打开来源" });
+    sourceButton.addEventListener("click", async () => this.openItemSource(item));
+    const recordButton = actions.createEl("button", { text: item.kind === "ai" ? "打开 Topic Miner 报告" : "阅读记录" });
+    recordButton.addEventListener("click", async () => this.openItemRecord(item));
+  }
+
+  detailPrimaryText(item) {
+    return item.judgment || item.note || item.reason || item.quote || item.sourceTitle || this.itemTitle(item);
+  }
+
+  sourceSummary(item) {
+    if (Array.isArray(item.sources) && item.sources.length) return item.sources.join("\n");
+    return item.sourcePath || item.readingNotePath || "";
+  }
+
+  renderDetailBlock(container, title, text) {
+    const block = container.createDiv({ cls: "reading-capture-topic-detail-block" });
+    block.createEl("h3", { text: title });
+    block.createEl("p", { text });
+  }
+
+  async openItemSource(item) {
+    const path = item.sourcePath || (Array.isArray(item.sources) ? item.sources[0] : "");
+    if (!path) return;
+    const file = this.plugin.app.vault.getAbstractFileByPath(path);
+    if (this.plugin.isFile(file)) await this.plugin.openReaderForFile(file);
+  }
+
+  async openItemRecord(item) {
+    if (item.kind === "ai") {
+      const file = this.plugin.app.vault.getAbstractFileByPath(item.reportPath);
+      if (this.plugin.isFile(file)) await this.plugin.openFile(file);
+      return;
+    }
+    const file = this.plugin.app.vault.getAbstractFileByPath(item.readingNotePath);
+    await this.plugin.openReadingRecord(this.plugin.isFile(file) ? file : this.plugin.makeFileRef(item.readingNotePath), this.plugin.makeFileRef(item.sourcePath));
+  }
+
+  async openLatestTopicMinerReport() {
+    const report = (await this.plugin.getTopicMinerReportFiles())[0];
+    if (!report) {
+      new Notice("还没有找到 Topic Miner 报告。");
+      return;
+    }
+    await this.plugin.openFile(report);
+  }
+
+  visibleItems() {
+    return this.sortTopicItems(this.items.filter((item) => {
+      if (this.sourceFilter !== "all" && item.kind !== this.sourceFilter) return false;
+      if (this.feedbackFilter !== "all" && this.topicFeedback(item) !== this.feedbackFilter) return false;
+      return true;
+    }));
+  }
+
+  sortTopicItems(items) {
+    const sorted = [...items];
+    if (this.topicSortMode === "feedback") {
+      return sorted.sort((left, right) => this.compareTopicDates(this.topicFeedbackDate(right), this.topicFeedbackDate(left)) || this.compareTopicDates(this.topicContentDate(right), this.topicContentDate(left)) || this.compareTopicTitles(left, right));
+    }
+    if (this.topicSortMode === "content") {
+      return sorted.sort((left, right) => this.compareTopicDates(this.topicContentDate(right), this.topicContentDate(left)) || this.compareTopicTitles(left, right));
+    }
+    return sorted.sort((left, right) => {
+      const statusOrder = this.topicFeedbackRank(left) - this.topicFeedbackRank(right);
+      if (statusOrder !== 0) return statusOrder;
+      return this.compareTopicDates(this.topicContentDate(right), this.topicContentDate(left)) || this.compareTopicTitles(left, right);
+    });
+  }
+
+  shouldGroupTopicItems() {
+    return this.topicSortMode === "workflow" && this.feedbackFilter === "all";
+  }
+
+  topicFeedback(item) {
+    return TOPIC_FEEDBACK_OPTIONS.includes(item && item.feedback) ? item.feedback : "待定";
+  }
+
+  topicFeedbackRank(item) {
+    const index = TOPIC_FEEDBACK_OPTIONS.indexOf(this.topicFeedback(item));
+    return index === -1 ? 0 : index;
+  }
+
+  topicContentDate(item) {
+    if (this.plugin && typeof this.plugin.topicPoolSortDate === "function") return this.plugin.topicPoolSortDate(item);
+    return item && (item.sortDate || item.reportDate || item.updatedAt || item.time) || "";
+  }
+
+  topicFeedbackDate(item) {
+    return item && (item.feedbackUpdatedAt || item.updatedAt || this.topicContentDate(item)) || "";
+  }
+
+  compareTopicDates(left, right) {
+    return String(left || "").localeCompare(String(right || ""));
+  }
+
+  compareTopicTitles(left, right) {
+    return String(this.itemTitle(left)).localeCompare(String(this.itemTitle(right)));
+  }
+
+  summaryText() {
+    const aiCount = this.items.filter((item) => item.kind === "ai").length;
+    const manualCount = this.items.filter((item) => item.kind === "manual").length;
+    const reportDate = this.items
+      .filter((item) => item.kind === "ai" && item.reportDate)
+      .map((item) => item.reportDate)
+      .sort()
+      .pop();
+    return `${manualCount} 条人工灵感 · ${aiCount} 条 AI 推荐${reportDate ? ` · 当前报告 ${reportDate}` : ""}`;
+  }
+
+  itemTitle(item) {
+    return item.title || item.note || item.quote || "未命名灵感";
+  }
+
+  feedbackClass(value) {
+    if (value === "想写" || value === "已写") return "is-green";
+    if (value === "不要") return "is-red";
+    if (value === "暂存") return "is-amber";
+    return "is-blue";
+  }
+
+  truncate(value, maxLength) {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
   }
 }
 
@@ -2601,6 +3060,9 @@ module.exports = class ReadingCapturePlugin extends Plugin {
   async buildTopicPoolItems() {
     const index = await this.loadIndex();
     const sources = index && index.sources ? index.sources : {};
+    const feedbackItems = await this.loadTopicMinerFeedback();
+    const feedbackById = new Map(feedbackItems.filter((item) => item.candidateId).map((item) => [item.candidateId, item]));
+    const feedbackByTitle = new Map(feedbackItems.filter((item) => item.title).map((item) => [item.title, item]));
     const items = [];
     for (const [sourcePath, entry] of Object.entries(sources)) {
       if (!entry || !entry.reading_note_path) continue;
@@ -2608,9 +3070,18 @@ module.exports = class ReadingCapturePlugin extends Plugin {
         const markdown = await this.readText(entry.reading_note_path);
         const annotations = this.parseAnnotationsFromReadingNote(markdown).filter((item) => this.annotationMatchesFilter(item, "topic"));
         for (const annotation of annotations) {
+          const manualId = `${entry.reading_note_path}#${annotation.id}`;
+          const feedback = feedbackById.get(manualId) || feedbackByTitle.get(annotation.note) || null;
           items.push({
-            id: annotation.id,
+            id: manualId,
+            kind: "manual",
+            originLabel: "人工灵感",
+            feedback: feedback ? feedback.feedback : "待定",
+            feedbackNote: feedback ? feedback.note : "",
+            feedbackUpdatedAt: feedback ? feedback.updatedAt : "",
             time: annotation.time || "",
+            updatedAt: feedback && feedback.updatedAt ? feedback.updatedAt : annotation.time || entry.updated || "",
+            sortDate: this.topicPoolManualSortDate(sourcePath, entry, annotation),
             sourcePath,
             sourceTitle: entry.source_title || sourcePath,
             sourceRoot: entry.source_root || rootSlug(sourcePath.split("/").slice(0, -1).join("/")),
@@ -2624,7 +3095,288 @@ module.exports = class ReadingCapturePlugin extends Plugin {
         // A missing or malformed reading note should not block the creative ideas view.
       }
     }
-    return items.sort((left, right) => String(right.time || "").localeCompare(String(left.time || "")));
+    items.push(...(await this.buildTopicMinerCandidateItems(feedbackItems)));
+    return items.sort((left, right) => this.compareTopicPoolItems(left, right));
+  }
+
+  compareTopicPoolItems(left, right) {
+    const leftKey = this.topicPoolSortDate(left);
+    const rightKey = this.topicPoolSortDate(right);
+    const dateOrder = String(rightKey).localeCompare(String(leftKey));
+    if (dateOrder !== 0) return dateOrder;
+    if (left.kind !== right.kind) return left.kind === "manual" ? -1 : 1;
+    return String(this.topicPoolSortTitle(left)).localeCompare(String(this.topicPoolSortTitle(right)));
+  }
+
+  topicPoolSortDate(item) {
+    if (!item) return "";
+    if (item.sortDate) return item.sortDate;
+    if (item.kind === "ai") return item.reportDate || this.dateFromTopicPath(item.reportPath) || "";
+    return this.dateFromTopicPath(item.sourcePath) || this.dateFromTopicPath(item.readingNotePath) || this.dateFromTimestamp(item.time) || this.dateFromTimestamp(item.updatedAt) || "";
+  }
+
+  topicPoolSortTitle(item) {
+    return item && (item.title || item.note || item.quote || item.id) || "";
+  }
+
+  topicPoolManualSortDate(sourcePath, entry, annotation) {
+    return this.dateFromTopicPath(sourcePath)
+      || this.dateFromTopicPath(entry && entry.reading_note_path)
+      || this.dateFromTimestamp(annotation && annotation.time)
+      || this.dateFromTimestamp(entry && entry.updated)
+      || "";
+  }
+
+  dateFromTopicPath(value) {
+    const text = String(value || "");
+    const dashed = text.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (dashed) return `${dashed[1]}-${dashed[2]}-${dashed[3]}`;
+    const compact = text.match(/(?:^|[^\d])(\d{4})(\d{2})(\d{2})(?:[^\d]|$)/);
+    return compact ? `${compact[1]}-${compact[2]}-${compact[3]}` : "";
+  }
+
+  dateFromTimestamp(value) {
+    const match = String(value || "").match(/(\d{4}-\d{2}-\d{2})/);
+    return match ? match[1] : "";
+  }
+
+  async buildTopicMinerCandidateItems(feedbackItems = null) {
+    if (!feedbackItems) feedbackItems = await this.loadTopicMinerFeedback();
+    const feedbackById = new Map(feedbackItems.filter((item) => item.candidateId).map((item) => [item.candidateId, item]));
+    const feedbackByTitle = new Map(feedbackItems.filter((item) => item.title).map((item) => [item.title, item]));
+    const candidates = [];
+
+    for (const reportFile of await this.getTopicMinerReportFiles()) {
+      try {
+        const markdown = await this.readText(reportFile.path);
+        for (const candidate of this.parseTopicMinerReport(markdown, reportFile.path)) {
+          const feedback = feedbackById.get(candidate.id) || feedbackByTitle.get(candidate.title) || null;
+          candidates.push(Object.assign({}, candidate, {
+            feedback: feedback ? feedback.feedback : candidate.feedback,
+            feedbackNote: feedback ? feedback.note : "",
+            feedbackUpdatedAt: feedback ? feedback.updatedAt : "",
+            updatedAt: feedback && feedback.updatedAt ? feedback.updatedAt : candidate.updatedAt,
+          }));
+        }
+      } catch (error) {
+        // A broken report should not block manual creative ideas.
+      }
+    }
+
+    return candidates;
+  }
+
+  async getTopicMinerReportFiles() {
+    const files = typeof this.app.vault.getMarkdownFiles === "function" ? this.app.vault.getMarkdownFiles() : [];
+    const indexedFiles = files
+      .filter((file) => file && typeof file.path === "string" && normalizePath(file.path).startsWith(`${TOPIC_MINER_ROOT}/reports/`))
+      .map((file) => this.makeFileRef(file.path));
+    const adapterFiles = await this.listTopicMinerReportFilesFromAdapter();
+    const byPath = new Map();
+    for (const file of [...indexedFiles, ...adapterFiles]) {
+      if (file && file.path) byPath.set(normalizePath(file.path), this.makeFileRef(file.path));
+    }
+    return [...byPath.values()].sort((left, right) => String(right.path).localeCompare(String(left.path)));
+  }
+
+  async listTopicMinerReportFilesFromAdapter() {
+    const adapter = this.app && this.app.vault ? this.app.vault.adapter : null;
+    if (!adapter || typeof adapter.list !== "function") return [];
+    try {
+      const listed = await adapter.list(`${TOPIC_MINER_ROOT}/reports`);
+      const paths = Array.isArray(listed && listed.files) ? listed.files : [];
+      return paths
+        .filter((filePath) => /\.md$/i.test(String(filePath || "")))
+        .map((filePath) => this.makeFileRef(filePath));
+    } catch (error) {
+      return [];
+    }
+  }
+
+  parseTopicMinerReport(markdown, reportPath = "") {
+    const text = String(markdown || "");
+    const reportDate = (text.match(/^#\s+AI 选题候选\s*-\s*(\d{4}-\d{2}-\d{2})/m) || [])[1] || this.dateFromTopicMinerPath(reportPath);
+    const lines = text.split(/\r?\n/);
+    const candidates = [];
+    let current = null;
+
+    const finish = () => {
+      if (!current) return;
+      const parsed = this.parseTopicMinerCandidateBlock(current.lines);
+      candidates.push(Object.assign({
+        id: this.topicMinerCandidateId(reportDate, current.kind, current.index),
+        kind: "ai",
+        originLabel: "AI 推荐",
+        reportDate,
+        reportPath,
+        title: current.title,
+        updatedAt: reportDate,
+        sortDate: reportDate,
+      }, parsed));
+    };
+
+    for (const line of lines) {
+      const heading = line.match(/^###\s+(?:(B)(\d+)|(\d+))\.\s*(.+?)\s*$/);
+      if (heading) {
+        finish();
+        const isBackup = !!heading[1];
+        current = {
+          kind: isBackup ? "backup" : "strong",
+          index: Number(heading[2] || heading[3] || candidates.length + 1),
+          title: heading[4].trim(),
+          lines: [],
+        };
+        continue;
+      }
+      if (current) current.lines.push(line);
+    }
+    finish();
+    return candidates;
+  }
+
+  parseTopicMinerCandidateBlock(lines) {
+    const body = lines.join("\n");
+    const valueAfter = (label) => {
+      const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const match = body.match(new RegExp(`^${escaped}：\\s*(.*?)\\s*$`, "m"));
+      return match ? this.cleanTopicMinerField(match[1]) : "";
+    };
+    return {
+      feedback: this.normalizeTopicFeedback(valueAfter("反馈")),
+      sourceType: valueAfter("来源类型"),
+      fit: valueAfter("适配度"),
+      novelty: valueAfter("新鲜度"),
+      writeability: valueAfter("可写性"),
+      timing: valueAfter("时机判断"),
+      duplicationRisk: valueAfter("重复风险"),
+      maturity: valueAfter("选题成立度"),
+      judgment: this.readTopicMinerSection(lines, "核心判断"),
+      whyNow: this.readTopicMinerSection(lines, "为什么现在值得写"),
+      sources: this.readTopicMinerListSection(lines, "素材来源"),
+      relationship: this.readTopicMinerSection(lines, "与已发布内容关系"),
+      firstAction: this.readTopicMinerSection(lines, "第一动作"),
+      reason: this.readTopicMinerSection(lines, "为什么暂时放入备选"),
+    };
+  }
+
+  readTopicMinerSection(lines, label) {
+    const collected = this.readTopicMinerSectionLines(lines, label);
+    return collected.join("\n").trim();
+  }
+
+  readTopicMinerListSection(lines, label) {
+    return this.readTopicMinerSectionLines(lines, label)
+      .map((line) => line.replace(/^[-*]\s*/, "").trim())
+      .filter(Boolean);
+  }
+
+  readTopicMinerSectionLines(lines, label) {
+    const result = [];
+    let collecting = false;
+    const labelPattern = /^[\u4e00-\u9fa5A-Za-z0-9/（）()]+：/;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith(`${label}：`)) {
+        const inlineValue = this.cleanTopicMinerField(trimmed.slice(`${label}：`.length));
+        collecting = true;
+        if (inlineValue) result.push(inlineValue);
+        continue;
+      }
+      if (!collecting) continue;
+      if (labelPattern.test(trimmed)) break;
+      if (!trimmed && !result.length) continue;
+      if (!trimmed && result.length) break;
+      result.push(this.cleanTopicMinerField(trimmed));
+    }
+    return result;
+  }
+
+  cleanTopicMinerField(value) {
+    return String(value || "").trim().replace(/\\$/, "").trim();
+  }
+
+  topicMinerCandidateId(reportDate, kind, index) {
+    const safeDate = reportDate || "unknown-date";
+    return `${safeDate}-${kind === "backup" ? "backup" : "strong"}-${String(index || 1).padStart(2, "0")}`;
+  }
+
+  dateFromTopicMinerPath(reportPath) {
+    return (String(reportPath || "").match(/(\d{4}-\d{2}-\d{2})/) || [])[1] || "";
+  }
+
+  async loadTopicMinerFeedback() {
+    if (!(await this.pathExists(TOPIC_MINER_FEEDBACK_PATH))) return [];
+    try {
+      return this.parseTopicMinerFeedback(await this.readText(TOPIC_MINER_FEEDBACK_PATH));
+    } catch (error) {
+      return [];
+    }
+  }
+
+  parseTopicMinerFeedback(text) {
+    const latest = new Map();
+    for (const line of String(text || "").split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let raw;
+      try {
+        raw = JSON.parse(trimmed);
+      } catch (error) {
+        continue;
+      }
+      const item = {
+        candidateId: String(raw.candidateId || raw.id || "").trim(),
+        title: String(raw.title || "").trim(),
+        feedback: this.normalizeTopicFeedback(raw.feedback),
+        note: String(raw.note || "").trim(),
+        source: String(raw.source || "").trim(),
+        kind: String(raw.kind || "").trim(),
+        reportDate: String(raw.reportDate || "").trim(),
+        sourcePath: String(raw.sourcePath || "").trim(),
+        readingNotePath: String(raw.readingNotePath || "").trim(),
+        updatedAt: String(raw.updatedAt || "").trim(),
+      };
+      if (!item.candidateId && !item.title) continue;
+      const key = item.candidateId || item.title;
+      const previous = latest.get(key);
+      if (!previous || this.compareTopicFeedbackTime(item.updatedAt, previous.updatedAt) >= 0) latest.set(key, item);
+    }
+    return [...latest.values()];
+  }
+
+  normalizeTopicFeedback(value) {
+    const normalized = String(value || "待定").trim().replace(/^`+|`+$/g, "");
+    return TOPIC_FEEDBACK_OPTIONS.includes(normalized) ? normalized : "待定";
+  }
+
+  compareTopicFeedbackTime(left, right) {
+    const leftTime = Date.parse(left || "");
+    const rightTime = Date.parse(right || "");
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime)) return leftTime - rightTime;
+    if (Number.isFinite(leftTime)) return 1;
+    if (Number.isFinite(rightTime)) return -1;
+    return 0;
+  }
+
+  async saveTopicMinerFeedback(item, feedback, note) {
+    const record = {
+      candidateId: String((item && item.id) || (item && item.candidateId) || "").trim(),
+      title: String((item && item.title) || (item && item.note) || "").trim(),
+      feedback: this.normalizeTopicFeedback(feedback),
+      note: String(note || "").trim(),
+      source: "reading-capture-plugin",
+      kind: String((item && item.kind) || "ai").trim() || "ai",
+      reportDate: String((item && item.reportDate) || "").trim(),
+      updatedAt: this.now(),
+    };
+    const sourcePath = String((item && item.sourcePath) || "").trim();
+    const readingNotePath = String((item && item.readingNotePath) || "").trim();
+    if (sourcePath) record.sourcePath = sourcePath;
+    if (readingNotePath) record.readingNotePath = readingNotePath;
+    await this.ensureFolderForPath(TOPIC_MINER_FEEDBACK_PATH);
+    const previous = (await this.pathExists(TOPIC_MINER_FEEDBACK_PATH)) ? await this.readText(TOPIC_MINER_FEEDBACK_PATH) : "";
+    const next = `${previous.replace(/\s*$/g, "")}${previous.trim() ? "\n" : ""}${JSON.stringify(record)}\n`;
+    await this.writeText(TOPIC_MINER_FEEDBACK_PATH, next);
   }
 
   async loadSettings() {
@@ -2637,6 +3389,8 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     this.settings.readingRoot = normalizePath(this.settings.readingRoot || DEFAULT_SETTINGS.readingRoot);
     this.settings.articleLibraryRoots = this.settings.articleLibraryRoots || DEFAULT_SETTINGS.articleLibraryRoots;
     this.settings.articleLibraryExcludeRoots = this.settings.articleLibraryExcludeRoots || DEFAULT_SETTINGS.articleLibraryExcludeRoots;
+    this.settings.readerFontSize = clampReaderFontSize(this.settings.readerFontSize);
+    this.settings.readerLineHeight = normalizeReaderLineHeight(this.settings.readerLineHeight);
   }
 
   async saveSettings() {

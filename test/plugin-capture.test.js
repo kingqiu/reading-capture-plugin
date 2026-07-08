@@ -104,6 +104,13 @@ function makeFakeApp() {
         }
         files.get(path).content = content;
       },
+      async list(path) {
+        const prefix = `${path.replace(/\/+$/g, "")}/`;
+        return {
+          files: [...files.keys()].filter((filePath) => filePath.startsWith(prefix)),
+          folders: [...folders].filter((folderPath) => folderPath.startsWith(prefix)),
+        };
+      },
     },
     getAbstractFileByPath(path) {
       if (files.has(path)) return files.get(path).file;
@@ -162,6 +169,14 @@ function makeFakeElement(tag = "div") {
     dataset: {},
     listeners: {},
     disabled: false,
+    value: "",
+    scrollTop: 0,
+    style: {
+      properties: {},
+      setProperty(key, value) {
+        this.properties[key] = value;
+      },
+    },
     empty() {
       this.children = [];
       this.text = "";
@@ -180,6 +195,8 @@ function makeFakeElement(tag = "div") {
       if (options.cls) child.addClass(options.cls);
       if (options.text) child.text = options.text;
       if (options.attr) child.attrs = { ...child.attrs, ...options.attr };
+      if (Object.prototype.hasOwnProperty.call(options, "value")) child.value = options.value;
+      if (child.attrs && Object.prototype.hasOwnProperty.call(child.attrs, "value")) child.value = child.attrs.value;
       this.children.push(child);
       return child;
     },
@@ -217,6 +234,30 @@ function fakeElementsByClass(element, className) {
   };
   visit(element);
   return matches;
+}
+
+function fakeElementsByTag(element, tagName) {
+  const matches = [];
+  const visit = (node) => {
+    if (node.tag === tagName) matches.push(node);
+    for (const child of node.children || []) visit(child);
+  };
+  visit(element);
+  return matches;
+}
+
+function fakeElementByText(element, text) {
+  let match = null;
+  const visit = (node) => {
+    if (match) return;
+    if (node.text === text) {
+      match = node;
+      return;
+    }
+    for (const child of node.children || []) visit(child);
+  };
+  visit(element);
+  return match;
 }
 
 async function testCaptureWritesAnnotationAndIndex() {
@@ -631,6 +672,52 @@ async function testArticleLibraryFiltersAndSortsForResearchWorkflow() {
   assert.deepStrictEqual(view.visibleGroups().map((group) => group.id), ["c"]);
 }
 
+async function testArticleLibraryTopBarOpensCreativeIdeas() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  plugin.app = {
+    workspace: {
+      on() {
+        return {};
+      },
+      getActiveFile() {
+        return null;
+      },
+    },
+  };
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => {
+    registeredViews[type] = factory;
+  };
+
+  let openedTopicPool = false;
+  plugin.openTopicPool = async () => {
+    openedTopicPool = true;
+  };
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-library"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  view.groups = [];
+  await view.render();
+
+  const buttons = [];
+  const visit = (node) => {
+    if (node.tag === "button") buttons.push(node);
+    for (const child of node.children || []) visit(child);
+  };
+  visit(view.containerEl.children[1]);
+
+  const topicButton = buttons.find((button) => button.text === "创作灵感");
+  assert.ok(topicButton, "article library top bar should include creative ideas entry");
+  assert.strictEqual(typeof topicButton.listeners.click, "function");
+  await topicButton.listeners.click();
+  assert.strictEqual(openedTopicPool, true);
+}
+
 async function testArticleLibraryUsesCacheUntilSourceFilesChange() {
   const PluginClass = loadPluginClass();
   const plugin = new PluginClass();
@@ -765,12 +852,819 @@ topic idea
   const topics = await plugin.buildTopicPoolItems();
 
   assert.strictEqual(topics.length, 1);
-  assert.strictEqual(topics[0].id, "ann_topic");
+  assert.strictEqual(topics[0].id, `${notePath}#ann_topic`);
   assert.strictEqual(topics[0].sourceTitle, "Example Article");
   assert.strictEqual(topics[0].sourcePath, sourceFile.path);
   assert.strictEqual(topics[0].readingNotePath, notePath);
   assert.strictEqual(topics[0].note, "topic idea");
   assert.strictEqual(topics[0].quote, "source quote");
+}
+
+async function testTopicPoolCombinesManualIdeasWithTopicMinerCandidatesAndFeedback() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files, sourceFile } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = {
+    readingRoot: "Learning/reading-notes",
+    openNoteAfterCapture: false,
+  };
+  const notePath = "Learning/reading-notes/2026/06/example.md";
+  const noteMarkdown = `---
+type: reading-note
+source_vault_path: "${sourceFile.path}"
+source_title: "Example Article"
+---
+
+# 阅读记录：Example Article
+
+## 创作灵感
+
+### ann_topic
+
+- time: 2026-06-10T13:00:00+08:00
+- type: topic
+
+> source quote
+
+我的想法：
+manual idea
+`;
+  files.set(notePath, { file: makeFile(notePath, noteMarkdown), content: noteMarkdown });
+  const index = core.createEmptyIndex(fixedNow);
+  index.sources[sourceFile.path] = {
+    source_vault_path: sourceFile.path,
+    source_title: "Example Article",
+    reading_note_path: notePath,
+    annotation_count: 1,
+    status: "reading",
+    codex_status: "pending_summary",
+    updated: fixedNow,
+  };
+  files.set(plugin.indexPath(), { file: makeFile(plugin.indexPath(), JSON.stringify(index)), content: `${JSON.stringify(index, null, 2)}\n` });
+
+  const reportPath = "Learning/reading-notes/topic-miner/reports/2026-07-07.md";
+  const reportMarkdown = `# AI 选题候选 - 2026-07-07
+
+## 强推荐
+
+### 1. OpenAI 作为负面 AI 转型案例是否值得写？
+
+反馈：待定
+
+来源类型：反面案例\\
+适配度：9/10\\
+新鲜度：8/10\\
+可写性：8/10\\
+时机判断：现在可写\\
+重复风险：低，和旧文角度不同
+
+核心判断：\\
+可以写成一个组织转型失败的反面案例。
+
+为什么现在值得写：\\
+最近保存材料足够，而且和 AI 组织变化有关。
+
+素材来源：
+- Learning/web/articles/ai-transformation-case
+
+与已发布内容关系：\\
+不是重复，是延展。
+
+第一动作：\\
+先补充 OpenAI 和 Anthropic 的对比。
+`;
+  files.set(reportPath, { file: makeFile(reportPath, reportMarkdown), content: reportMarkdown });
+  const feedbackPath = "Learning/reading-notes/topic-miner/feedback.jsonl";
+  files.set(feedbackPath, {
+    file: makeFile(feedbackPath, ""),
+    content: `${JSON.stringify({
+      candidateId: "2026-07-07-strong-01",
+      title: "OpenAI 作为负面 AI 转型案例是否值得写？",
+      feedback: "想写",
+      note: "我想把它写成反面案例，继续找组织转型材料。",
+      source: "reading-capture-plugin",
+      reportDate: "2026-07-07",
+      updatedAt: "2026-07-07T10:30:00+08:00",
+    })}\n${JSON.stringify({
+      candidateId: `${notePath}#ann_topic`,
+      title: "manual idea",
+      feedback: "暂存",
+      note: "这个人工灵感还需要再补一篇关联文章。",
+      source: "reading-capture-plugin",
+      kind: "manual",
+      reportDate: "",
+      sourcePath: sourceFile.path,
+      readingNotePath: notePath,
+      updatedAt: "2026-07-07T10:35:00+08:00",
+    })}\n`,
+  });
+
+  const topics = await plugin.buildTopicPoolItems();
+
+  assert.strictEqual(topics.length, 2);
+  const aiTopic = topics.find((item) => item.kind === "ai");
+  const manualTopic = topics.find((item) => item.kind === "manual");
+  assert.ok(aiTopic, "Topic Miner candidate should be included");
+  assert.ok(manualTopic, "manual creative idea should still be included");
+  assert.strictEqual(aiTopic.id, "2026-07-07-strong-01");
+  assert.strictEqual(aiTopic.feedback, "想写");
+  assert.strictEqual(aiTopic.feedbackNote, "我想把它写成反面案例，继续找组织转型材料。");
+  assert.strictEqual(aiTopic.sourceType, "反面案例");
+  assert.strictEqual(aiTopic.duplicationRisk, "低，和旧文角度不同");
+  assert.strictEqual(aiTopic.judgment, "可以写成一个组织转型失败的反面案例。");
+  assert.strictEqual(aiTopic.firstAction, "先补充 OpenAI 和 Anthropic 的对比。");
+  assert.strictEqual(manualTopic.kind, "manual");
+  assert.strictEqual(manualTopic.note, "manual idea");
+  assert.strictEqual(manualTopic.id, `${notePath}#ann_topic`);
+  assert.strictEqual(manualTopic.feedback, "暂存");
+  assert.strictEqual(manualTopic.feedbackNote, "这个人工灵感还需要再补一篇关联文章。");
+}
+
+async function testTopicPoolFindsTopicMinerReportsFromAdapterWhenVaultIndexIsStale() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = {
+    readingRoot: "Learning/reading-notes",
+    openNoteAfterCapture: false,
+  };
+  app.vault.getMarkdownFiles = () => [];
+
+  const reportPath = "Learning/reading-notes/topic-miner/reports/2026-07-07.md";
+  const reportMarkdown = `# AI 选题候选 - 2026-07-07
+
+## 强推荐
+
+### 1. 外部脚本生成的报告也应该被插件看到
+
+反馈：待定
+来源类型：探索发现
+适配度：高
+新鲜度：高
+可写性：高
+时机判断：现在可写
+重复风险：低
+选题成立度：D3
+
+核心判断：
+报告文件可能已经落盘，但 Obsidian 文件索引还没来得及刷新。
+
+素材来源：
+- Learning/web/articles/example
+
+第一动作：
+直接从底层目录扫描兜底。
+`;
+  files.set(reportPath, { file: makeFile(reportPath, reportMarkdown), content: reportMarkdown });
+
+  const topics = await plugin.buildTopicPoolItems();
+
+  assert.strictEqual(topics.length, 1);
+  assert.strictEqual(topics[0].kind, "ai");
+  assert.strictEqual(topics[0].title, "外部脚本生成的报告也应该被插件看到");
+  assert.strictEqual(topics[0].reportPath, reportPath);
+}
+
+async function testTopicPoolAiCandidatesPreferLatestReportOverFeedbackTime() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = {
+    readingRoot: "Learning/reading-notes",
+    openNoteAfterCapture: false,
+  };
+
+  const oldReportPath = "Learning/reading-notes/topic-miner/reports/2026-07-05.md";
+  const newReportPath = "Learning/reading-notes/topic-miner/reports/2026-07-07.md";
+  files.set(oldReportPath, {
+    file: makeFile(oldReportPath, ""),
+    content: `# AI 选题候选 - 2026-07-05
+
+## 强推荐
+
+### 1. 旧报告里刚反馈过的选题
+
+反馈：待定
+核心判断：
+这条不应该因为反馈时间更新而压过新报告。
+`,
+  });
+  files.set(newReportPath, {
+    file: makeFile(newReportPath, ""),
+    content: `# AI 选题候选 - 2026-07-07
+
+## 强推荐
+
+### 1. 今天报告里的选题
+
+反馈：待定
+核心判断：
+刷新后应该优先看到最新报告里的选题。
+`,
+  });
+  files.set("Learning/reading-notes/topic-miner/feedback.jsonl", {
+    file: makeFile("Learning/reading-notes/topic-miner/feedback.jsonl", ""),
+    content: `${JSON.stringify({
+      candidateId: "2026-07-05-strong-01",
+      title: "旧报告里刚反馈过的选题",
+      feedback: "想写",
+      note: "",
+      source: "reading-capture-plugin",
+      reportDate: "2026-07-05",
+      updatedAt: "2026-07-07T23:30:00+08:00",
+    })}\n`,
+  });
+
+  const topics = await plugin.buildTopicPoolItems();
+
+  assert.strictEqual(topics.length, 2);
+  assert.strictEqual(topics[0].title, "今天报告里的选题");
+  assert.strictEqual(topics[0].reportDate, "2026-07-07");
+  assert.strictEqual(topics[1].title, "旧报告里刚反馈过的选题");
+}
+
+async function testTopicPoolSortsByContentDateNotFeedbackTime() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = {
+    readingRoot: "Learning/reading-notes",
+    openNoteAfterCapture: false,
+  };
+
+  const oldSourcePath = "Learning/web/articles/2026-07-03_old-manual-topic/article_zh.md";
+  const oldNotePath = "Learning/reading-notes/2026/07/20260703_old-manual-topic.md";
+  files.set(oldSourcePath, { file: makeFile(oldSourcePath, "# Old"), content: "# Old" });
+  const oldNoteMarkdown = `---
+type: reading-note
+source_vault_path: "${oldSourcePath}"
+source_title: "Old Manual Topic"
+---
+
+# 阅读记录：Old Manual Topic
+
+## 创作灵感
+
+### ann_topic
+
+- time: 2026-07-08T21:00:00+08:00
+- type: topic
+
+> old quote
+
+我的想法：
+旧文章里最近反馈过的人工灵感
+`;
+  files.set(oldNotePath, { file: makeFile(oldNotePath, oldNoteMarkdown), content: oldNoteMarkdown });
+
+  const index = core.createEmptyIndex(fixedNow);
+  index.sources[oldSourcePath] = {
+    source_vault_path: oldSourcePath,
+    source_title: "Old Manual Topic",
+    reading_note_path: oldNotePath,
+    annotation_count: 1,
+    updated: "2026-07-08T21:00:00+08:00",
+  };
+  files.set(plugin.indexPath(), { file: makeFile(plugin.indexPath(), JSON.stringify(index)), content: `${JSON.stringify(index, null, 2)}\n` });
+
+  const reportPath = "Learning/reading-notes/topic-miner/reports/2026-07-07.md";
+  files.set(reportPath, {
+    file: makeFile(reportPath, ""),
+    content: `# AI 选题候选 - 2026-07-07
+
+## 强推荐
+
+### 1. 今天报告里的 AI 推荐
+
+反馈：待定
+核心判断：
+这条应该排在旧内容前面。
+`,
+  });
+  files.set("Learning/reading-notes/topic-miner/feedback.jsonl", {
+    file: makeFile("Learning/reading-notes/topic-miner/feedback.jsonl", ""),
+    content: `${JSON.stringify({
+      candidateId: `${oldNotePath}#ann_topic`,
+      title: "旧文章里最近反馈过的人工灵感",
+      feedback: "已写",
+      source: "reading-capture-plugin",
+      kind: "manual",
+      sourcePath: oldSourcePath,
+      readingNotePath: oldNotePath,
+      updatedAt: "2026-07-08T22:00:00+08:00",
+    })}\n`,
+  });
+
+  const topics = await plugin.buildTopicPoolItems();
+
+  assert.strictEqual(topics.length, 2);
+  assert.strictEqual(topics[0].title, "今天报告里的 AI 推荐");
+  assert.strictEqual(topics[0].sortDate, "2026-07-07");
+  assert.strictEqual(topics[1].note, "旧文章里最近反馈过的人工灵感");
+  assert.strictEqual(topics[1].sortDate, "2026-07-03");
+}
+
+async function testTopicMinerFeedbackIsAppendedAsJsonl() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.now = () => "2026-07-07T10:30:00+08:00";
+
+  await plugin.saveTopicMinerFeedback(
+    {
+      id: "2026-07-07-strong-01",
+      title: "OpenAI 作为负面 AI 转型案例是否值得写？",
+      reportDate: "2026-07-07",
+    },
+    "想写",
+    "我想把它写成反面案例。"
+  );
+
+  const feedbackPath = "Learning/reading-notes/topic-miner/feedback.jsonl";
+  assert.ok(files.has(feedbackPath), "feedback.jsonl should be created");
+  const lines = files.get(feedbackPath).content.trim().split(/\r?\n/);
+  assert.strictEqual(lines.length, 1);
+  assert.deepStrictEqual(JSON.parse(lines[0]), {
+    candidateId: "2026-07-07-strong-01",
+    title: "OpenAI 作为负面 AI 转型案例是否值得写？",
+    feedback: "想写",
+    note: "我想把它写成反面案例。",
+    source: "reading-capture-plugin",
+    kind: "ai",
+    reportDate: "2026-07-07",
+    updatedAt: "2026-07-07T10:30:00+08:00",
+  });
+}
+
+async function testManualTopicFeedbackIsSavedWithSourceContext() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.now = () => "2026-07-07T10:40:00+08:00";
+
+  await plugin.saveTopicMinerFeedback(
+    {
+      id: "Learning/reading-notes/2026/06/example.md#ann_topic",
+      kind: "manual",
+      note: "manual idea",
+      sourcePath: "Learning/web/articles/example/article.md",
+      readingNotePath: "Learning/reading-notes/2026/06/example.md",
+    },
+    "想写",
+    "这条人工灵感可以延展成一个工作流案例。"
+  );
+
+  const feedbackPath = "Learning/reading-notes/topic-miner/feedback.jsonl";
+  const lines = files.get(feedbackPath).content.trim().split(/\r?\n/);
+  assert.deepStrictEqual(JSON.parse(lines[0]), {
+    candidateId: "Learning/reading-notes/2026/06/example.md#ann_topic",
+    title: "manual idea",
+    feedback: "想写",
+    note: "这条人工灵感可以延展成一个工作流案例。",
+    source: "reading-capture-plugin",
+    kind: "manual",
+    reportDate: "",
+    sourcePath: "Learning/web/articles/example/article.md",
+    readingNotePath: "Learning/reading-notes/2026/06/example.md",
+    updatedAt: "2026-07-07T10:40:00+08:00",
+  });
+}
+
+async function testTopicPoolViewShowsDecisionWorkspaceControls() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => {
+    registeredViews[type] = factory;
+  };
+  let buildCalls = 0;
+  plugin.buildTopicPoolItems = async () => {
+    buildCalls += 1;
+    return [
+      {
+        id: "Learning/reading-notes/2026/06/example.md#ann_topic",
+        kind: "manual",
+        originLabel: "人工灵感",
+        sourcePath: "Learning/web/articles/example/article.md",
+        readingNotePath: "Learning/reading-notes/2026/06/example.md",
+        note: "manual idea",
+        feedback: "待定",
+      },
+    ];
+  };
+  plugin.loadData = async () => null;
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-topic-pool"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+
+  const texts = fakeElementTexts(view.containerEl.children[1]);
+  assert.ok(texts.includes("回到知见录"), "topic pool should keep a back-to-library button");
+  assert.ok(texts.includes("打开今日报告"), "topic pool should expose the latest report");
+  assert.ok(texts.includes("状态"), "topic pool should label feedback filters as status");
+  assert.ok(texts.includes("保存给 AI"), "manual creative ideas should also be saved as feedback for Topic Miner");
+  assert.ok(texts.includes("补充备注不是必填。没有额外想法时，只选状态并保存也可以。"));
+
+  const buttons = [];
+  const visit = (node) => {
+    if (node.tag === "button") buttons.push(node);
+    for (const child of node.children || []) visit(child);
+  };
+  visit(view.containerEl.children[1]);
+  const saveButton = buttons.find((button) => button.text === "保存给 AI");
+  assert.ok(saveButton, "topic pool should render a save button");
+  assert.ok(saveButton.classes.has("reading-capture-topic-save-button"), "save button should use the plugin green primary style");
+  const refreshButton = buttons.find((button) => button.text === "刷新");
+  assert.ok(refreshButton, "topic pool should render a refresh button");
+  await refreshButton.listeners.click();
+  assert.strictEqual(buildCalls, 2, "clicking refresh should reload topic pool items");
+}
+
+async function testTopicPoolSummaryUsesLatestReportDate() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => {
+    registeredViews[type] = factory;
+  };
+  plugin.buildTopicPoolItems = async () => [
+    {
+      id: "2026-07-05-strong-01",
+      kind: "ai",
+      originLabel: "AI 推荐",
+      reportDate: "2026-07-05",
+      title: "旧报告里刚反馈过的选题",
+      judgment: "旧报告判断",
+      feedback: "想写",
+      updatedAt: "2026-07-07T23:30:00+08:00",
+    },
+    {
+      id: "2026-07-07-strong-01",
+      kind: "ai",
+      originLabel: "AI 推荐",
+      reportDate: "2026-07-07",
+      title: "今天报告里的选题",
+      judgment: "新报告判断",
+      feedback: "待定",
+      updatedAt: "2026-07-07",
+    },
+  ];
+  plugin.loadData = async () => null;
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-topic-pool"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+
+  const texts = fakeElementTexts(view.containerEl.children[1]);
+  assert.ok(texts.includes("0 条人工灵感 · 2 条 AI 推荐 · 当前报告 2026-07-07"), "topic pool summary should use the latest report date");
+}
+
+async function testTopicPoolWorkflowSortModesAndCollapsedArchiveGroups() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => {
+    registeredViews[type] = factory;
+  };
+  plugin.buildTopicPoolItems = async () => [
+    {
+      id: "done-latest",
+      kind: "ai",
+      originLabel: "AI 推荐",
+      reportDate: "2026-07-10",
+      sortDate: "2026-07-10",
+      title: "已写的选题",
+      judgment: "已写判断",
+      feedback: "已写",
+      feedbackUpdatedAt: "2026-07-01T10:00:00+08:00",
+    },
+    {
+      id: "rejected-newer",
+      kind: "ai",
+      originLabel: "AI 推荐",
+      reportDate: "2026-07-09",
+      sortDate: "2026-07-09",
+      title: "拒绝的选题",
+      judgment: "拒绝判断",
+      feedback: "不要",
+      feedbackUpdatedAt: "2026-07-02T10:00:00+08:00",
+    },
+    {
+      id: "want-write",
+      kind: "ai",
+      originLabel: "AI 推荐",
+      reportDate: "2026-07-08",
+      sortDate: "2026-07-08",
+      title: "想写的选题",
+      judgment: "想写判断",
+      feedback: "想写",
+      feedbackUpdatedAt: "2026-07-03T10:00:00+08:00",
+    },
+    {
+      id: "pending",
+      kind: "ai",
+      originLabel: "AI 推荐",
+      reportDate: "2026-07-07",
+      sortDate: "2026-07-07",
+      title: "待定的选题",
+      judgment: "待定判断",
+      feedback: "待定",
+      feedbackUpdatedAt: "2026-07-04T10:00:00+08:00",
+    },
+    {
+      id: "parked",
+      kind: "ai",
+      originLabel: "AI 推荐",
+      reportDate: "2026-07-06",
+      sortDate: "2026-07-06",
+      title: "暂存的选题",
+      judgment: "暂存判断",
+      feedback: "暂存",
+      feedbackUpdatedAt: "2026-07-09T10:00:00+08:00",
+    },
+  ];
+  plugin.loadData = async () => null;
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-topic-pool"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+
+  assert.deepStrictEqual(Array.from(view.visibleItems(), (item) => item.id), ["pending", "want-write", "parked", "rejected-newer", "done-latest"], "workflow sort should prioritize decision status before content date");
+  view.topicSortMode = "content";
+  assert.deepStrictEqual(Array.from(view.visibleItems(), (item) => item.id), ["done-latest", "rejected-newer", "want-write", "pending", "parked"], "latest content sort should use content/report date descending");
+  view.topicSortMode = "feedback";
+  assert.deepStrictEqual(Array.from(view.visibleItems(), (item) => item.id), ["parked", "pending", "want-write", "rejected-newer", "done-latest"], "latest feedback sort should use feedback timestamp descending");
+
+  view.topicSortMode = "workflow";
+  await view.render();
+  let texts = fakeElementTexts(view.containerEl.children[1]);
+  assert.ok(texts.includes("不要"), "rejected group header should be visible");
+  assert.ok(texts.includes("已写"), "done group header should be visible");
+  assert.ok(!texts.includes("拒绝的选题"), "rejected topics should be collapsed by default");
+  assert.ok(!texts.includes("已写的选题"), "done topics should be collapsed by default");
+
+  const headers = fakeElementsByClass(view.containerEl.children[1], "reading-capture-topic-group-header");
+  const rejectedHeader = headers.find((header) => fakeElementTexts(header).includes("不要"));
+  assert.ok(rejectedHeader, "rejected group header should be clickable");
+  await rejectedHeader.listeners.click();
+  texts = fakeElementTexts(view.containerEl.children[1]);
+  assert.ok(texts.includes("拒绝的选题"), "clicking a collapsed archive group should expand it");
+}
+
+async function testTopicPoolFeedbackSaveFailureReenablesButton() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => {
+    registeredViews[type] = factory;
+  };
+  plugin.buildTopicPoolItems = async () => [
+    {
+      id: "2026-07-07-strong-01",
+      kind: "ai",
+      originLabel: "AI 推荐",
+      reportDate: "2026-07-07",
+      reportPath: "Learning/reading-notes/topic-miner/reports/2026-07-07.md",
+      title: "OpenAI 作为负面 AI 转型案例是否值得写？",
+      judgment: "可以写成一个组织转型失败的反面案例。",
+      feedback: "待定",
+    },
+  ];
+  plugin.saveTopicMinerFeedback = async () => {
+    throw new Error("disk unavailable");
+  };
+  plugin.loadData = async () => null;
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-topic-pool"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+
+  const buttons = [];
+  const visit = (node) => {
+    if (node.tag === "button") buttons.push(node);
+    for (const child of node.children || []) visit(child);
+  };
+  visit(view.containerEl.children[1]);
+  const saveButton = buttons.find((button) => button.text === "保存给 AI");
+  await saveButton.listeners.click();
+  assert.strictEqual(saveButton.disabled, false, "save button should recover after a failed save");
+}
+
+async function testTopicPoolCardClickUpdatesDetailWithoutRerenderingList() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => {
+    registeredViews[type] = factory;
+  };
+  plugin.buildTopicPoolItems = async () => [
+    {
+      id: "topic-a",
+      kind: "ai",
+      originLabel: "AI 推荐",
+      reportDate: "2026-07-07",
+      title: "第一个选题",
+      judgment: "第一个判断",
+      feedback: "待定",
+    },
+    {
+      id: "topic-b",
+      kind: "ai",
+      originLabel: "AI 推荐",
+      reportDate: "2026-07-07",
+      title: "第二个选题",
+      judgment: "第二个判断",
+      feedback: "想写",
+    },
+  ];
+  plugin.loadData = async () => null;
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-topic-pool"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+
+  let renderCalls = 0;
+  view.render = async () => {
+    renderCalls += 1;
+  };
+
+  const cards = [];
+  const visit = (node) => {
+    if (node.classes && node.classes.has("reading-capture-topic-card")) cards.push(node);
+    for (const child of node.children || []) visit(child);
+  };
+  visit(view.containerEl.children[1]);
+  assert.strictEqual(cards.length, 2);
+  assert.ok(cards[0].classes.has("is-selected"), "first card should be selected initially");
+
+  await cards[1].listeners.click();
+
+  assert.strictEqual(renderCalls, 0, "selecting a topic card should not rerender the whole list and reset scroll");
+  assert.strictEqual(view.selectedId, "topic-b");
+  assert.ok(!cards[0].classes.has("is-selected"), "previous card should lose selected state");
+  assert.ok(cards[1].classes.has("is-selected"), "clicked card should become selected");
+  const texts = fakeElementTexts(view.containerEl.children[1]);
+  assert.ok(texts.includes("第二个判断"), "detail panel should update to the clicked topic");
+}
+
+async function testTopicPoolSavePreservesListScrollPosition() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => {
+    registeredViews[type] = factory;
+  };
+  let savedFeedback = "待定";
+  plugin.buildTopicPoolItems = async () => [
+    {
+      id: "topic-a",
+      kind: "ai",
+      originLabel: "AI 推荐",
+      reportDate: "2026-07-07",
+      title: "第一条选题",
+      judgment: "第一条判断",
+      feedback: "待定",
+    },
+    {
+      id: "topic-b",
+      kind: "ai",
+      originLabel: "AI 推荐",
+      reportDate: "2026-07-07",
+      title: "中部选中的选题",
+      judgment: "中部判断",
+      feedback: savedFeedback,
+    },
+    {
+      id: "topic-c",
+      kind: "ai",
+      originLabel: "AI 推荐",
+      reportDate: "2026-07-07",
+      title: "第三条选题",
+      judgment: "第三条判断",
+      feedback: "暂存",
+    },
+  ];
+  plugin.saveTopicMinerFeedback = async (_item, feedback) => {
+    savedFeedback = feedback;
+  };
+  plugin.loadData = async () => null;
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-topic-pool"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+
+  const cards = [];
+  const findCards = (node) => {
+    if (node.classes && node.classes.has("reading-capture-topic-card")) cards.push(node);
+    for (const child of node.children || []) findCards(child);
+  };
+  findCards(view.containerEl.children[1]);
+  const targetCard = cards.find((card) => fakeElementTexts(card).includes("中部选中的选题"));
+  assert.ok(targetCard, "target topic card should be rendered");
+  await targetCard.listeners.click();
+  view.topicListEl.scrollTop = 520;
+
+  const buttons = [];
+  const findButtons = (node) => {
+    if (node.tag === "button") buttons.push(node);
+    for (const child of node.children || []) findButtons(child);
+  };
+  findButtons(view.containerEl.children[1]);
+  const saveButton = buttons.find((button) => button.text === "保存给 AI");
+  await saveButton.listeners.click();
+
+  assert.strictEqual(view.selectedId, "topic-b", "saving feedback should keep the same topic selected");
+  assert.strictEqual(view.topicListEl.scrollTop, 520, "saving feedback should preserve the middle list scroll position");
+}
+
+async function testTopicPoolStylesPreventFloatingDetailOverlap() {
+  const css = fs.readFileSync(path.join(__dirname, "../plugin/styles.css"), "utf8");
+  const rule = (selector) => (css.match(new RegExp(`^\\${selector}\\s*\\{[\\s\\S]*?\\}`, "m")) || [])[0];
+  const poolRule = rule(".reading-capture-topic-pool");
+  const shellRule = rule(".reading-capture-topic-shell");
+  const detailRule = rule(".reading-capture-topic-detail");
+  const cardRule = rule(".reading-capture-topic-card");
+  const mainRule = rule(".reading-capture-topic-main");
+  const listRule = rule(".reading-capture-topic-list");
+  const workspaceRule = rule(".reading-capture-topic-workspace");
+  const sortSelectRule = rule(".reading-capture-topic-sort-select");
+  const groupHeaderRule = rule(".reading-capture-topic-group-header");
+  assert.ok(poolRule, "topic pool root style should exist");
+  assert.ok(shellRule, "topic shell style should exist");
+  assert.ok(detailRule, "topic detail style should exist");
+  assert.ok(cardRule, "topic card style should exist");
+  assert.ok(mainRule, "topic main style should exist");
+  assert.ok(listRule, "topic list style should exist");
+  assert.ok(workspaceRule, "topic workspace style should exist");
+  assert.ok(/height:\s*100%/.test(poolRule), "topic pool should occupy the view height instead of growing with page content");
+  assert.ok(/overflow:\s*hidden/.test(poolRule), "topic pool root should prevent whole-page scrolling");
+  assert.ok(/display:\s*flex/.test(shellRule), "topic shell should use a column layout");
+  assert.ok(/flex-direction:\s*column/.test(shellRule), "topic shell should keep the header fixed above the workspace");
+  assert.ok(/overflow:\s*hidden/.test(workspaceRule), "topic workspace should keep three columns inside the viewport");
+  assert.ok(/height:\s*100%/.test(workspaceRule), "topic workspace should take the remaining view height");
+  assert.ok(/display:\s*flex/.test(mainRule), "topic main column should keep the list header above the scrolling list");
+  assert.ok(/align-content:\s*start/.test(listRule), "topic cards should keep their natural height in the scrolling list");
+  assert.ok(/grid-auto-rows:\s*max-content/.test(listRule), "topic list rows should not be compressed to fit the viewport");
+  assert.ok(sortSelectRule, "topic sort select style should exist");
+  assert.ok(/cursor:\s*pointer/.test(sortSelectRule), "topic sort select should look interactive");
+  assert.ok(groupHeaderRule, "topic group header style should exist");
+  assert.ok(/cursor:\s*pointer/.test(groupHeaderRule), "topic group headers should be clickable");
+  assert.ok(/overflow-y:\s*auto/.test(listRule), "topic list should scroll independently");
+  assert.ok(/overflow-y:\s*auto/.test(detailRule), "topic detail column should scroll independently and stay reachable");
+  assert.ok(!/position:\s*sticky/.test(detailRule), "topic detail should stay in its grid column instead of floating");
+  const toolsButtonRule = rule(".reading-capture-topic-tools button");
+  assert.ok(toolsButtonRule, "topic toolbar button style should exist");
+  assert.ok(/cursor:\s*pointer/.test(toolsButtonRule), "topic toolbar buttons should show a clickable cursor");
+  assert.ok(/overflow:\s*hidden/.test(cardRule), "topic cards should clip long content inside the middle column");
+  assert.ok(/minmax\(0,\s*1fr\)/.test(workspaceRule), "middle column should be allowed to shrink without overflowing under the detail column");
 }
 
 async function testOpenLibraryVersionUsesReaderForMarkdownAndObsidianForPdf() {
@@ -927,6 +1821,84 @@ async function testReaderSidebarKeepsAnnotationNavigationFocused() {
   assert.strictEqual(cards[0].children.some((child) => child.tag === "button" && child.text === "打开阅读记录"), false);
 }
 
+async function testReaderDisplayControlsAdjustFontSizeAndLineHeight() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  plugin.app = {
+    workspace: {
+      on() {
+        return {};
+      },
+      getActiveFile() {
+        return null;
+      },
+    },
+  };
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => {
+    registeredViews[type] = factory;
+  };
+  let saveCount = 0;
+  plugin.saveSettings = async () => {
+    saveCount += 1;
+  };
+  await plugin.onload();
+  plugin.settings.readerFontSize = 17;
+  plugin.settings.readerLineHeight = 1.72;
+  const view = registeredViews["reading-capture-reader"]({});
+  const actions = makeFakeElement();
+  const body = makeFakeElement();
+
+  view.renderReaderDisplayControls(actions, body);
+  view.applyReaderDisplaySettings(body);
+
+  const texts = fakeElementTexts(actions);
+  assert.ok(texts.includes("Aa"), "reader toolbar should expose reading settings");
+  assert.strictEqual(body.style.properties["--rc-reader-font-size"], "17px");
+  assert.strictEqual(body.style.properties["--rc-reader-line-height"], "1.72");
+
+  const settingsButton = fakeElementByText(actions, "Aa");
+  assert.strictEqual(typeof settingsButton.listeners.click, "function");
+  settingsButton.listeners.click();
+
+  const range = fakeElementsByTag(actions, "input").find((input) => input.attrs.type === "range");
+  assert.ok(range, "reader settings should include a font-size slider");
+  assert.strictEqual(range.attrs.min, "14");
+  assert.strictEqual(range.attrs.max, "28");
+  range.value = "23";
+  await range.listeners.input({ target: range });
+  assert.strictEqual(plugin.settings.readerFontSize, 23);
+  assert.strictEqual(body.style.properties["--rc-reader-font-size"], "23px");
+  assert.ok(saveCount >= 1);
+
+  const plusButton = fakeElementByText(actions, "A+");
+  await plusButton.listeners.click();
+  assert.strictEqual(plugin.settings.readerFontSize, 24);
+  assert.strictEqual(body.style.properties["--rc-reader-font-size"], "24px");
+
+  const relaxedButton = fakeElementByText(actions, "舒展");
+  await relaxedButton.listeners.click();
+  assert.strictEqual(plugin.settings.readerLineHeight, 1.9);
+  assert.strictEqual(body.style.properties["--rc-reader-line-height"], "1.9");
+
+  const resetButton = fakeElementByText(actions, "恢复默认");
+  await resetButton.listeners.click();
+  assert.strictEqual(plugin.settings.readerFontSize, 18);
+  assert.strictEqual(plugin.settings.readerLineHeight, 1.72);
+  assert.strictEqual(body.style.properties["--rc-reader-font-size"], "18px");
+}
+
+function testReaderBodyUsesDisplaySettingVariables() {
+  const css = fs.readFileSync(path.join(__dirname, "../plugin/styles.css"), "utf8");
+  assert.match(css, /--rc-reader-font-size/, "reader CSS should expose a font-size variable");
+  assert.match(css, /font-size:\s*var\(--rc-reader-font-size/, "reader body should use the saved font-size variable");
+  assert.match(css, /line-height:\s*var\(--rc-reader-line-height/, "reader body should use the saved line-height variable");
+  assert.match(css, /reading-capture-reader-settings-slider/, "reader settings slider should have dedicated styling");
+}
+
 async function testReadingRecordViewGroupsAnnotationsAndSwitchesMarkdownInPlace() {
   const PluginClass = loadPluginClass();
   const plugin = new PluginClass();
@@ -1076,13 +2048,29 @@ testCaptureWritesAnnotationAndIndex()
   .then(testRecordTargetAndHighlight)
   .then(testArticleLibraryGrouping)
   .then(testArticleLibraryFiltersAndSortsForResearchWorkflow)
+  .then(testArticleLibraryTopBarOpensCreativeIdeas)
   .then(testArticleLibraryUsesCacheUntilSourceFilesChange)
   .then(testArticleLibrarySnapshotPersistsForFastInitialRender)
   .then(testTopicPoolCollectsWritableTopicsFromReadingNotes)
+  .then(testTopicPoolCombinesManualIdeasWithTopicMinerCandidatesAndFeedback)
+  .then(testTopicPoolFindsTopicMinerReportsFromAdapterWhenVaultIndexIsStale)
+  .then(testTopicPoolAiCandidatesPreferLatestReportOverFeedbackTime)
+  .then(testTopicPoolSortsByContentDateNotFeedbackTime)
+  .then(testTopicMinerFeedbackIsAppendedAsJsonl)
+  .then(testManualTopicFeedbackIsSavedWithSourceContext)
+  .then(testTopicPoolViewShowsDecisionWorkspaceControls)
+  .then(testTopicPoolSummaryUsesLatestReportDate)
+  .then(testTopicPoolWorkflowSortModesAndCollapsedArchiveGroups)
+  .then(testTopicPoolFeedbackSaveFailureReenablesButton)
+  .then(testTopicPoolCardClickUpdatesDetailWithoutRerenderingList)
+  .then(testTopicPoolSavePreservesListScrollPosition)
+  .then(testTopicPoolStylesPreventFloatingDetailOverlap)
   .then(testOpenLibraryVersionUsesReaderForMarkdownAndObsidianForPdf)
   .then(testGenericDefaultSettings)
   .then(testVersionPathTooltipAndCopy)
   .then(testReaderSidebarKeepsAnnotationNavigationFocused)
+  .then(testReaderDisplayControlsAdjustFontSizeAndLineHeight)
+  .then(testReaderBodyUsesDisplaySettingVariables)
   .then(testReadingRecordViewGroupsAnnotationsAndSwitchesMarkdownInPlace)
   .then(testOpeningReadingNoteUsesRecordViewInsteadOfRawMarkdown)
   .then(() => console.log("plugin capture test passed"))
