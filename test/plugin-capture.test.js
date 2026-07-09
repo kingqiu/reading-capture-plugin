@@ -1027,6 +1027,83 @@ async function testTopicPoolFindsTopicMinerReportsFromAdapterWhenVaultIndexIsSta
   assert.strictEqual(topics[0].reportPath, reportPath);
 }
 
+async function testTopicPoolPrefersTopicMinerProjectionJsonWhenAvailable() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = {
+    readingRoot: "Learning/reading-notes",
+    openNoteAfterCapture: false,
+  };
+
+  files.set("Learning/reading-notes/topic-miner/current.json", {
+    file: makeFile("Learning/reading-notes/topic-miner/current.json", ""),
+    content: `${JSON.stringify({
+      schemaVersion: 1,
+      latestReportDate: "2026-07-09",
+      reportPath: "Learning/reading-notes/topic-miner/reports/2026-07-09.md",
+      viewPath: "Learning/reading-notes/topic-miner/candidates.view.json",
+    }, null, 2)}\n`,
+  });
+  files.set("Learning/reading-notes/topic-miner/candidates.view.json", {
+    file: makeFile("Learning/reading-notes/topic-miner/candidates.view.json", ""),
+    content: `${JSON.stringify({
+      schemaVersion: 1,
+      reportDate: "2026-07-09",
+      sortMode: "recommended",
+      items: [
+        {
+          candidateId: "tm_20260709_meta_90days",
+          title: "如果你的公司在做 AI 化，先看完 Meta 这 90 天",
+          summary: "这个题适合做成面向企业客户的反面教材。",
+          source: "AI 推荐",
+          sourceType: "反面案例",
+          feedback: "想写",
+          feedbackNote: "补一组组织转型材料。",
+          duplicateRisk: "中",
+          timing: "先补材料",
+          firstAction: "先列出 Meta 的时间线。",
+          sourcePaths: ["Learning/web/articles/meta-90-days/article_zh.md"],
+          sourceLabels: ["Meta 工程组织解构"],
+          updatedAt: "2026-07-09",
+        },
+      ],
+    }, null, 2)}\n`,
+  });
+  files.set("Learning/reading-notes/topic-miner/reports/2026-07-08.md", {
+    file: makeFile("Learning/reading-notes/topic-miner/reports/2026-07-08.md", ""),
+    content: `# AI 选题候选 - 2026-07-08
+
+## 强推荐
+
+### 1. 旧 Markdown 报告里的候选
+
+反馈：待定
+`,
+  });
+
+  const topics = await plugin.buildTopicPoolItems();
+
+  assert.strictEqual(topics.length, 1);
+  assert.strictEqual(topics[0].id, "tm_20260709_meta_90days");
+  assert.strictEqual(topics[0].kind, "ai");
+  assert.strictEqual(topics[0].originLabel, "AI 推荐");
+  assert.strictEqual(topics[0].reportDate, "2026-07-09");
+  assert.strictEqual(topics[0].reportPath, "Learning/reading-notes/topic-miner/reports/2026-07-09.md");
+  assert.strictEqual(topics[0].title, "如果你的公司在做 AI 化，先看完 Meta 这 90 天");
+  assert.strictEqual(topics[0].judgment, "这个题适合做成面向企业客户的反面教材。");
+  assert.strictEqual(topics[0].sourceType, "反面案例");
+  assert.strictEqual(topics[0].duplicationRisk, "中");
+  assert.strictEqual(topics[0].timing, "先补材料");
+  assert.strictEqual(topics[0].firstAction, "先列出 Meta 的时间线。");
+  assert.deepStrictEqual(topics[0].sources, ["Learning/web/articles/meta-90-days/article_zh.md"]);
+  assert.strictEqual(topics[0].sourcePath, "Learning/web/articles/meta-90-days/article_zh.md");
+  assert.strictEqual(topics[0].sourceTitle, "Meta 工程组织解构");
+  assert.strictEqual(topics[0].feedback, "想写");
+  assert.strictEqual(topics[0].feedbackNote, "补一组组织转型材料。");
+}
+
 async function testTopicPoolAiCandidatesPreferLatestReportOverFeedbackTime() {
   const PluginClass = loadPluginClass();
   const plugin = new PluginClass();
@@ -2054,6 +2131,7 @@ testCaptureWritesAnnotationAndIndex()
   .then(testTopicPoolCollectsWritableTopicsFromReadingNotes)
   .then(testTopicPoolCombinesManualIdeasWithTopicMinerCandidatesAndFeedback)
   .then(testTopicPoolFindsTopicMinerReportsFromAdapterWhenVaultIndexIsStale)
+  .then(testTopicPoolPrefersTopicMinerProjectionJsonWhenAvailable)
   .then(testTopicPoolAiCandidatesPreferLatestReportOverFeedbackTime)
   .then(testTopicPoolSortsByContentDateNotFeedbackTime)
   .then(testTopicMinerFeedbackIsAppendedAsJsonl)

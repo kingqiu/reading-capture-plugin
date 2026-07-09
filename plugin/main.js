@@ -23,6 +23,8 @@ const DIAGNOSTIC_LOG_MAX_CHARS = 120000;
 const RUNTIME_FILE_NAMES = ["manifest.json", "main.js", "styles.css", "reading-core.js"];
 const TOPIC_MINER_ROOT = "Learning/reading-notes/topic-miner";
 const TOPIC_MINER_FEEDBACK_PATH = `${TOPIC_MINER_ROOT}/feedback.jsonl`;
+const TOPIC_MINER_CURRENT_PATH = `${TOPIC_MINER_ROOT}/current.json`;
+const TOPIC_MINER_VIEW_PATH = `${TOPIC_MINER_ROOT}/candidates.view.json`;
 const TOPIC_FEEDBACK_OPTIONS = ["待定", "想写", "暂存", "不要", "已写"];
 const TOPIC_SORT_OPTIONS = [
   ["workflow", "工作流排序"],
@@ -3142,6 +3144,9 @@ module.exports = class ReadingCapturePlugin extends Plugin {
 
   async buildTopicMinerCandidateItems(feedbackItems = null) {
     if (!feedbackItems) feedbackItems = await this.loadTopicMinerFeedback();
+    const projectedCandidates = await this.loadTopicMinerProjectionCandidates(feedbackItems);
+    if (projectedCandidates) return projectedCandidates;
+
     const feedbackById = new Map(feedbackItems.filter((item) => item.candidateId).map((item) => [item.candidateId, item]));
     const feedbackByTitle = new Map(feedbackItems.filter((item) => item.title).map((item) => [item.title, item]));
     const candidates = [];
@@ -3164,6 +3169,81 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     }
 
     return candidates;
+  }
+
+  async loadTopicMinerProjectionCandidates(feedbackItems = null) {
+    try {
+      const current = await this.loadTopicMinerCurrentProjection();
+      const viewPath = normalizePath((current && current.viewPath) || TOPIC_MINER_VIEW_PATH);
+      if (!(await this.pathExists(viewPath))) return null;
+      const view = JSON.parse(await this.readText(viewPath));
+      if (!view || view.schemaVersion !== 1 || !Array.isArray(view.items)) return null;
+      const reportDate = String(view.reportDate || (current && current.latestReportDate) || "").trim();
+      const reportPath = normalizePath(
+        (current && current.reportPath)
+          || (reportDate ? `${TOPIC_MINER_ROOT}/reports/${reportDate}.md` : "")
+      );
+      return this.normalizeTopicMinerProjectionItems({
+        items: view.items,
+        reportDate,
+        reportPath,
+        feedbackItems: feedbackItems || [],
+      });
+    } catch (error) {
+      return null;
+    }
+  }
+
+  async loadTopicMinerCurrentProjection() {
+    if (!(await this.pathExists(TOPIC_MINER_CURRENT_PATH))) return null;
+    try {
+      return JSON.parse(await this.readText(TOPIC_MINER_CURRENT_PATH));
+    } catch (error) {
+      return null;
+    }
+  }
+
+  normalizeTopicMinerProjectionItems({ items, reportDate, reportPath, feedbackItems }) {
+    const feedbackById = new Map((feedbackItems || []).filter((item) => item.candidateId).map((item) => [item.candidateId, item]));
+    const feedbackByTitle = new Map((feedbackItems || []).filter((item) => item.title).map((item) => [item.title, item]));
+    return (items || []).map((item, index) => {
+      const id = String(item.candidateId || item.id || this.topicMinerCandidateId(reportDate, "strong", index + 1)).trim();
+      const title = String(item.title || item.name || "未命名选题").trim();
+      const feedback = feedbackById.get(id) || feedbackByTitle.get(title) || null;
+      const sourcePaths = Array.isArray(item.sourcePaths)
+        ? item.sourcePaths.map((sourcePath) => normalizePath(sourcePath)).filter(Boolean)
+        : [];
+      const sourceLabels = Array.isArray(item.sourceLabels)
+        ? item.sourceLabels.map((label) => String(label || "").trim()).filter(Boolean)
+        : [];
+      const updatedAt = String((feedback && feedback.updatedAt) || item.updatedAt || item.createdAt || reportDate || "").trim();
+      return {
+        id,
+        kind: "ai",
+        originLabel: String(item.source || item.originLabel || "AI 推荐").trim() || "AI 推荐",
+        reportDate: String(item.reportDate || reportDate || "").trim(),
+        reportPath,
+        title,
+        feedback: feedback ? feedback.feedback : this.normalizeTopicFeedback(item.feedback || item.status),
+        feedbackNote: feedback ? feedback.note : String(item.feedbackNote || item.noteForAi || "").trim(),
+        feedbackUpdatedAt: feedback ? feedback.updatedAt : "",
+        updatedAt,
+        sortDate: String(item.sortDate || item.reportDate || reportDate || updatedAt || "").trim(),
+        sourceType: String(item.sourceType || item.type || "").trim(),
+        timing: String(item.timing || item.timeJudgment || "").trim(),
+        duplicationRisk: String(item.duplicateRisk || item.duplicationRisk || item.repetitionRisk || "").trim(),
+        maturity: String(item.maturity || "").trim(),
+        judgment: String(item.judgment || item.summary || item.coreJudgment || "").trim(),
+        whyNow: String(item.whyNow || "").trim(),
+        relationship: String(item.relationship || item.publishedRelationship || "").trim(),
+        firstAction: String(item.firstAction || item.nextAction || "").trim(),
+        reason: String(item.reason || "").trim(),
+        sources: sourcePaths,
+        sourceLabels,
+        sourcePath: sourcePaths[0] || "",
+        sourceTitle: sourceLabels[0] || sourcePaths[0] || "",
+      };
+    });
   }
 
   async getTopicMinerReportFiles() {
