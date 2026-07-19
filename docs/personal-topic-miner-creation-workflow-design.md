@@ -838,9 +838,34 @@ Not included in V1:
 - full Local Deep Research deployment;
 - automatic deletion or merging of historical publishing directories.
 
-## 20. Implementation Sequence
+## 20. Implementation Method and Sequence
 
-### Phase 1: project and approval foundation
+### 20.1 Mandatory TDD method
+
+All Creation Project, Runner, persistence, platform-workflow, and export functionality is developed test-first. Each behavior follows this order:
+
+1. translate the relevant design rule or validation-matrix path into an automated test;
+2. run the test and confirm that it fails for the expected missing behavior, not because the test setup is broken;
+3. add the smallest production change that makes the test pass;
+4. run the focused test and the relevant regression suite;
+5. refactor only while the suite remains green;
+6. exercise the completed path in the real Obsidian application.
+
+The test layers include pure domain tests, Vault persistence and migration tests, Runner/Task contract tests, Obsidian view interaction tests, failure and restart recovery tests, generic-release isolation tests, and end-to-end path tests. User-visible stages also require screenshot regression tests against the current approved prototype. Tests may use controlled Skill doubles for deterministic failure and recovery, while milestone acceptance additionally requires selected real-Skill runs.
+
+Production code must not be added first with tests written afterward merely to describe the implementation. A defect fix begins with a reproducing test. A visual mismatch begins with a failing screenshot or DOM/layout assertion. Commit and review records must make the red-to-green relationship traceable.
+
+### 20.2 Visual implementation constraint
+
+The Creation Project view must reproduce the current approved `creation-workflow-prototype.html` 1:1 at the reference desktop viewport while satisfying the interaction and persistence requirements in the written specification. This requirement covers layout, proportions, spacing, typography, color, borders, controls, labels, selection, statuses, modal presentation, and stage-specific states. The project's broader design rules constrain implementation details but do not authorize a visual reinterpretation of the approved prototype.
+
+Every implemented stage and route variant requires side-by-side reference screenshots plus automated screenshot comparison. Responsive layouts are additional adaptations for narrower supported widths; they do not replace or relax the desktop fidelity requirement.
+
+Before UI implementation begins, the approved prototype revision, exact reference viewport dimensions, and baseline screenshots must be frozen in version control. Any baseline change is a design change and requires explicit user approval plus updates to the interaction specification and validation matrix.
+
+### 20.3 Delivery sequence
+
+#### Phase 1: project and approval foundation
 
 - project schema and directory creation;
 - create versus append-to-project flow;
@@ -848,7 +873,7 @@ Not included in V1:
 - task, event, approval, and version model;
 - project UI and empty/error states.
 
-### Phase 2: Runner foundation
+#### Phase 2: Runner foundation
 
 - local background service;
 - queue watcher, active executor, leases, and idempotency;
@@ -856,7 +881,7 @@ Not included in V1:
 - Codex executor contract;
 - logs, retry, cancellation, and stale-output behavior.
 
-### Phase 3: planning and research
+#### Phase 3: planning and research
 
 - Writing Styles diagnosis;
 - master brief workflow;
@@ -865,7 +890,7 @@ Not included in V1:
 - optional Last30days and Academic Research Suite routes;
 - source and research validation.
 
-### Phase 4: platform deliverables
+#### Phase 4: platform deliverables
 
 - WeChat outline, draft, and approval flow;
 - WeChat visual plan and routed asset generation;
@@ -873,7 +898,7 @@ Not included in V1:
 - WeChat-to-Xiaohongshu adaptation flow;
 - Keke Social Card proposal and package generation.
 
-### Phase 5: finalization and export
+#### Phase 5: finalization and export
 
 - final review and immutable snapshots;
 - canonical directory naming;
@@ -910,6 +935,8 @@ V1 is acceptable when all of the following are demonstrated in the real Obsidian
 23. Skill installation rejects mismatched artifact or manifest digests, and the locked digest can be reinstalled and reproduced on a second approved machine.
 24. Sandbox tests prove that a Skill or transitive dependency cannot read undeclared project data, write outside declared locations, access unapproved network destinations, or receive undeclared secrets.
 25. A Skill upgrade that expands permissions requires new approval; a failed upgrade leaves the previous locked version runnable.
+26. Every production behavior and defect fix has a traceable test that was observed failing before its implementation and passes with the relevant regression suite afterward.
+27. Every Creation Project stage and supported route variant matches the current approved prototype 1:1 at the reference desktop viewport, with screenshot evidence and reviewer approval; responsive variants also satisfy the documented adaptation rules.
 
 ## 22. Decision Record
 
@@ -941,3 +968,5 @@ The following decisions are approved as of 2026-07-19:
 - require independent visual and publishing-copy QA for Xiaohongshu, both at a default threshold of 95;
 - enable WeChat-to-Xiaohongshu adaptation only after a valid finalized WeChat Artifact exists;
 - require platform-specific final checks to unlock each publishing snapshot independently.
+- treat the current approved Creation Project prototype as the 1:1 visual implementation baseline rather than a loose style reference;
+- require test-driven development for this feature: failing test first, minimal implementation second, regression and refactor afterward.

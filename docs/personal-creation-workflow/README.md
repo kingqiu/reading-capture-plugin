@@ -12,14 +12,16 @@ This directory is the durable design index for the personal creation workflow th
 
 The workflow belongs only to the `personal/topic-miner` branch. It must not enter the generic Reading Capture release.
 
-## Source-of-truth order
+## Sources of truth
 
-When documents appear to disagree, use this order:
+Authority is divided by concern rather than by a single document order:
 
-1. [`interaction-spec.md`](interaction-spec.md) for what the user sees, edits, confirms, and can recover from.
-2. [`../personal-topic-miner-creation-workflow-design.md`](../personal-topic-miner-creation-workflow-design.md) for product boundaries, domain model, storage, Runner architecture, Skill contracts, security, and implementation sequence.
-3. [`path-validation-matrix.md`](path-validation-matrix.md) for the paths that must work before a development milestone is accepted.
-4. The approved HTML prototype for visual intent only. The written rules above win if prototype behavior is incomplete.
+1. The approved HTML prototype is the source of truth for the Creation Project view's visual presentation. The implementation must reproduce it 1:1.
+2. [`interaction-spec.md`](interaction-spec.md) is the source of truth for what the user sees, edits, confirms, and can recover from.
+3. [`../personal-topic-miner-creation-workflow-design.md`](../personal-topic-miner-creation-workflow-design.md) is the source of truth for product boundaries, domain model, storage, Runner architecture, Skill contracts, security, and implementation sequence.
+4. [`path-validation-matrix.md`](path-validation-matrix.md) is the source of truth for the paths and evidence required before a development milestone is accepted.
+
+The written rules remain authoritative for behavior, persistence, validation, and recovery that the prototype does not simulate completely. If a written visual rule conflicts with the current approved prototype, development pauses for a design correction instead of choosing one silently.
 
 ## Document map
 
@@ -45,7 +47,7 @@ delivery=wechat | xhs
 stage=relations | diagnosis | research | brief | plan | draft | visual | final
 ```
 
-The prototype is a visual and interaction reference, not executable product logic. It uses temporary browser state and simulated results. The real implementation must persist project truth in the Vault and execute work through durable Tasks.
+The prototype is the approved visual baseline, not executable product logic. The real Creation Project view must reproduce its layout, dimensions and proportions, spacing, typography, colors, borders, control hierarchy, labels, stage presentation, and visible states 1:1. It uses temporary browser state and simulated results, so the real implementation must additionally persist project truth in the Vault and execute work through durable Tasks. Product data, browser chrome, and temporary prototype-only simulation controls are not visual product requirements.
 
 ## Core approved decisions
 
@@ -65,17 +67,25 @@ The prototype is a visual and interaction reference, not executable product logi
 - Automatic quality thresholds default to 95, but a passing score never replaces human review.
 - Publishing export creates an immutable snapshot and leaves the creation project intact.
 - Both platform directories use `YYYYMMDD_主题` with `_vN` conflict handling.
+- The current approved prototype is reproduced 1:1 for the Creation Project view; it is not a loose style reference.
+- Development is test-first using `red → green → refactor`; production behavior is not written before its failing test.
 
 ## Development gate
 
-Implementation may begin from this baseline. A milestone is not complete until:
+Implementation may begin from this baseline only through test-driven development. For every behavior or state, the developer must first add an automated test that expresses the approved requirement and observe it fail for the expected reason; only then may production code be written. The cycle is `red → green → refactor`, and no implementation-only commit is accepted without its preceding or accompanying tests.
 
-1. its path is demonstrated in the real Obsidian application;
-2. generated content is visible and editable before approval;
-3. loading, waiting, partial, failure, stale, and recovery states are exercised;
-4. project state survives refresh and Obsidian restart;
-5. screenshots are compared with the approved interaction hierarchy;
-6. the generic Reading Capture build remains free of personal workflow modules.
+Before the first UI implementation test, the team must freeze the approved prototype revision, reference viewport dimensions, and reference screenshots in version control. Changing any of these baselines requires explicit user approval and an update to this document set.
+
+A milestone is not complete until:
+
+1. its automated tests were written first and the expected red-to-green evidence is retained in the development record;
+2. its path is demonstrated in the real Obsidian application;
+3. generated content is visible and editable before approval;
+4. loading, waiting, partial, failure, stale, and recovery states are exercised;
+5. project state survives refresh and Obsidian restart;
+6. screenshots at the approved reference viewport are compared with the current approved prototype and show a 1:1 visual reproduction, not merely a similar style;
+7. responsive behavior is separately verified at narrower supported widths without weakening desktop 1:1 fidelity;
+8. the generic Reading Capture build remains free of personal workflow modules.
 
 ## Change control
 

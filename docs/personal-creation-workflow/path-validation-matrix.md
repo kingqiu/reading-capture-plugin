@@ -14,6 +14,8 @@ This matrix converts the approved design into paths that can be demonstrated and
 
 For each scenario, record:
 
+- the automated test added before production code and evidence that it first failed for the expected reason;
+- the passing focused test and relevant regression-suite result after implementation;
 - starting project and input state;
 - every stage transition;
 - visible confirmation object and button consequence;
@@ -22,7 +24,10 @@ For each scenario, record:
 - failure or stale-state behavior where applicable;
 - final Vault-relative output path;
 - screenshot of each major checkpoint;
+- side-by-side and automated screenshot comparison against the current approved prototype at the reference desktop viewport;
 - proof that the generic plugin artifact remains unaffected.
+
+No scenario changes from pending to accepted when tests were added only after the production behavior, when the expected initial failure was not established, or when the view is merely stylistically similar to the prototype instead of being reproduced 1:1.
 
 ## 3. WeChat paths
 

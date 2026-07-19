@@ -26,6 +26,7 @@ It does not define Skill internals or Runner implementation details. Those are d
 10. A skipped stage is displayed as “not used for this path,” never as completed.
 11. Upstream changes mark affected downstream work stale. They do not silently regenerate or delete it.
 12. WeChat and Xiaohongshu Deliverables advance and recover independently.
+13. The Creation Project view reproduces the current approved prototype 1:1; the general design system is a constraint around that baseline, not permission to reinterpret it.
 
 ## 3. Persistent page structure
 
@@ -599,6 +600,26 @@ Refresh, project switching, Obsidian restart, and opening the synced Vault on an
 If state metadata and files disagree, the UI shows a conflict and recovery choices. It never silently overwrites either side.
 
 ## 16. Visual semantics
+
+### 16.1 Prototype fidelity contract
+
+The current approved `creation-workflow-prototype.html` is the visual source of truth for this view. At the reference desktop viewport, implementation must match it 1:1 in:
+
+- information architecture and element order;
+- column widths, content widths, alignment, spacing, and vertical rhythm;
+- typography scale, weight, line height, and text hierarchy;
+- backgrounds, borders, radii, shadows, dividers, and semantic colors;
+- button, status, selection, form, card, list, navigation, and modal treatments;
+- default, selected, disabled, loading, warning, error, and confirmation states represented by the prototype;
+- visible labels and consequence-oriented action wording.
+
+Developers must not redesign, simplify, “improve,” or substitute generic Obsidian controls where doing so changes the approved appearance. Responsive adaptation is allowed only below the reference viewport and must follow section 17. Browser chrome, sample content values, transient prototype data, and controls used only to simulate state are excluded from the 1:1 requirement.
+
+Visual acceptance requires side-by-side screenshots and automated screenshot comparison for every implemented stage and supported path variant. A reviewer must also inspect differences that automated comparison marks as intentional or tolerable; passing a pixel threshold alone is not approval.
+
+Before UI code begins, the approved prototype revision, exact reference viewport dimensions, and baseline screenshots are frozen in version control. They cannot be replaced by a newer interpretation without explicit user approval and a corresponding design-document update.
+
+### 16.2 Semantic color and control rules
 
 - Green: valid, selected, passed, or ready.
 - Blue: candidate, informational selection, or current work where green would imply approval.
