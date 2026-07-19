@@ -313,20 +313,42 @@ class ReadingCaptureReaderView extends ItemView {
     return container;
   }
 
-  async renderKeepingScroll() {
+  captureReaderState() {
     const container = this.getScrollContainer();
-    const scrollTop = container ? container.scrollTop : 0;
-    const scrollLeft = container ? container.scrollLeft : 0;
-    await this.render();
-    const restored = this.getScrollContainer();
-    if (!restored) return;
-    const restore = () => {
-      restored.scrollTop = scrollTop;
-      restored.scrollLeft = scrollLeft;
+    const details = container && typeof container.querySelectorAll === "function"
+      ? Array.from(container.querySelectorAll("details")).map((element, index) => ({ index, open: !!element.open }))
+      : [];
+    return {
+      scrollTop: container ? container.scrollTop : 0,
+      scrollLeft: container ? container.scrollLeft : 0,
+      details,
     };
-    restore();
-    if (typeof requestAnimationFrame === "function") requestAnimationFrame(restore);
-    else setTimeout(restore, 0);
+  }
+
+  restoreReaderState(state, annotationId = "") {
+    const container = this.getScrollContainer();
+    if (!container || !state) return;
+
+    const details = typeof container.querySelectorAll === "function" ? Array.from(container.querySelectorAll("details")) : [];
+    for (const item of state.details || []) {
+      if (details[item.index]) details[item.index].open = item.open;
+    }
+
+    const restoreScroll = () => {
+      container.scrollTop = state.scrollTop || 0;
+      container.scrollLeft = state.scrollLeft || 0;
+    };
+    const didFocusAnnotation = annotationId && this.activateAnnotation(annotationId, true);
+    if (didFocusAnnotation) return;
+    restoreScroll();
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(restoreScroll);
+    else setTimeout(restoreScroll, 0);
+  }
+
+  async renderKeepingScroll({ annotationId = "" } = {}) {
+    const state = this.captureReaderState();
+    await this.render();
+    this.restoreReaderState(state, annotationId);
   }
 
   async render() {
@@ -550,13 +572,13 @@ class ReadingCaptureReaderView extends ItemView {
           return;
         }
         const target = this.plugin.resolveRecordTarget(recordType, note);
-        await this.plugin.captureForFile(sourceFile, {
+        const capture = await this.plugin.captureForFile(sourceFile, {
           selectedText: "",
           note,
           type: target.type === "highlight-with-note" ? "idea" : target.type,
           heading: target.heading,
         });
-        await this.renderKeepingScroll();
+        await this.renderKeepingScroll({ annotationId: capture && capture.annotationId });
       },
       { includeTypeSelect: true, onError: (error) => this.plugin.writeDiagnosticEvent("error", "reader-free-thought-save", this.plugin.errorToDiagnostic(error)) }
     ).open();
@@ -578,13 +600,13 @@ class ReadingCaptureReaderView extends ItemView {
       "写下你对这段内容的想法。可留空。",
       async (note, recordType) => {
         const target = this.plugin.resolveRecordTarget(recordType, note);
-        await this.plugin.captureForFile(sourceFile, {
+        const capture = await this.plugin.captureForFile(sourceFile, {
           selectedText,
           note,
           type: target.type,
           heading: target.heading,
         });
-        await this.renderKeepingScroll();
+        await this.renderKeepingScroll({ annotationId: capture && capture.annotationId });
       },
       {
         includeTypeSelect: true,
@@ -606,14 +628,14 @@ class ReadingCaptureReaderView extends ItemView {
           return;
         }
         const target = this.plugin.resolveRecordTarget(recordType, note);
-        await this.plugin.captureForFile(sourceFile, {
+        const capture = await this.plugin.captureForFile(sourceFile, {
           selectedText: "",
           note,
           type: target.type === "highlight-with-note" ? "image-note" : target.type,
           heading: target.heading,
           media,
         });
-        await this.renderKeepingScroll();
+        await this.renderKeepingScroll({ annotationId: capture && capture.annotationId });
       },
       {
         includeTypeSelect: true,
@@ -849,13 +871,14 @@ class ReadingCaptureReaderView extends ItemView {
   }
 
   activateAnnotation(annotationId, scrollArticle) {
-    if (!annotationId) return;
+    if (!annotationId) return false;
     this.activeAnnotationId = annotationId;
     this.containerEl.querySelectorAll(".reading-capture-reader-highlight.is-active").forEach((element) => element.removeClass("is-active"));
     this.containerEl.querySelectorAll(".reading-capture-reader-image-highlight.is-active").forEach((element) => element.removeClass("is-active"));
     this.containerEl.querySelectorAll(".reading-capture-sidebar-card.is-active").forEach((element) => element.removeClass("is-active"));
     const escapedId = this.plugin.cssEscape(annotationId);
-    this.containerEl.querySelectorAll(`.reading-capture-reader-highlight[data-annotation-id="${escapedId}"], .reading-capture-reader-image-highlight[data-annotation-id="${escapedId}"]`).forEach((element, index) => {
+    const articleMatches = this.containerEl.querySelectorAll(`.reading-capture-reader-highlight[data-annotation-id="${escapedId}"], .reading-capture-reader-image-highlight[data-annotation-id="${escapedId}"]`);
+    articleMatches.forEach((element, index) => {
       element.addClass("is-active");
       if (scrollArticle && index === 0) element.scrollIntoView({ block: "center", behavior: "smooth" });
     });
@@ -864,6 +887,7 @@ class ReadingCaptureReaderView extends ItemView {
       card.addClass("is-active");
       if (!scrollArticle) card.scrollIntoView({ block: "nearest", behavior: "smooth" });
     }
+    return articleMatches.length > 0;
   }
 }
 
@@ -2298,13 +2322,13 @@ module.exports = class ReadingCapturePlugin extends Plugin {
         new Notice("请先在阅读器里选中一段文字。");
         return;
       }
-      await this.captureForFile(file, {
+      const capture = await this.captureForFile(file, {
         selectedText,
         note: "",
         type: "highlight",
         heading: "标注记录",
       });
-      await reader.renderKeepingScroll();
+      await reader.renderKeepingScroll({ annotationId: capture && capture.annotationId });
       return;
     }
     const context = this.getActiveMarkdownContext();
@@ -2334,7 +2358,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
         return;
       }
       const selectedText = reader.getSelectedTextWithin(reader.containerEl);
-      this.openTypedCaptureModal(file, selectedText, recordType, async () => reader.renderKeepingScroll());
+      this.openTypedCaptureModal(file, selectedText, recordType, async (capture) => reader.renderKeepingScroll({ annotationId: capture && capture.annotationId }));
       return;
     }
     const context = this.getActiveMarkdownContext();
@@ -2358,13 +2382,13 @@ module.exports = class ReadingCapturePlugin extends Plugin {
           new Notice("没有可记录的内容。");
           return;
         }
-        await this.captureForFile(file, {
+        const capture = await this.captureForFile(file, {
           selectedText,
           note: finalNote,
           type: recordType,
           heading: isTopic ? CREATIVE_IDEA_SECTION : "事实待核查",
         });
-        if (afterSave) await afterSave();
+        if (afterSave) await afterSave(capture);
       },
       {
         previewText: this.previewSelectedText(selectedText),
@@ -3672,11 +3696,11 @@ module.exports = class ReadingCapturePlugin extends Plugin {
   async captureForFile(file, { selectedText, note, type, heading, media = null }) {
     if (!this.isFile(file)) {
       new Notice("没有找到当前文件。");
-      return;
+      return null;
     }
     if (file.path.startsWith(`${this.settings.readingRoot}/`)) {
       new Notice("当前文件已经是阅读记录，请在源文档中标注。");
-      return;
+      return null;
     }
 
     const noteFile = await this.getOrCreateReadingNote(file);
@@ -3697,6 +3721,11 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     if (this.settings.openNoteAfterCapture) {
       await this.openReadingRecord(noteFile, file);
     }
+    const annotationMatch = block.match(/^###\s+(\S+)/m);
+    return {
+      annotationId: annotationMatch ? annotationMatch[1] : "",
+      noteFile,
+    };
   }
 
   async getOrCreateReadingNote(sourceFile) {

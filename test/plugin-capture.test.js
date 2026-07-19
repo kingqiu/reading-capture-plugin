@@ -63,6 +63,9 @@ function loadPluginClass() {
     JSON,
     Math,
     Array,
+    setTimeout(callback) {
+      callback();
+    },
   };
   vm.runInNewContext(code, sandbox, { filename: "main.js" });
   return sandbox.module.exports;
@@ -271,12 +274,14 @@ async function testCaptureWritesAnnotationAndIndex() {
   };
   plugin.now = () => fixedNow;
 
-  await plugin.captureForFile(sourceFile, {
+  const capture = await plugin.captureForFile(sourceFile, {
     selectedText: "Selected text",
     note: "My note",
     type: "highlight-with-note",
     heading: "标注记录",
   });
+
+  assert.match(capture.annotationId, /^ann_20260610_115900_/);
 
   const readingPath = [...files.keys()].find((path) => path.startsWith("Learning/reading-notes/2026/06/") && path.endsWith(".md"));
   assert.ok(readingPath, "reading note should be created");
@@ -1898,6 +1903,53 @@ async function testReaderSidebarKeepsAnnotationNavigationFocused() {
   assert.strictEqual(cards[0].children.some((child) => child.tag === "button" && child.text === "打开阅读记录"), false);
 }
 
+async function testReaderPreservesExpandedDetailsAndPositionAfterRefresh() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  plugin.app = {
+    workspace: {
+      on() {
+        return {};
+      },
+      getActiveFile() {
+        return null;
+      },
+    },
+  };
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => {
+    registeredViews[type] = factory;
+  };
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-reader"]({});
+  let details = [{ open: true }, { open: false }];
+  const body = {
+    scrollTop: 640,
+    scrollLeft: 12,
+    querySelector() {
+      return this;
+    },
+    querySelectorAll(selector) {
+      return selector === "details" ? details : [];
+    },
+  };
+  view.containerEl = { children: [null, body] };
+
+  const state = view.captureReaderState();
+  details = [{ open: false }, { open: true }];
+  body.scrollTop = 0;
+  body.scrollLeft = 0;
+  view.restoreReaderState(state);
+
+  assert.deepStrictEqual(details.map((item) => item.open), [true, false]);
+  assert.strictEqual(body.scrollTop, 640);
+  assert.strictEqual(body.scrollLeft, 12);
+}
+
 async function testReaderDisplayControlsAdjustFontSizeAndLineHeight() {
   const PluginClass = loadPluginClass();
   const plugin = new PluginClass();
@@ -2147,6 +2199,7 @@ testCaptureWritesAnnotationAndIndex()
   .then(testGenericDefaultSettings)
   .then(testVersionPathTooltipAndCopy)
   .then(testReaderSidebarKeepsAnnotationNavigationFocused)
+  .then(testReaderPreservesExpandedDetailsAndPositionAfterRefresh)
   .then(testReaderDisplayControlsAdjustFontSizeAndLineHeight)
   .then(testReaderBodyUsesDisplaySettingVariables)
   .then(testReadingRecordViewGroupsAnnotationsAndSwitchesMarkdownInPlace)
