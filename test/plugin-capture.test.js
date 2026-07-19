@@ -1109,6 +1109,29 @@ async function testTopicPoolPrefersTopicMinerProjectionJsonWhenAvailable() {
   assert.strictEqual(topics[0].feedbackNote, "补一组组织转型材料。");
 }
 
+function testTopicMinerReportParsesBulletedSourceSection() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const candidates = plugin.parseTopicMinerReport(`## 主选候选
+
+### 1. AI Agent 上线前，至少要做哪五项风险评估
+
+- 反馈：待定
+- 核心判断：先定义风险边界。
+- 素材来源：
+- Learning/reading-notes/2026/07/agent-risk.md
+- Learning/web/articles/agent-risk/article_zh.md
+- 第一动作：整理成风险评估清单。
+`, "Learning/reading-notes/topic-miner/reports/2026-07-19.md");
+
+  assert.strictEqual(candidates.length, 1);
+  assert.deepStrictEqual([...candidates[0].sources], [
+    "Learning/reading-notes/2026/07/agent-risk.md",
+    "Learning/web/articles/agent-risk/article_zh.md",
+  ]);
+  assert.strictEqual(candidates[0].firstAction, "整理成风险评估清单。");
+}
+
 async function testTopicPoolAiCandidatesPreferLatestReportOverFeedbackTime() {
   const PluginClass = loadPluginClass();
   const plugin = new PluginClass();
@@ -1630,6 +1653,47 @@ async function testTopicPoolCardClickUpdatesDetailWithoutRerenderingList() {
   assert.ok(texts.includes("第二个判断"), "detail panel should update to the clicked topic");
 }
 
+async function testTopicPoolCardClickKeepsRepeatedCandidateIdsVisuallyIndependent() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => {
+    registeredViews[type] = factory;
+  };
+  plugin.buildTopicPoolItems = async () => [
+    { id: "2026-07-19-strong-02", kind: "ai", reportDate: "2026-07-19", title: "第一条重复编号", judgment: "第一个判断", feedback: "想写" },
+    { id: "2026-07-19-strong-02", kind: "ai", reportDate: "2026-07-19", title: "第二条重复编号", judgment: "第二个判断", feedback: "想写" },
+  ];
+  plugin.loadData = async () => null;
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-topic-pool"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+
+  const cards = [];
+  const visit = (node) => {
+    if (node.classes && node.classes.has("reading-capture-topic-card")) cards.push(node);
+    for (const child of node.children || []) visit(child);
+  };
+  visit(view.containerEl.children[1]);
+  assert.strictEqual(cards.length, 2);
+  assert.ok(cards[0].classes.has("is-selected"), "first repeated id card should be selected initially");
+  assert.ok(!cards[1].classes.has("is-selected"), "second repeated id card must remain unselected");
+
+  await cards[1].listeners.click();
+
+  assert.ok(!cards[0].classes.has("is-selected"), "first card should lose selected state after clicking the second");
+  assert.ok(cards[1].classes.has("is-selected"), "only the clicked repeated id card should be selected");
+  assert.ok(fakeElementTexts(view.containerEl.children[1]).includes("第二个判断"));
+}
+
 async function testTopicPoolSavePreservesListScrollPosition() {
   const PluginClass = loadPluginClass();
   const plugin = new PluginClass();
@@ -1773,6 +1837,46 @@ async function testOpenLibraryVersionUsesReaderForMarkdownAndObsidianForPdf() {
 
   assert.strictEqual(readerPath, markdown.path);
   assert.strictEqual(openedPath, pdf.path);
+}
+
+async function testTopicPoolOpensBestArticleFromDirectorySource() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  const registeredViews = {};
+  const sourceDirectory = "Learning/web/articles/agent-risk";
+  const readingNote = makeFile("Learning/reading-notes/2026/07/agent-risk.md", "# Reading note");
+  const original = makeFile(`${sourceDirectory}/article.md`, "# Original");
+  const enriched = makeFile(`${sourceDirectory}/article_zh_enriched.md`, "# Enriched");
+  files.set(readingNote.path, { file: readingNote, content: "# Reading note" });
+  files.set(original.path, { file: original, content: "# Original" });
+  files.set(enriched.path, { file: enriched, content: "# Enriched" });
+  app.workspace.on = () => ({});
+  plugin.app = app;
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => {
+    registeredViews[type] = factory;
+  };
+
+  await plugin.onload();
+  plugin.settings.readingRoot = "Learning/reading-notes";
+  const view = registeredViews["reading-capture-topic-pool"]({});
+  let openedPath = "";
+  plugin.openReaderForFile = async (file) => {
+    openedPath = file.path;
+  };
+
+  const resolved = plugin.resolveTopicSourceFile(`[[${sourceDirectory}|AI Agent 风险评估]]`);
+  assert.strictEqual(resolved.path, enriched.path, "directory sources should resolve to the best Markdown version");
+  await view.openItemSource({
+    kind: "ai",
+    sourcePath: readingNote.path,
+    sources: [readingNote.path, sourceDirectory],
+  });
+
+  assert.strictEqual(openedPath, enriched.path, "article sources should be preferred over reading-note sources");
 }
 
 async function testGenericDefaultSettings() {
@@ -2184,6 +2288,7 @@ testCaptureWritesAnnotationAndIndex()
   .then(testTopicPoolCombinesManualIdeasWithTopicMinerCandidatesAndFeedback)
   .then(testTopicPoolFindsTopicMinerReportsFromAdapterWhenVaultIndexIsStale)
   .then(testTopicPoolPrefersTopicMinerProjectionJsonWhenAvailable)
+  .then(testTopicMinerReportParsesBulletedSourceSection)
   .then(testTopicPoolAiCandidatesPreferLatestReportOverFeedbackTime)
   .then(testTopicPoolSortsByContentDateNotFeedbackTime)
   .then(testTopicMinerFeedbackIsAppendedAsJsonl)
@@ -2193,9 +2298,11 @@ testCaptureWritesAnnotationAndIndex()
   .then(testTopicPoolWorkflowSortModesAndCollapsedArchiveGroups)
   .then(testTopicPoolFeedbackSaveFailureReenablesButton)
   .then(testTopicPoolCardClickUpdatesDetailWithoutRerenderingList)
+  .then(testTopicPoolCardClickKeepsRepeatedCandidateIdsVisuallyIndependent)
   .then(testTopicPoolSavePreservesListScrollPosition)
   .then(testTopicPoolStylesPreventFloatingDetailOverlap)
   .then(testOpenLibraryVersionUsesReaderForMarkdownAndObsidianForPdf)
+  .then(testTopicPoolOpensBestArticleFromDirectorySource)
   .then(testGenericDefaultSettings)
   .then(testVersionPathTooltipAndCopy)
   .then(testReaderSidebarKeepsAnnotationNavigationFocused)

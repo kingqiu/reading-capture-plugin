@@ -1668,7 +1668,7 @@ class ReadingCaptureTopicPoolView extends ItemView {
     this.isLoading = true;
     if (!options.skipLoadingRender) await this.render();
     try {
-      this.items = await this.plugin.buildTopicPoolItems();
+      this.items = this.assignTopicViewIds(await this.plugin.buildTopicPoolItems());
       if (previousSelectedId) this.selectedId = previousSelectedId;
     } finally {
       this.isLoading = false;
@@ -1676,6 +1676,20 @@ class ReadingCaptureTopicPoolView extends ItemView {
       this.restoreTopicListScroll(previousListScrollTop);
     }
     if (options.notify) new Notice("创作灵感已刷新。");
+  }
+
+  assignTopicViewIds(items) {
+    const counts = new Map();
+    return (items || []).map((item) => {
+      const baseId = String((item && item.id) || "topic");
+      const occurrence = (counts.get(baseId) || 0) + 1;
+      counts.set(baseId, occurrence);
+      return Object.assign({}, item, { topicViewId: occurrence === 1 ? baseId : `${baseId}::${occurrence}` });
+    });
+  }
+
+  topicViewId(item) {
+    return String((item && (item.topicViewId || item.id)) || "");
   }
 
   restoreTopicListScroll(scrollTop) {
@@ -1739,7 +1753,7 @@ class ReadingCaptureTopicPoolView extends ItemView {
     }
 
     const visibleItems = this.visibleItems();
-    if (!visibleItems.some((item) => item.id === this.selectedId)) this.selectedId = visibleItems[0] ? visibleItems[0].id : "";
+    if (!visibleItems.some((item) => this.topicViewId(item) === this.selectedId)) this.selectedId = visibleItems[0] ? this.topicViewId(visibleItems[0]) : "";
     if (!visibleItems.length) {
       list.createDiv({ cls: "reading-capture-library-empty", text: "当前筛选下没有创作灵感。" });
       this.renderTopicDetail(workspace.createDiv({ cls: "reading-capture-topic-detail" }), null);
@@ -1753,7 +1767,7 @@ class ReadingCaptureTopicPoolView extends ItemView {
       this.renderTopicCards(list, visibleItems);
     }
     this.topicDetailEl = workspace.createDiv({ cls: "reading-capture-topic-detail" });
-    this.renderTopicDetail(this.topicDetailEl, visibleItems.find((item) => item.id === this.selectedId) || visibleItems[0]);
+    this.renderTopicDetail(this.topicDetailEl, visibleItems.find((item) => this.topicViewId(item) === this.selectedId) || visibleItems[0]);
   }
 
   renderTopicGroups(container, items) {
@@ -1792,8 +1806,9 @@ class ReadingCaptureTopicPoolView extends ItemView {
   }
 
   renderTopicCard(container, item) {
-    const card = container.createDiv({ cls: `reading-capture-topic-card ${item.id === this.selectedId ? "is-selected" : ""} ${item.kind === "ai" ? "is-ai" : "is-manual"}` });
-    this.topicCardEls.set(item.id, card);
+    const viewId = this.topicViewId(item);
+    const card = container.createDiv({ cls: `reading-capture-topic-card ${viewId === this.selectedId ? "is-selected" : ""} ${item.kind === "ai" ? "is-ai" : "is-manual"}` });
+    this.topicCardEls.set(viewId, card);
     card.addEventListener("click", async () => {
       this.selectTopicItem(item);
     });
@@ -1811,9 +1826,9 @@ class ReadingCaptureTopicPoolView extends ItemView {
 
   selectTopicItem(item) {
     if (!item) return;
-    this.selectedId = item.id;
+    this.selectedId = this.topicViewId(item);
     for (const [id, card] of this.topicCardEls.entries()) {
-      if (id === item.id) card.addClass("is-selected");
+      if (id === this.selectedId) card.addClass("is-selected");
       else card.removeClass("is-selected");
     }
     if (this.topicDetailEl) {
@@ -1927,10 +1942,22 @@ class ReadingCaptureTopicPoolView extends ItemView {
   }
 
   async openItemSource(item) {
-    const path = item.sourcePath || (Array.isArray(item.sources) ? item.sources[0] : "");
-    if (!path) return;
-    const file = this.plugin.app.vault.getAbstractFileByPath(path);
-    if (this.plugin.isFile(file)) await this.plugin.openReaderForFile(file);
+    const sourceReferences = Array.isArray(item.sources) && item.sources.length ? item.sources : [item.sourcePath];
+    const sourceFiles = sourceReferences
+      .map((sourceReference) => this.plugin.resolveTopicSourceFile(sourceReference))
+      .filter(Boolean);
+    const readingRoot = normalizePath(this.plugin.settings.readingRoot || DEFAULT_SETTINGS.readingRoot).replace(/\/+$/g, "");
+    const file = sourceFiles.find((candidate) => !candidate.path.startsWith(`${readingRoot}/`)) || sourceFiles[0] || null;
+    const sourceReference = sourceReferences.find(Boolean) || "";
+    if (!file) {
+      new Notice(sourceReference ? `找不到来源文章：${sourceReference}` : "这条创作灵感没有可打开的来源文章。");
+      return;
+    }
+    if (sourceKindFromPath(file.path) === "markdown") {
+      await this.plugin.openReaderForFile(file);
+      return;
+    }
+    await this.plugin.openFile(file);
   }
 
   async openItemRecord(item) {
@@ -2242,6 +2269,30 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       return;
     }
     await this.openFile(file);
+  }
+
+  resolveTopicSourceFile(sourceReference) {
+    const sourcePath = this.normalizeTopicSourceReference(sourceReference);
+    if (!sourcePath) return null;
+    const exactFile = this.app.vault.getAbstractFileByPath(sourcePath);
+    if (this.isFile(exactFile)) return exactFile;
+
+    const candidates = this.getVaultFiles()
+      .filter((file) => this.isLibraryCandidate(file) && normalizePath(file.path).startsWith(`${sourcePath}/`))
+      .sort((left, right) => {
+        const priority = this.articleVersionRank(left.name) - this.articleVersionRank(right.name);
+        return priority || left.path.localeCompare(right.path);
+      });
+    return candidates[0] || null;
+  }
+
+  normalizeTopicSourceReference(value) {
+    let source = String(value || "").trim();
+    const wikiLink = source.match(/^\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]$/);
+    const markdownLink = source.match(/^\[[^\]]*\]\(([^)]+)\)$/);
+    if (wikiLink) source = wikiLink[1];
+    else if (markdownLink) source = markdownLink[1];
+    return normalizePath(source).replace(/\/+$/g, "");
   }
 
   async openArticleLibrary() {
@@ -3380,14 +3431,15 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     const labelPattern = /^[\u4e00-\u9fa5A-Za-z0-9/（）()]+：/;
     for (const line of lines) {
       const trimmed = line.trim();
-      if (trimmed.startsWith(`${label}：`)) {
-        const inlineValue = this.cleanTopicMinerField(trimmed.slice(`${label}：`.length));
+      const fieldLine = trimmed.replace(/^[-*]\s+/, "");
+      if (fieldLine.startsWith(`${label}：`)) {
+        const inlineValue = this.cleanTopicMinerField(fieldLine.slice(`${label}：`.length));
         collecting = true;
         if (inlineValue) result.push(inlineValue);
         continue;
       }
       if (!collecting) continue;
-      if (labelPattern.test(trimmed)) break;
+      if (labelPattern.test(fieldLine)) break;
       if (!trimmed && !result.length) continue;
       if (!trimmed && result.length) break;
       result.push(this.cleanTopicMinerField(trimmed));

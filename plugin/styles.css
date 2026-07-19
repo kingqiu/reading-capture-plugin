@@ -1799,7 +1799,7 @@
 }
 
 .reading-capture-topic-card.is-manual {
-  border-left-color: rgba(83, 196, 111, 0.86);
+  border-left-color: rgba(82, 128, 255, 0.85);
 }
 
 .reading-capture-topic-card:hover {
@@ -1808,8 +1808,9 @@
 }
 
 .reading-capture-topic-card.is-selected {
-  border-color: rgba(82, 128, 255, 0.8);
-  box-shadow: 0 0 0 1px rgba(82, 128, 255, 0.45), 0 16px 36px rgba(0, 0, 0, 0.2);
+  border-color: rgba(83, 196, 111, 0.8);
+  border-left-color: var(--rc-mint);
+  box-shadow: 0 0 0 1px rgba(83, 196, 111, 0.45), 0 16px 36px rgba(0, 0, 0, 0.2);
 }
 
 .reading-capture-topic-card h2 {

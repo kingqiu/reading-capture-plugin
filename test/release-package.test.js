@@ -168,6 +168,20 @@ function testReaderAnnotationTypesUseSharedPalette() {
   assert.match(styles, /border-left:\s*2px solid var\(--rc-annotation-border\)/);
 }
 
+function testTopicPoolUsesOneClearSelectionState() {
+  const styles = fs.readFileSync(path.join(root, "plugin/styles.css"), "utf8");
+  const cardRule = styles.match(/\.reading-capture-topic-card\s*\{(?<body>[^}]+)\}/);
+  const manualRule = styles.match(/\.reading-capture-topic-card\.is-manual\s*\{(?<body>[^}]+)\}/);
+  const selectedRule = styles.match(/\.reading-capture-topic-card\.is-selected\s*\{(?<body>[^}]+)\}/);
+
+  assert.ok(cardRule && manualRule && selectedRule, "topic cards should define default, manual, and selected styles");
+  assert.match(cardRule.groups.body, /border-left:\s*3px solid rgba\(82, 128, 255, 0\.85\)/);
+  assert.match(manualRule.groups.body, /border-left-color:\s*rgba\(82, 128, 255, 0\.85\)/);
+  assert.match(selectedRule.groups.body, /border-color:\s*rgba\(83, 196, 111, 0\.8\)/);
+  assert.match(selectedRule.groups.body, /border-left-color:\s*var\(--rc-mint\)/);
+  assert.doesNotMatch(selectedRule.groups.body, /background:/);
+}
+
 function testDiagnosticReportCommandExists() {
   const main = fs.readFileSync(path.join(root, "plugin/main.js"), "utf8");
   const readme = fs.readFileSync(path.join(root, "README.md"), "utf8");
@@ -192,6 +206,7 @@ testReaderToolbarIsIntegratedWithWorkspace();
 testReaderUsesFixedWorkspaceWithIndependentScrollAreas();
 testReaderMatchesApprovedTwoPaneDesignStructure();
 testReaderAnnotationTypesUseSharedPalette();
+testTopicPoolUsesOneClearSelectionState();
 testDiagnosticReportCommandExists();
 
 console.log("release package tests passed");
