@@ -1426,6 +1426,10 @@ async function testTopicPoolViewShowsDecisionWorkspaceControls() {
     ];
   };
   plugin.loadData = async () => null;
+  let openedCreationProjects = false;
+  plugin.openCreationProjects = async () => {
+    openedCreationProjects = true;
+  };
 
   await plugin.onload();
   const view = registeredViews["reading-capture-topic-pool"]({});
@@ -1435,6 +1439,7 @@ async function testTopicPoolViewShowsDecisionWorkspaceControls() {
   const texts = fakeElementTexts(view.containerEl.children[1]);
   assert.ok(texts.includes("回到知见录"), "topic pool should keep a back-to-library button");
   assert.ok(texts.includes("打开今日报告"), "topic pool should expose the latest report");
+  assert.ok(texts.includes("创作项目"), "topic pool should expose a direct creation project entry");
   assert.ok(texts.includes("状态"), "topic pool should label feedback filters as status");
   assert.ok(texts.includes("保存给 AI"), "manual creative ideas should also be saved as feedback for Topic Miner");
   assert.ok(texts.includes("开始创作"), "creative ideas should expose the creation-project entry point");
@@ -1453,6 +1458,10 @@ async function testTopicPoolViewShowsDecisionWorkspaceControls() {
   assert.ok(refreshButton, "topic pool should render a refresh button");
   await refreshButton.listeners.click();
   assert.strictEqual(buildCalls, 2, "clicking refresh should reload topic pool items");
+  const projectsButton = buttons.find((button) => button.text === "创作项目");
+  assert.ok(projectsButton, "topic pool should render a creation project button");
+  await projectsButton.listeners.click();
+  assert.strictEqual(openedCreationProjects, true, "creation project button should open the project view");
 }
 
 async function testTopicPoolSummaryUsesLatestReportDate() {

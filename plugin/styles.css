@@ -2820,6 +2820,18 @@
   border-color: rgba(var(--rc-mint-rgb), 0.52);
 }
 
+.reading-capture-topic-tools .reading-capture-topic-projects-button {
+  border-color: rgba(var(--rc-mint-rgb), 0.52);
+  background: rgba(var(--rc-mint-rgb), 0.12);
+  color: var(--rc-mint-text);
+}
+
+.reading-capture-topic-tools .reading-capture-topic-projects-button:hover {
+  border-color: rgba(var(--rc-mint-rgb), 0.78);
+  background: rgba(var(--rc-mint-rgb), 0.2);
+  color: #e0f3e1;
+}
+
 .reading-capture-topic-tools button:disabled {
   cursor: wait;
   opacity: 0.66;
@@ -3814,6 +3826,9 @@
 }
 
 .reading-capture-creation-modal {
+  --rc-workbench-green: #62c96f;
+  --rc-workbench-line: #26382a;
+  --rc-workbench-ink: #d9dfd5;
   width: min(620px, 86vw);
   box-sizing: border-box;
   padding: 24px;
@@ -3836,6 +3851,24 @@
   border-radius: 7px;
   background: #09100b;
   color: var(--rc-workbench-ink);
+}
+
+.reading-capture-creation-modal button {
+  min-height: 36px;
+  padding: 8px 14px;
+  border: 1px solid var(--rc-workbench-line);
+  border-radius: 7px;
+  background: #111912;
+  color: var(--rc-workbench-ink);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.reading-capture-creation-modal button.mod-cta {
+  border-color: var(--rc-workbench-green) !important;
+  background: var(--rc-workbench-green) !important;
+  background-color: var(--rc-workbench-green) !important;
+  color: #071109 !important;
 }
 
 .reading-capture-creation-modal-intro {

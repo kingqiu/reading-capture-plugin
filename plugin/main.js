@@ -3747,6 +3747,12 @@ class ReadingCaptureTopicPoolView extends ItemView {
     refresh.addEventListener("click", () => this.reload({ notify: true }));
     const report = tools.createEl("button", { attr: { type: "button" }, text: "打开今日报告" });
     report.addEventListener("click", () => this.openLatestTopicMinerReport());
+    const projects = tools.createEl("button", {
+      cls: "reading-capture-topic-projects-button",
+      attr: { type: "button", title: "打开创作项目工作台" },
+      text: "创作项目",
+    });
+    projects.addEventListener("click", async () => this.plugin.openCreationProjects());
     const back = tools.createEl("button", { attr: { type: "button" }, text: "回到知见录" });
     back.addEventListener("click", async () => this.plugin.openArticleLibrary());
 
