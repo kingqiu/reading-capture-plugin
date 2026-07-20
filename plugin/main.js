@@ -928,13 +928,17 @@ class ReadingCaptureReaderView extends ItemView {
 
   renderApprovedProjectPicker(container) {
     const picker = container.createDiv({ cls: "reading-capture-creation-project-picker" });
+    const pickerHeader = picker.createDiv({ cls: "reading-capture-creation-project-picker-header" });
+    pickerHeader.createEl("strong", { text: `全部项目 · ${this.projects.length}` });
+    pickerHeader.createEl("small", { text: "已完成项目仍会保留，可随时切换查看" });
     const search = picker.createEl("input", { attr: { type: "search", placeholder: "搜索项目标题…", "aria-label": "搜索创作项目" } });
     const options = picker.createDiv({ cls: "reading-capture-creation-project-options" });
     const rows = [];
     for (const project of this.projects) {
       const button = options.createEl("button", { cls: project.path === this.selectedPath ? "is-selected" : "" });
-      button.createEl("strong", { text: project.title });
-      button.createEl("small", { text: `${this.plugin.creationPlatformLabel(project.platform)} · ${project.statusLabel}` });
+      const copy = button.createDiv({ cls: "reading-capture-creation-project-option-copy" });
+      copy.createEl("strong", { text: project.title });
+      copy.createEl("small", { text: `${this.plugin.creationPlatformLabel(project.platform)} · ${project.statusLabel}` });
       button.addEventListener("click", async () => {
         this.selectedPath = project.path;
         this.isProjectPickerOpen = false;

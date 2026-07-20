@@ -3362,6 +3362,15 @@ async function testCreationProjectViewShowsEightStageEntryContract() {
   assert.ok(texts.includes("我确认关联灵感范围正确"));
   assert.ok(texts.includes("确认项目输入，进入素材诊断"));
   assert.ok(!texts.includes("确认简报与提纲"), "stage one must not expose the legacy combined approval");
+
+  view.projects.push({ ...view.projects[0], path: "Reading Capture/creation-projects/project-2/project.md", title: "Project 2" });
+  const switchButton = fakeElementsByTag(view.containerEl.children[1], "button").find((button) => button.text === "切换项目");
+  await switchButton.listeners.click();
+  const pickerOptions = fakeElementsByClass(view.containerEl.children[1], "reading-capture-creation-project-options")[0];
+  const optionCopies = fakeElementsByClass(pickerOptions, "reading-capture-creation-project-option-copy");
+  assert.strictEqual(optionCopies.length, 2, "project picker should show all available projects by default");
+  assert.ok(fakeElementTexts(optionCopies[0]).includes("Project 1"));
+  assert.ok(fakeElementTexts(optionCopies[0]).some((text) => text.includes("策划中")), "project option should keep status in a separate metadata row");
 }
 
 async function testCreationProjectViewShowsDiagnosisContract() {

@@ -246,7 +246,8 @@ function testCreationWorkbenchMatchesApprovedCoreGeometry() {
   assert.match(hero.groups.body, /min-height:\s*72px/);
   assert.match(screen.groups.body, /padding:\s*22px 28px 28px/);
   assert.match(entries.groups.body, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
-  assert.match(pickerOptions.groups.body, /max-height:\s*330px/);
+  assert.match(pickerOptions.groups.body, /max-height:\s*min\(420px,\s*calc\(100vh - 260px\)\)/);
+  assert.match(pickerOptions.groups.body, /gap:\s*8px/);
   assert.match(pickerOptions.groups.body, /overflow-y:\s*auto/);
 }
 
