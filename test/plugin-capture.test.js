@@ -3348,6 +3348,7 @@ async function testCreationProjectViewShowsEightStageEntryContract() {
     },
     latestTask: null,
   }];
+  plugin.buildTopicPoolItems = async () => [{ id: "related-1", kind: "manual", note: "Related idea" }];
 
   await plugin.onload();
   const view = registeredViews["reading-capture-creation-project"]({});
@@ -3360,8 +3361,13 @@ async function testCreationProjectViewShowsEightStageEntryContract() {
   assert.ok(texts.includes("从创作灵感开始"));
   assert.ok(texts.includes("我确认当前主灵感正确"));
   assert.ok(texts.includes("我确认关联灵感范围正确"));
+  assert.ok(texts.includes("增加关联灵感"), "stage one should expose an explicit related inspiration add action");
   assert.ok(texts.includes("确认项目输入，进入素材诊断"));
   assert.ok(!texts.includes("确认简报与提纲"), "stage one must not expose the legacy combined approval");
+
+  const addRelated = fakeElementsByTag(view.containerEl.children[1], "button").find((button) => button.text === "增加关联灵感");
+  await addRelated.listeners.click();
+  assert.ok(fakeElementTexts(view.containerEl.children[1]).includes("选择要关联的灵感"), "related inspiration picker should open in place");
 
   view.projects.push({ ...view.projects[0], path: "Reading Capture/creation-projects/project-2/project.md", title: "Project 2" });
   const switchButton = fakeElementsByTag(view.containerEl.children[1], "button").find((button) => button.text === "切换项目");

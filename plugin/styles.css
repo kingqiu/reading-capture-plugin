@@ -400,6 +400,67 @@
   border-left: 3px solid var(--rc-workbench-green);
 }
 
+.reading-capture-creation-related-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 10px;
+}
+
+.reading-capture-creation-related-picker {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--rc-workbench-line);
+  border-radius: 8px;
+  background: rgba(8, 15, 10, 0.72);
+}
+
+.reading-capture-creation-related-picker > input {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.reading-capture-creation-related-picker-meta {
+  display: block;
+  margin-top: 6px;
+  color: var(--rc-workbench-faint);
+}
+
+.reading-capture-creation-related-results {
+  display: grid;
+  gap: 7px;
+  max-height: 280px;
+  margin-top: 8px;
+  overflow-y: auto;
+}
+
+.reading-capture-creation-related-row {
+  display: flex;
+  width: 100%;
+  min-height: 52px;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 9px 11px;
+  text-align: left !important;
+  white-space: normal;
+}
+
+.reading-capture-creation-related-row > div {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 4px;
+}
+
+.reading-capture-creation-related-row strong {
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+.reading-capture-creation-related-row small {
+  color: var(--rc-workbench-muted);
+  font-size: 9px;
+}
+
 .reading-capture-creation-workbench button,
 .reading-capture-creation-workbench input,
 .reading-capture-creation-workbench textarea,

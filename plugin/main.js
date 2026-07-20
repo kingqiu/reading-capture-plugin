@@ -998,6 +998,26 @@ class ReadingCaptureReaderView extends ItemView {
     } else {
       screen.createEl("p", { cls: "reading-capture-creation-empty-copy", text: "当前没有关联灵感；关联灵感可以为空。" });
     }
+    const relatedActions = screen.createDiv({ cls: "reading-capture-creation-related-actions" });
+    const addRelated = relatedActions.createEl("button", { cls: "mod-cta", text: "增加关联灵感" });
+    let relatedPicker = null;
+    addRelated.addEventListener("click", async () => {
+      if (relatedPicker) {
+        relatedPicker.remove();
+        relatedPicker = null;
+        this.isRelatedInspirationPickerOpen = false;
+        return;
+      }
+      this.isRelatedInspirationPickerOpen = true;
+      try {
+        relatedPicker = this.renderApprovedRelatedInspirationPicker(screen, selected);
+      } catch (error) {
+        this.isRelatedInspirationPickerOpen = false;
+        console.error("Reading Capture related inspiration picker failed", error);
+        new Notice("关联灵感选择器暂时无法打开。");
+      }
+    });
+    if (this.isRelatedInspirationPickerOpen) relatedPicker = this.renderApprovedRelatedInspirationPicker(screen, selected);
     const gate = screen.createDiv({ cls: "reading-capture-creation-gate" });
     gate.createEl("h4", { text: "完成本阶段前需要确认" });
     gate.createEl("p", { text: "进入下一步后仍可修改，但下游产物会被标记为需要重新检查。" });
@@ -1016,6 +1036,62 @@ class ReadingCaptureReaderView extends ItemView {
       await this.plugin.confirmCreationRelations(selected.path);
       await this.reload();
     });
+  }
+
+  renderApprovedRelatedInspirationPicker(screen, selected) {
+    const picker = screen.createDiv({ cls: "reading-capture-creation-related-picker" });
+    const head = picker.createDiv({ cls: "reading-capture-creation-source-picker-head" });
+    const copy = head.createDiv();
+    copy.createEl("h3", { text: "选择要关联的灵感" });
+    copy.createEl("p", { text: "主灵感不会出现在这里；已关联的灵感也会自动排除。" });
+    head.createEl("button", { text: "关闭" }).addEventListener("click", async () => {
+      this.isRelatedInspirationPickerOpen = false;
+      picker.remove();
+    });
+    const search = picker.createEl("input", { attr: { type: "search", placeholder: "搜索灵感标题…", "aria-label": "搜索要关联的灵感" } });
+    const resultMeta = picker.createEl("small", { cls: "reading-capture-creation-related-picker-meta", text: "正在读取灵感…" });
+    const results = picker.createDiv({ cls: "reading-capture-creation-related-results" });
+    let candidates = [];
+    const renderResults = () => {
+      results.empty();
+      const query = String(search.value || "").trim().toLocaleLowerCase();
+      const visible = candidates.filter((item) => {
+        const title = this.plugin.creationIdeaTitle(item).toLocaleLowerCase();
+        return !query || `${title} ${String(item.judgment || item.note || item.quote || "")}`.toLocaleLowerCase().includes(query);
+      });
+      resultMeta.textContent = `${visible.length} 条可关联灵感`;
+      if (!visible.length) {
+        results.createEl("p", { cls: "reading-capture-creation-empty-copy", text: query ? "没有匹配的灵感" : "暂时没有可新增的关联灵感" });
+        return;
+      }
+      for (const item of visible.slice(0, 50)) {
+        const title = this.plugin.creationIdeaTitle(item);
+        const row = results.createEl("button", { cls: "reading-capture-creation-related-row", attr: { type: "button" } });
+        const rowCopy = row.createDiv();
+        rowCopy.createEl("strong", { text: title });
+        rowCopy.createEl("small", { text: `${item.originLabel || "灵感"} · 点击后加入项目` });
+        row.addEventListener("click", async () => {
+          row.disabled = true;
+          await this.plugin.appendInspirationToCreationProject(item, selected.path);
+          this.isRelatedInspirationPickerOpen = false;
+          new Notice("关联灵感已加入项目。");
+          await this.reload();
+        });
+      }
+    };
+    search.addEventListener("input", renderResults);
+    this.plugin.buildTopicPoolItems().then((items) => {
+      const excluded = new Set([selected.primaryTitle, ...(selected.relatedTitles || [])].map((title) => String(title || "").trim()).filter(Boolean));
+      candidates = (items || []).filter((item) => {
+        const title = this.plugin.creationIdeaTitle(item);
+        return title && !excluded.has(title);
+      });
+      renderResults();
+    }).catch(() => {
+      resultMeta.textContent = "灵感读取失败";
+      results.createEl("p", { cls: "reading-capture-creation-empty-copy", text: "暂时无法读取创作灵感，请稍后重试。" });
+    });
+    return picker;
   }
 
   renderApprovedSourcePicker(screen, selected) {
@@ -3387,6 +3463,7 @@ class ReadingCaptureCreationProjectView extends ItemView {
     this.selectedPath = "";
     this.isLoading = false;
     this.isProjectPickerOpen = false;
+    this.isRelatedInspirationPickerOpen = false;
     this.autoRefreshTimer = null;
     this.autoRefreshInFlight = false;
   }
@@ -3460,6 +3537,10 @@ class ReadingCaptureCreationProjectView extends ItemView {
 
   renderApprovedRelations(container, selected) {
     return ReadingCaptureReaderView.prototype.renderApprovedRelations.call(this, container, selected);
+  }
+
+  renderApprovedRelatedInspirationPicker(container, selected) {
+    return ReadingCaptureReaderView.prototype.renderApprovedRelatedInspirationPicker.call(this, container, selected);
   }
 
   renderApprovedSourcePicker(container, selected) {
