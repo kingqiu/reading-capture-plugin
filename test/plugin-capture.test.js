@@ -3,10 +3,12 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 const core = require("../plugin/reading-core");
+const creationWorkflow = require("../plugin/creation-workflow");
+const skillRegistry = require("../plugin/skill-registry");
 
 const fixedNow = "2026-06-10T11:59:00+08:00";
 
-function loadPluginClass() {
+function loadPluginClass(options = {}) {
   const code = fs.readFileSync(path.join(__dirname, "../plugin/main.js"), "utf8");
   class ItemView {}
   class Modal {}
@@ -52,6 +54,12 @@ function loadPluginClass() {
     require(name) {
       if (name === "obsidian") return { ItemView, MarkdownRenderer, Menu, Modal, Notice, Plugin, PluginSettingTab, Setting, normalizePath };
       if (name === "./reading-core") return core;
+      if (name === "./creation-workflow") return creationWorkflow;
+      if (name === "./skill-registry") return skillRegistry;
+      if (name === "crypto") return require("crypto");
+      if (name === "fs") return require("fs");
+      if (name === "os") return require("os");
+      if (name === "child_process" && options.childProcess) return options.childProcess;
       throw new Error(`Unexpected require: ${name}`);
     },
     module: { exports: {} },
@@ -66,6 +74,13 @@ function loadPluginClass() {
     setTimeout(callback) {
       callback();
     },
+    setInterval(callback) {
+      return { callback };
+    },
+    clearInterval() {},
+    ...(options.localStorage ? { localStorage: options.localStorage } : {}),
+    ...(options.process ? { process: options.process } : {}),
+    ...(options.dirname ? { __dirname: options.dirname } : {}),
   };
   vm.runInNewContext(code, sandbox, { filename: "main.js" });
   return sandbox.module.exports;
@@ -114,6 +129,19 @@ function makeFakeApp() {
           folders: [...folders].filter((folderPath) => folderPath.startsWith(prefix)),
         };
       },
+      async rename(source, target) {
+        const movedFiles = [...files.entries()].filter(([filePath]) => filePath === source || filePath.startsWith(`${source}/`));
+        for (const [filePath, entry] of movedFiles) {
+          const nextPath = `${target}${filePath.slice(source.length)}`;
+          files.delete(filePath);
+          files.set(nextPath, { ...entry, file: makeFile(nextPath, entry.content) });
+        }
+        const movedFolders = [...folders].filter((folderPath) => folderPath === source || folderPath.startsWith(`${source}/`));
+        for (const folderPath of movedFolders) {
+          folders.delete(folderPath);
+          folders.add(`${target}${folderPath.slice(source.length)}`);
+        }
+      },
     },
     getAbstractFileByPath(path) {
       if (files.has(path)) return files.get(path).file;
@@ -160,6 +188,24 @@ function makeFakeApp() {
       },
     },
   };
+}
+
+function markCreationTaskAwaiting(files, projectPath, kind) {
+  const entry = [...files.entries()].find(([filePath, record]) => {
+    if (!filePath.includes("/_runner/queue/") || !filePath.endsWith(".json")) return false;
+    try {
+      const task = JSON.parse(record.content);
+      return task.projectPath === projectPath && task.kind === kind && task.status !== "cancelled";
+    } catch (error) {
+      return false;
+    }
+  });
+  assert.ok(entry, `expected ${kind} task for ${projectPath}`);
+  const task = JSON.parse(entry[1].content);
+  task.status = "awaiting_approval";
+  task.outputHashes = task.outputHashes || { [task.outputs[0]]: `${kind}-v1` };
+  entry[1].content = `${JSON.stringify(task, null, 2)}\n`;
+  return { ...task, taskPath: entry[0] };
 }
 
 function makeFakeElement(tag = "div") {
@@ -699,8 +745,12 @@ async function testArticleLibraryTopBarOpensCreativeIdeas() {
   };
 
   let openedTopicPool = false;
+  let openedCreationProjects = false;
   plugin.openTopicPool = async () => {
     openedTopicPool = true;
+  };
+  plugin.openCreationProjects = async () => {
+    openedCreationProjects = true;
   };
 
   await plugin.onload();
@@ -721,6 +771,12 @@ async function testArticleLibraryTopBarOpensCreativeIdeas() {
   assert.strictEqual(typeof topicButton.listeners.click, "function");
   await topicButton.listeners.click();
   assert.strictEqual(openedTopicPool, true);
+
+  const creationButton = buttons.find((button) => button.text === "创作项目");
+  assert.ok(creationButton, "article library top bar should include creation projects entry");
+  assert.strictEqual(typeof creationButton.listeners.click, "function");
+  await creationButton.listeners.click();
+  assert.strictEqual(openedCreationProjects, true);
 }
 
 async function testArticleLibraryUsesCacheUntilSourceFilesChange() {
@@ -1381,6 +1437,7 @@ async function testTopicPoolViewShowsDecisionWorkspaceControls() {
   assert.ok(texts.includes("打开今日报告"), "topic pool should expose the latest report");
   assert.ok(texts.includes("状态"), "topic pool should label feedback filters as status");
   assert.ok(texts.includes("保存给 AI"), "manual creative ideas should also be saved as feedback for Topic Miner");
+  assert.ok(texts.includes("开始创作"), "creative ideas should expose the creation-project entry point");
   assert.ok(texts.includes("补充备注不是必填。没有额外想法时，只选状态并保存也可以。"));
 
   const buttons = [];
@@ -1887,12 +1944,2034 @@ async function testGenericDefaultSettings() {
 
   assert.strictEqual(plugin.settings.readingRoot, "Reading Capture/notes");
   assert.strictEqual(plugin.settings.articleLibraryRoots, "");
+  assert.strictEqual(plugin.settings.creationProjectRoot, "Reading Capture/creation-projects");
+  assert.strictEqual(plugin.settings.defaultWritingStyle, "keke");
   assert.strictEqual(plugin.getArticleLibraryRoots().length, 0);
   assert.deepStrictEqual([...plugin.getArticleLibraryExcludeRoots()], ["Reading Capture/notes", ".obsidian"]);
   assert.strictEqual(plugin.articleLibraryEmptyMessage(), "还没有配置知见录扫描目录。请在 Reading Capture 设置里添加保存文章的文件夹。");
 
   plugin.settings.articleLibraryRoots = "Articles";
   assert.strictEqual(plugin.articleLibraryEmptyMessage(), "没有找到匹配的文章。可以调整搜索词或扫描目录。");
+}
+
+async function testCreationProjectCreateAppendAndList() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = {
+    creationProjectRoot: "Reading Capture/creation-projects",
+    defaultWritingStyle: "keke",
+  };
+  plugin.now = () => fixedNow;
+
+  const primary = {
+    id: "2026-07-19-strong-01",
+    kind: "ai",
+    title: "AI Agent 上线前的五项风险评估",
+    judgment: "先建立可观察、可回滚的上线评估清单。",
+    sources: ["Learning/web/articles/agent/article_zh.md"],
+  };
+  const project = await plugin.createCreationProject(primary, { title: primary.title, platform: "wechat" });
+
+  assert.ok(project.path.startsWith("Reading Capture/creation-projects/"));
+  assert.ok(files.has(project.path), "project homepage should be created");
+  assert.ok(files.has(`${project.directory}/planning/context.md`), "project context should be created");
+  assert.ok(files.has(`${project.directory}/planning/master-brief.md`), "project brief placeholder should be created");
+  assert.ok(files.has(`${project.directory}/workflow-state.json`), "durable eight-stage workflow state should be created");
+  assert.ok(files.has(`${project.directory}/deliverables/wechat/wechat-001/drafts`) === false, "folders should not be represented as files");
+  assert.match(files.get(project.path).content, /writing_style: "keke"/);
+  assert.match(files.get(`${project.directory}/planning/context.md`).content, /## 主灵感：AI Agent 上线前的五项风险评估/);
+  const workflowState = JSON.parse(files.get(`${project.directory}/workflow-state.json`).content);
+  assert.strictEqual(workflowState.schemaVersion, 2);
+  assert.strictEqual(workflowState.currentStage, "relations");
+  assert.strictEqual(workflowState.workflowMode, "idea_creation");
+  assert.strictEqual(workflowState.activeDeliverable, "wechat");
+  assert.strictEqual(
+    [...files.keys()].filter((filePath) => filePath.includes("/_runner/queue/")).length,
+    0,
+    "project creation must not queue brief or outline work before stage-one review"
+  );
+
+  const related = {
+    id: "2026-07-19-strong-01",
+    kind: "ai",
+    title: "AI 系统的可观察性指标",
+    judgment: "用任务成功率与返工成本衡量，而不是只看调用量。",
+  };
+  const firstAppend = await plugin.appendInspirationToCreationProject(related, project.path);
+  const secondAppend = await plugin.appendInspirationToCreationProject(related, project.path);
+  assert.strictEqual(firstAppend.appended, true);
+  assert.strictEqual(secondAppend.appended, false, "adding the same inspiration twice should be idempotent");
+  assert.notStrictEqual(plugin.creationInspirationId(primary), plugin.creationInspirationId(related), "different titles must remain distinct even if Topic Miner reuses an id");
+  const context = files.get(`${project.directory}/planning/context.md`).content;
+  assert.strictEqual((context.match(/## 关联灵感：AI 系统的可观察性指标/g) || []).length, 1);
+
+  files.delete(`${project.directory}/workflow-state.json`);
+  const projects = await plugin.listCreationProjects();
+  assert.strictEqual(projects.length, 1);
+  assert.strictEqual(projects[0].title, primary.title);
+  assert.strictEqual(projects[0].platform, "wechat");
+  assert.strictEqual(projects[0].primaryTitle, primary.title);
+  assert.deepStrictEqual([...projects[0].relatedTitles], [related.title]);
+  assert.ok(files.has(`${project.directory}/workflow-state.json`), "legacy projects should receive durable workflow state on first read");
+  assert.strictEqual(projects[0].workflowState.currentStage, "relations");
+  assert.strictEqual(projects[0].stageStates.relations, "current");
+}
+
+async function testCreationProjectListExcludesRunnerWorkspaceCopies() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "真实项目", kind: "manual" }, { platform: "wechat" });
+  const nestedPath = `${project.directory}/runs/task-1_attempt-1/workspace/project.md`;
+  await app.vault.create(nestedPath, files.get(project.path).content);
+
+  const projects = await plugin.listCreationProjects();
+
+  assert.strictEqual(projects.length, 1);
+  assert.strictEqual(projects[0].path, project.path);
+  await assert.rejects(() => plugin.queueCreationStageTask(nestedPath, "brief.master"), /真实创作项目根目录/);
+}
+
+async function testConfirmCreationRelationsPersistsDiagnosisStage() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "持久化阶段确认", kind: "manual" }, { platform: "wechat" });
+
+  await plugin.confirmCreationRelations(project.path);
+
+  const state = JSON.parse(files.get(`${project.directory}/workflow-state.json`).content);
+  assert.strictEqual(state.currentStage, "diagnosis");
+  const listed = await plugin.listCreationProjects();
+  assert.strictEqual(listed[0].stageStates.relations, "complete");
+  assert.strictEqual(listed[0].stageStates.diagnosis, "current");
+  const queued = [...files.entries()].find(([filePath]) => filePath.includes("/_runner/queue/") && filePath.endsWith(".json"));
+  assert.ok(queued, "entering diagnosis should queue the local diagnosis task");
+  assert.strictEqual(JSON.parse(queued[1].content).kind, "diagnosis.materials");
+  const stateAfterQueue = JSON.parse(files.get(`${project.directory}/workflow-state.json`).content);
+  assert.strictEqual(stateAfterQueue.taskRefs["diagnosis.materials"], queued[0]);
+}
+
+async function testCreationCoordinationWritesDoNotDependOnVaultModifyCache() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "持久写入", kind: "manual" }, { platform: "wechat" });
+  app.vault.modify = async () => {};
+
+  await plugin.confirmCreationRelations(project.path);
+
+  assert.strictEqual(JSON.parse(files.get(`${project.directory}/workflow-state.json`).content).currentStage, "diagnosis");
+  assert.strictEqual(plugin.readFrontmatterValue(files.get(project.path).content, "status"), "material-diagnosis");
+}
+
+async function testRunnerTaskStatusBypassesStaleVaultCache() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "外部 Runner 状态同步", kind: "manual" }, { platform: "wechat" });
+  await plugin.confirmCreationRelations(project.path);
+
+  const taskEntry = [...files.entries()].find(([filePath]) => filePath.includes("/_runner/queue/") && filePath.endsWith(".json"));
+  const pendingSnapshot = taskEntry[1].content;
+  const completedByRunner = JSON.parse(taskEntry[1].content);
+  completedByRunner.status = "awaiting_approval";
+  completedByRunner.updatedAt = "2026-06-10T04:00:00.000Z";
+  taskEntry[1].content = `${JSON.stringify(completedByRunner, null, 2)}\n`;
+  const originalVaultRead = app.vault.read;
+  app.vault.read = async (file) => file.path === taskEntry[0] ? pendingSnapshot : originalVaultRead(file);
+
+  const tasks = await plugin.listCreationRunnerTasks();
+
+  assert.strictEqual(tasks[0].status, "awaiting_approval", "runner queue state must be read from disk instead of Obsidian's stale file cache");
+}
+
+async function testRunnerTasksFallBackToVaultIndexWhenAdapterListingLags() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "队列索引恢复", kind: "manual" }, { platform: "wechat" });
+  await plugin.confirmCreationRelations(project.path);
+  const originalList = app.vault.adapter.list;
+  app.vault.adapter.list = async (folderPath) => folderPath.endsWith("/_runner/queue")
+    ? { files: [], folders: [] }
+    : originalList(folderPath);
+
+  const tasks = await plugin.listCreationRunnerTasks();
+
+  assert.strictEqual(tasks.length, 1);
+  assert.strictEqual(tasks[0].kind, "diagnosis.materials");
+}
+
+async function testRunnerAcceptsRelativeAdapterListings() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "相对队列路径", kind: "manual" }, { platform: "wechat" });
+  await plugin.confirmCreationRelations(project.path);
+  const taskPath = [...files.keys()].find((filePath) => filePath.includes("/_runner/queue/") && filePath.endsWith(".json"));
+  const originalList = app.vault.adapter.list;
+  app.vault.adapter.list = async (folderPath) => folderPath.endsWith("/_runner/queue")
+    ? { files: [taskPath.split("/").pop()], folders: [] }
+    : originalList(folderPath);
+  app.vault.getFiles = () => [];
+
+  const tasks = await plugin.listCreationRunnerTasks();
+
+  assert.strictEqual(tasks.length, 1);
+  assert.strictEqual(tasks[0].taskPath, taskPath);
+}
+
+async function testProjectLoadsTaskFromDurableReferenceWithoutQueueListing() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "持久任务引用", kind: "manual" }, { platform: "wechat" });
+  await plugin.confirmCreationRelations(project.path);
+  const originalList = app.vault.adapter.list;
+  const originalGetFiles = app.vault.getFiles;
+  app.vault.adapter.list = async (folderPath) => folderPath.endsWith("/_runner/queue")
+    ? { files: [], folders: [] }
+    : originalList(folderPath);
+  app.vault.getFiles = () => originalGetFiles().filter((file) => !file.path.includes("/_runner/queue/"));
+
+  const projects = await plugin.listCreationProjects();
+
+  assert.strictEqual(projects[0].tasks.length, 1);
+  assert.strictEqual(projects[0].tasks[0].kind, "diagnosis.materials");
+}
+
+async function testCreationProjectVisualFilesUseNaturalFilenameOrder() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "视觉文件排序", kind: "manual" }, { platform: "wechat" });
+  const wechatRoot = `${project.directory}/deliverables/wechat/wechat-001/visuals`;
+  const xhsRoot = `${project.directory}/deliverables/xiaohongshu/xiaohongshu-001/images`;
+  for (const name of ["09-final.png", "02-middle.png", "01-cover.png", "10-extra.png"]) {
+    await app.vault.create(`${wechatRoot}/${name}`, name);
+  }
+  for (const name of ["card-10.png", "card-2.png", "card-1.png"]) {
+    await app.vault.create(`${xhsRoot}/${name}`, name);
+  }
+
+  const [listed] = await plugin.listCreationProjects();
+
+  assert.deepStrictEqual(Array.from(listed.wechatVisualFiles, (file) => file.name), ["01-cover.png", "02-middle.png", "09-final.png", "10-extra.png"]);
+  assert.deepStrictEqual(Array.from(listed.xhsImageFiles, (file) => file.name), ["card-1.png", "card-2.png", "card-10.png"]);
+}
+
+async function testProjectRecoversTaskReferenceFromRunHistory() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "历史运行迁移", kind: "manual" }, { platform: "wechat" });
+  await plugin.confirmCreationRelations(project.path);
+  const taskEntry = [...files.entries()].find(([filePath]) => filePath.includes("/_runner/queue/") && filePath.endsWith(".json"));
+  const task = JSON.parse(taskEntry[1].content);
+  const runId = `${task.taskId}_attempt-1`;
+  const runRoot = `${project.directory}/runs/${runId}`;
+  await app.vault.adapter.write(`${runRoot}/task.json`, `${JSON.stringify(task)}\n`);
+  await app.vault.adapter.write(`${runRoot}/result.json`, `${JSON.stringify({ status: "awaiting_approval", outputHashes: {}, completedAt: fixedNow })}\n`);
+  const state = JSON.parse(files.get(`${project.directory}/workflow-state.json`).content);
+  delete state.taskRefs;
+  files.get(`${project.directory}/workflow-state.json`).content = `${JSON.stringify(state, null, 2)}\n`;
+  const originalList = app.vault.adapter.list;
+  const originalGetFiles = app.vault.getFiles;
+  app.vault.adapter.list = async (folderPath) => {
+    if (folderPath.endsWith("/_runner/queue")) return { files: [], folders: [] };
+    if (folderPath === `${project.directory}/runs`) return { files: [], folders: [runId] };
+    return originalList(folderPath);
+  };
+  app.vault.getFiles = () => originalGetFiles().filter((file) => !file.path.includes("/_runner/queue/"));
+
+  const projects = await plugin.listCreationProjects();
+
+  assert.strictEqual(projects[0].tasks[0].status, "awaiting_approval");
+  const migratedState = JSON.parse(files.get(`${project.directory}/workflow-state.json`).content);
+  assert.strictEqual(migratedState.taskRefs[task.kind], taskEntry[0]);
+}
+
+async function testProjectReadsMarkdownRunReceiptWhenJsonIsNotIndexed() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "Markdown 回执", kind: "manual" }, { platform: "wechat" });
+  await plugin.confirmCreationRelations(project.path);
+  const taskPath = [...files.keys()].find((filePath) => filePath.includes("/_runner/queue/") && filePath.endsWith(".json"));
+  const task = JSON.parse(files.get(taskPath).content);
+  const receipt = { ...task, status: "awaiting_approval", taskPath, completedAt: fixedNow, updatedAt: fixedNow, outputHashes: {} };
+  await app.vault.create(`${project.directory}/runs/${task.taskId}_attempt-1/receipt.md`, `# Runner 回执\n\n<!-- reading-capture-run-receipt\n${JSON.stringify(receipt)}\n-->\n`);
+  const state = JSON.parse(files.get(`${project.directory}/workflow-state.json`).content);
+  delete state.taskRefs;
+  files.get(`${project.directory}/workflow-state.json`).content = `${JSON.stringify(state, null, 2)}\n`;
+  app.vault.adapter.list = async () => ({ files: [], folders: [] });
+  app.vault.getFiles = () => app.vault.getMarkdownFiles();
+
+  const projects = await plugin.listCreationProjects();
+
+  assert.strictEqual(projects[0].tasks[0].status, "awaiting_approval");
+  assert.strictEqual(projects[0].tasks[0].kind, "diagnosis.materials");
+}
+
+async function testRunnerResultReceiptRecoversStaleQueueFile() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "Runner 回执恢复", kind: "manual" }, { platform: "wechat" });
+  await plugin.confirmCreationRelations(project.path);
+  const taskEntry = [...files.entries()].find(([filePath]) => filePath.includes("/_runner/queue/") && filePath.endsWith(".json"));
+  const pendingTask = JSON.parse(taskEntry[1].content);
+  const runId = `${pendingTask.taskId}_attempt-1`;
+  const resultPath = `${project.directory}/runs/${runId}/result.json`;
+  await app.vault.adapter.write(resultPath, `${JSON.stringify({
+    status: "awaiting_approval",
+    outputHashes: { [`${project.directory}/planning/diagnosis.md`]: "receipt-v1" },
+    completedAt: "2026-06-10T04:00:00.000Z",
+  })}\n`);
+  const originalAdapterRead = app.vault.adapter.read;
+  const originalAdapterList = app.vault.adapter.list;
+  app.vault.adapter.read = async (filePath) => filePath === taskEntry[0] ? taskEntry[1].content : originalAdapterRead(filePath);
+  app.vault.adapter.list = async (folderPath) => folderPath === `${project.directory}/runs`
+    ? { files: [], folders: [`${project.directory}/runs/${runId}`] }
+    : originalAdapterList(folderPath);
+
+  const tasks = await plugin.listCreationRunnerTasks();
+
+  assert.strictEqual(tasks[0].status, "awaiting_approval");
+  assert.strictEqual(tasks[0].runId, runId);
+  assert.strictEqual(tasks[0].outputHashes[`${project.directory}/planning/diagnosis.md`], "receipt-v1");
+
+  pendingTask.status = "superseded";
+  pendingTask.error = "a newer user revision replaced this result";
+  taskEntry[1].content = `${JSON.stringify(pendingTask, null, 2)}\n`;
+  const terminalTasks = await plugin.listCreationRunnerTasks();
+  assert.strictEqual(terminalTasks[0].status, "superseded", "a historical run receipt must never revive a deliberately superseded queue task");
+}
+
+async function testWorkflowStateBypassesStaleVaultCache() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "外部工作流状态同步", kind: "manual" }, { platform: "wechat" });
+  const workflowPath = `${project.directory}/workflow-state.json`;
+  const staleRelationsSnapshot = files.get(workflowPath).content;
+  await plugin.confirmCreationRelations(project.path);
+  const originalVaultRead = app.vault.read;
+  app.vault.read = async (file) => file.path === workflowPath ? staleRelationsSnapshot : originalVaultRead(file);
+
+  const projects = await plugin.listCreationProjects();
+
+  assert.strictEqual(projects[0].workflowState.currentStage, "diagnosis", "workflow state must be read from disk instead of Obsidian's stale file cache");
+  assert.strictEqual(projects[0].stageStates.diagnosis, "current");
+}
+
+async function testProjectStatusRecoversLaggingWorkflowStage() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "恢复阶段", kind: "manual" }, { platform: "wechat" });
+  const projectEntry = files.get(project.path);
+  projectEntry.content = plugin.replaceFrontmatterValue(projectEntry.content, "status", "material-diagnosis");
+
+  const projects = await plugin.listCreationProjects();
+
+  assert.strictEqual(projects[0].workflowState.currentStage, "diagnosis");
+  assert.strictEqual(projects[0].stageStates.diagnosis, "current");
+}
+
+async function testRelatedInspirationCanBeUnlinkedWithoutRemovingPrimary() {
+  const ReadingCapturePlugin = loadPluginClass();
+  const plugin = new ReadingCapturePlugin();
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "主灵感", kind: "manual", id: "primary" }, { platform: "wechat" });
+  await plugin.appendInspirationToCreationProject({ title: "应保留的关联灵感", kind: "manual", id: "keep" }, project.path);
+  await plugin.appendInspirationToCreationProject({ title: "应解除的关联灵感", kind: "manual", id: "remove" }, project.path);
+
+  await plugin.unlinkCreationInspiration(project.path, "应解除的关联灵感");
+
+  const directory = project.path.slice(0, -"/project.md".length);
+  const context = await plugin.readText(`${directory}/planning/context.md`);
+  const markdown = await plugin.readText(project.path);
+  assert.match(context, /## 主灵感：主灵感/);
+  assert.match(context, /## 关联灵感：应保留的关联灵感/);
+  assert.doesNotMatch(context, /应解除的关联灵感/);
+  assert.strictEqual(Number(plugin.readFrontmatterValue(markdown, "related_inspiration_count")), 1);
+}
+
+async function testManualArtifactEditCreatesNamedVersionAndUpdatesApprovalTarget() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "人工改稿", kind: "manual" }, { platform: "wechat" });
+  await plugin.confirmCreationRelations(project.path);
+  markCreationTaskAwaiting(files, project.path, "diagnosis.materials");
+  await plugin.chooseCreationResearchPath(project.path, "skip");
+  const taskEntry = [...files.entries()].find(([filePath, entry]) => filePath.includes("/_runner/queue/") && JSON.parse(entry.content).kind === "brief.master");
+  const task = JSON.parse(taskEntry[1].content);
+  task.status = "awaiting_approval";
+  task.outputHashes = { [`${project.directory}/planning/master-brief.md`]: "ai-v1" };
+  files.get(taskEntry[0]).content = `${JSON.stringify(task, null, 2)}\n`;
+
+  const result = await plugin.saveCreationManualVersion(project.path, "masterBrief", "# 用户修改后的完整创作简报\n\n正文内容足够长，用于验证用户版本不会覆盖历史版本。\n");
+
+  assert.strictEqual(result.versionId, "user-v1");
+  assert.ok(files.has(`${project.directory}/planning/versions/master-brief-user-v1.md`));
+  assert.match(files.get(`${project.directory}/planning/master-brief.md`).content, /用户修改后的完整创作简报/);
+  const updatedTask = JSON.parse(files.get(taskEntry[0]).content);
+  assert.match(updatedTask.outputHashes[`${project.directory}/planning/master-brief.md`], /^[a-f0-9]{64}$/u);
+  assert.strictEqual(updatedTask.userEdited, true);
+  const artifact = files.get(`${project.directory}/artifacts.jsonl`).content.trim().split("\n").map(JSON.parse).pop();
+  assert.strictEqual(artifact.recordType, "artifact_version");
+  assert.strictEqual(artifact.artifactId, `${project.id}:manual:masterBrief`);
+  assert.strictEqual(artifact.artifactVersionId, `${project.id}:manual:masterBrief@user-v1`);
+  assert.match(artifact.contentHash, /^[a-f0-9]{64}$/u, "manual versions should persist a real content digest rather than using their display label as a hash");
+  assert.strictEqual(artifact.source, "user");
+}
+
+async function testAiRevisionSupersedesStaleQualityCheck() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "AI 改稿失效旧质检", kind: "manual" }, { platform: "wechat" });
+  await plugin.ensureFolder(`${project.directory}/deliverables/wechat/wechat-001/drafts`);
+  await plugin.writeText(`${project.directory}/deliverables/wechat/wechat-001/drafts/v1.md`, "# 当前公众号正文\n\n这是等待改稿的正文。\n");
+  const draft = await plugin.queueCreationStageTask(project.path, "wechat.draft", { force: true });
+  const qa = await plugin.queueCreationStageTask(project.path, "wechat.qa", { force: true });
+  for (const queued of [draft, qa]) {
+    const record = JSON.parse(files.get(queued.taskPath).content);
+    record.status = "awaiting_approval";
+    files.get(queued.taskPath).content = `${JSON.stringify(record, null, 2)}\n`;
+  }
+
+  const revised = await plugin.requestCreationRevision(project.path, "wechatDraft", "根据质检报告修订正文，但不要虚构事实。");
+
+  assert.strictEqual(JSON.parse(files.get(draft.taskPath).content).status, "superseded");
+  assert.strictEqual(JSON.parse(files.get(qa.taskPath).content).status, "superseded", "a QA result for the previous draft must disappear as soon as a new AI revision is requested");
+  assert.strictEqual(JSON.parse(files.get(revised.taskPath).content).status, "pending");
+}
+
+async function testXhsCaptionRevisionNeverRegeneratesAcceptedCards() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "小红书只改文案", kind: "manual" }, { platform: "xiaohongshu" });
+  await plugin.ensureFolder(`${project.directory}/deliverables/xiaohongshu/xiaohongshu-001/images`);
+  await plugin.writeText(`${project.directory}/deliverables/xiaohongshu/xiaohongshu-001/caption.md`, "# 当前发布文案\n\n卡片已经确认，只需要修订发布文案。\n");
+  await plugin.writeText(`${project.directory}/deliverables/xiaohongshu/xiaohongshu-001/images/xhs-01.png`, "accepted-card");
+  const packageTask = await plugin.queueCreationStageTask(project.path, "xhs.package", { force: true, outputDirectoriesOverride: [] });
+  const copyQa = await plugin.queueCreationStageTask(project.path, "xhs.copy-qa", { force: true });
+  for (const queued of [packageTask, copyQa]) {
+    const record = JSON.parse(files.get(queued.taskPath).content);
+    record.status = "awaiting_approval";
+    files.get(queued.taskPath).content = `${JSON.stringify(record, null, 2)}\n`;
+  }
+
+  const revised = await plugin.requestCreationRevision(project.path, "xhsCaption", "缩短开头，但保留事实与卡片结论。");
+
+  assert.strictEqual(revised.kind, "xhs.copy-qa", "caption revision should reuse the copy-only Writing Styles task");
+  assert.strictEqual(revised.skillId, "writing-styles");
+  assert.ok(revised.outputs.every((output) => !output.includes("/images/")), "caption revision must not declare any card image output");
+  assert.deepStrictEqual([...(revised.outputDirectories || [])], [], "caption revision must not receive an image-directory write contract");
+  assert.strictEqual(JSON.parse(files.get(packageTask.taskPath).content).status, "awaiting_approval", "an accepted card package is independent from copy-only revision");
+  assert.strictEqual(JSON.parse(files.get(copyQa.taskPath).content).status, "superseded");
+}
+
+async function testFailedQaCanReturnProjectToResearchConfiguration() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "补研究恢复入口", kind: "manual" }, { platform: "wechat" });
+  let state = await plugin.loadCreationWorkflowState(project.directory);
+  state = creationWorkflow.enterDiagnosis(state);
+  state = creationWorkflow.chooseResearchDecision(state, "skip");
+  state = creationWorkflow.approveMasterBrief(state, "brief-v1");
+  state = creationWorkflow.approvePlatformPlan(state, "wechat", { outlineVersion: "outline-v1" });
+  await plugin.saveCreationWorkflowState(project.directory, state);
+  const qa = await plugin.queueCreationStageTask(project.path, "wechat.qa", { force: true });
+  const qaRecord = JSON.parse(files.get(qa.taskPath).content);
+  qaRecord.status = "awaiting_approval";
+  qaRecord.qualityScore = 82;
+  qaRecord.qualityPassed = false;
+  files.get(qa.taskPath).content = `${JSON.stringify(qaRecord, null, 2)}\n`;
+
+  const reopened = await plugin.reopenCreationResearch(project.path);
+
+  assert.strictEqual(reopened.currentStage, "research");
+  assert.strictEqual(reopened.research.decision, "research");
+  assert.strictEqual(JSON.parse(files.get(qa.taskPath).content).status, "superseded");
+}
+
+async function testFinalExportCreatesImmutableNamedSnapshot() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = {
+    creationProjectRoot: "Reading Capture/creation-projects",
+    defaultWritingStyle: "keke",
+    wechatPublishingRoot: "Work/business/content-accounts/wechat",
+    xiaohongshuPublishingRoot: "Work/business/content-accounts/xiaohongshu",
+  };
+  plugin.now = () => "2026-07-19T16:00:00.000Z";
+  const project = await plugin.createCreationProject({ title: "不可变快照", kind: "manual" }, { platform: "wechat" });
+  const state = await plugin.loadCreationWorkflowState(project.directory);
+  state.currentStage = "final";
+  state.deliverables.wechat.stage = "final";
+  state.deliverables.wechat.approvalVersion = "visual-v1";
+  await plugin.saveCreationWorkflowState(project.directory, state);
+  await plugin.writeText(`${project.directory}/deliverables/wechat/wechat-001/drafts/v1.md`, "# 最终正文\n\n不可变发布内容。\n");
+  await plugin.writeText(`${project.directory}/deliverables/wechat/wechat-001/qa.md`, "# QA\n\n总分：96/100\n");
+  await plugin.writeText(`${project.directory}/deliverables/wechat/wechat-001/visuals/01-cover.png`, "image-binary-placeholder");
+
+  const snapshot = await plugin.exportCreationDeliverable(project.path, "wechat");
+
+  assert.strictEqual(snapshot.targetDirectory, "Work/business/content-accounts/wechat/20260719_不可变快照");
+  assert.ok(files.has(`${snapshot.targetDirectory}/article.md`));
+  assert.ok(files.has(`${snapshot.targetDirectory}/images/01-cover.png`));
+  assert.ok(files.has(`${snapshot.targetDirectory}/QA.md`));
+  assert.ok(files.has(`${snapshot.targetDirectory}/publishing-notes.md`));
+  assert.ok(files.has(`${snapshot.targetDirectory}/manifest.yaml`));
+  assert.ok(files.has(`${snapshot.targetDirectory}/snapshot.json`));
+  await assert.rejects(() => plugin.exportCreationDeliverable(project.path, "wechat"), /发布目录已存在/);
+}
+
+async function testXhsFinalExportUsesCanonicalPublishingPackage() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = {
+    creationProjectRoot: "Reading Capture/creation-projects",
+    defaultWritingStyle: "keke",
+    wechatPublishingRoot: "Work/business/content-accounts/wechat",
+    xiaohongshuPublishingRoot: "Work/business/content-accounts/xiaohongshu",
+  };
+  plugin.now = () => "2026-07-19T16:00:00.000Z";
+  const project = await plugin.createCreationProject({ title: "小红书发布包", kind: "manual" }, { platform: "xiaohongshu" });
+  const state = await plugin.loadCreationWorkflowState(project.directory);
+  state.currentStage = "final";
+  state.deliverables.xiaohongshu.stage = "final";
+  state.deliverables.xiaohongshu.approvalVersion = "xhs-package-v1";
+  await plugin.saveCreationWorkflowState(project.directory, state);
+  const root = `${project.directory}/deliverables/xiaohongshu/xiaohongshu-001`;
+  await plugin.writeText(`${root}/plan.md`, "# 小红书内容与视觉简报\n\n完整分页计划。\n");
+  await plugin.writeText(`${root}/caption.md`, "# 标题\n\n完整发布文案。\n");
+  await plugin.writeText(`${root}/copy-qa.md`, "# 文案 QA\n\n总分：97/100\n");
+  await plugin.writeText(`${root}/visual-qa.md`, "# 视觉 QA\n\n总分：96/100\n");
+  await plugin.writeText(`${root}/images/01-cover.png`, "image-binary-placeholder");
+
+  const snapshot = await plugin.exportCreationDeliverable(project.path, "xiaohongshu");
+
+  assert.ok(files.has(`${snapshot.targetDirectory}/BRIEF.md`));
+  assert.ok(files.has(`${snapshot.targetDirectory}/xiaohongshu-caption.md`));
+  assert.ok(files.has(`${snapshot.targetDirectory}/copy-variants.md`));
+  assert.ok(files.has(`${snapshot.targetDirectory}/images/01-cover.png`));
+  assert.match(files.get(`${snapshot.targetDirectory}/QA.md`).content, /文案 QA/);
+  assert.match(files.get(`${snapshot.targetDirectory}/QA.md`).content, /视觉 QA/);
+  assert.ok(files.has(`${snapshot.targetDirectory}/manifest.yaml`));
+}
+
+async function testConcurrentSnapshotExportReservesDistinctVersionDirectories() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = {
+    creationProjectRoot: "Reading Capture/creation-projects",
+    defaultWritingStyle: "keke",
+    wechatPublishingRoot: "Work/business/content-accounts/wechat",
+    xiaohongshuPublishingRoot: "Work/business/content-accounts/xiaohongshu",
+  };
+  plugin.now = () => "2026-07-19T16:00:00.000Z";
+  const project = await plugin.createCreationProject({ title: "并发导出", kind: "manual" }, { platform: "wechat" });
+  const state = await plugin.loadCreationWorkflowState(project.directory);
+  state.currentStage = "final";
+  state.deliverables.wechat.stage = "final";
+  state.deliverables.wechat.approvalVersion = "visual-v1";
+  await plugin.saveCreationWorkflowState(project.directory, state);
+  await plugin.writeText(`${project.directory}/deliverables/wechat/wechat-001/drafts/v1.md`, "# 最终正文\n\n并发导出内容。\n");
+
+  const results = await Promise.all([
+    plugin.exportCreationDeliverable(project.path, "wechat", { autoVersion: true }),
+    plugin.exportCreationDeliverable(project.path, "wechat", { autoVersion: true }),
+  ]);
+
+  assert.deepStrictEqual(results.map((item) => item.targetDirectory).sort(), [
+    "Work/business/content-accounts/wechat/20260719_并发导出",
+    "Work/business/content-accounts/wechat/20260719_并发导出_v2",
+  ]);
+  assert.strictEqual(results.find((item) => /_v2$/u.test(item.targetDirectory)).snapshotVersion, 2);
+}
+
+async function testExportWriteFailureNeverExposesPartialSnapshotAsFinal() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = {
+    creationProjectRoot: "Reading Capture/creation-projects",
+    defaultWritingStyle: "keke",
+    wechatPublishingRoot: "Work/business/content-accounts/wechat",
+    xiaohongshuPublishingRoot: "Work/business/content-accounts/xiaohongshu",
+  };
+  plugin.now = () => "2026-07-20T10:00:00.000Z";
+  const project = await plugin.createCreationProject({ title: "失败导出仍可恢复", kind: "manual" }, { platform: "wechat" });
+  const state = await plugin.loadCreationWorkflowState(project.directory);
+  state.currentStage = "final";
+  state.deliverables.wechat.stage = "final";
+  state.deliverables.wechat.approvalVersion = "visual-v1";
+  await plugin.saveCreationWorkflowState(project.directory, state);
+  await plugin.writeText(`${project.directory}/deliverables/wechat/wechat-001/drafts/v1.md`, "# 最终正文\n\n源项目必须保持完整。\n");
+  const target = "Work/business/content-accounts/wechat/20260720_失败导出仍可恢复";
+  const originalWrite = app.vault.adapter.write.bind(app.vault.adapter);
+  app.vault.adapter.write = async (path, content) => {
+    if (path.includes("Work/business/content-accounts/wechat/") && path.endsWith("/sources.md")) throw new Error("simulated export write failure");
+    return originalWrite(path, content);
+  };
+
+  await assert.rejects(() => plugin.exportCreationDeliverable(project.path, "wechat"), /simulated export write failure/);
+
+  assert.ok(files.has(project.path), "source project must survive a failed export");
+  assert.ok(files.has(`${project.directory}/deliverables/wechat/wechat-001/drafts/v1.md`));
+  assert.ok(![...files.keys()].some((path) => path === target || path.startsWith(`${target}/`)), "partial output must never appear under the final publishing path");
+  assert.ok([...files.keys()].some((path) => path.includes(`${target}.staging-`) && path.endsWith("/_EXPORT_INCOMPLETE.json")), "failed staging output should be explicitly identifiable for recovery or cleanup");
+}
+
+async function testPublicationReviewProjectsIdempotentTopicMinerFeedback() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = {
+    creationProjectRoot: "Reading Capture/creation-projects",
+    defaultWritingStyle: "keke",
+    wechatPublishingRoot: "Work/business/content-accounts/wechat",
+    xiaohongshuPublishingRoot: "Work/business/content-accounts/xiaohongshu",
+  };
+  plugin.now = () => "2026-07-20T09:00:00.000Z";
+  const project = await plugin.createCreationProject({ title: "发布复盘", kind: "manual", id: "idea-review" }, { platform: "wechat" });
+  const state = await plugin.loadCreationWorkflowState(project.directory);
+  state.currentStage = "final";
+  state.deliverables.wechat.stage = "final";
+  state.deliverables.wechat.approvalVersion = "visual-v1";
+  await plugin.saveCreationWorkflowState(project.directory, state);
+  await plugin.writeText(`${project.directory}/deliverables/wechat/wechat-001/drafts/v1.md`, "# 最终正文\n\n准备发布。\n");
+  const snapshot = await plugin.exportCreationDeliverable(project.path, "wechat");
+  const immutableBefore = files.get(`${snapshot.targetDirectory}/snapshot.json`).content;
+  const review = {
+    publishedAt: "2026-07-20T09:30:00.000Z",
+    url: "https://example.com/post/1",
+    outcome: "published",
+    whatWorked: "风险清单结构便于收藏",
+    whatFailed: "开头略长",
+    reusableAngles: "上线前检查表",
+    audienceResponse: "读者追问审计案例",
+    followUpIdeas: "补一篇失败复盘",
+  };
+
+  const first = await plugin.recordCreationPublicationReview(project.path, "wechat", snapshot, review);
+  const duplicate = await plugin.recordCreationPublicationReview(project.path, "wechat", snapshot, review);
+  assert.strictEqual(duplicate.reviewId, first.reviewId, "saving the same review twice must be idempotent");
+  const revised = await plugin.recordCreationPublicationReview(project.path, "wechat", snapshot, { ...review, whatFailed: "案例仍然不够具体" });
+  assert.strictEqual(revised.reviewRevision, 2);
+  assert.strictEqual(revised.previousReviewId, first.reviewId);
+  const records = files.get(`${project.directory}/publication-records.jsonl`).content.trim().split("\n").map(JSON.parse);
+  assert.strictEqual(records.filter((item) => item.recordType === "publication_review").length, 2);
+  const feedbackPath = "Reading Capture/creation-projects/_topic-miner/feedback.jsonl";
+  const feedback = files.get(feedbackPath).content.trim().split("\n").map(JSON.parse);
+  assert.strictEqual(feedback.length, 2);
+  assert.strictEqual(feedback[1].reviewRevision, 2);
+  const consumer = JSON.parse(files.get("Reading Capture/creation-projects/_topic-miner/consumers/topic-miner.json").content);
+  assert.strictEqual(consumer.records[0].reviewRevision, 2, "the consumer projection should expose only the latest revision per inspiration and publication");
+  assert.strictEqual(files.get(`${snapshot.targetDirectory}/snapshot.json`).content, immutableBefore, "publication review must not mutate the immutable snapshot");
+}
+
+async function testCreationResearchDecisionPersistsDistinctPaths() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const researchProject = await plugin.createCreationProject({ title: "进入研究", kind: "manual" }, { platform: "wechat" });
+  await plugin.confirmCreationRelations(researchProject.path);
+  markCreationTaskAwaiting(files, researchProject.path, "diagnosis.materials");
+  await plugin.chooseCreationResearchPath(researchProject.path, "research");
+  const researchState = JSON.parse(files.get(`${researchProject.directory}/workflow-state.json`).content);
+  assert.strictEqual(researchState.currentStage, "research");
+  assert.strictEqual(researchState.research.decision, "research");
+
+  const skipProject = await plugin.createCreationProject({ title: "跳过研究", kind: "manual" }, { platform: "wechat" });
+  await plugin.confirmCreationRelations(skipProject.path);
+  markCreationTaskAwaiting(files, skipProject.path, "diagnosis.materials");
+  await plugin.chooseCreationResearchPath(skipProject.path, "skip");
+  const skipState = JSON.parse(files.get(`${skipProject.directory}/workflow-state.json`).content);
+  assert.strictEqual(skipState.currentStage, "brief");
+  assert.strictEqual(skipState.research.decision, "skipped");
+  assert.strictEqual(creationWorkflow.deriveStageStates(skipState).research, "skipped");
+}
+
+async function testParallelResearchRoutesKeepOutputsSeparateAndMergeOnAcceptance() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "多路线研究合并", kind: "manual" }, { platform: "wechat" });
+  await plugin.confirmCreationRelations(project.path);
+  markCreationTaskAwaiting(files, project.path, "diagnosis.materials");
+  await plugin.chooseCreationResearchPath(project.path, "research");
+  const deep = await plugin.queueCreationStageTask(project.path, "research.evidence", { skillId: "deep-research-skills", networkAuthorized: true });
+  await assert.rejects(
+    () => plugin.queueCreationStageTask(project.path, "research.evidence", { skillId: "last30days", networkAuthorized: true }),
+    /暂不允许自动运行 last30days/u,
+  );
+  const recent = await plugin.queueCreationStageTask(project.path, "research.evidence", { skillId: "academic-research-suite", networkAuthorized: true });
+  assert.strictEqual(deep.skillRequirement.skillId, "deep-research-skills");
+  assert.match(deep.skillRequirement.artifactDigest, /^[a-f0-9]{64}$/u);
+  assert.match(deep.skillRequirement.manifestDigest, /^[a-f0-9]{64}$/u);
+  assert.deepStrictEqual(deep.skillRequirement.permissions.network, ["public-web"]);
+  assert.strictEqual(recent.skillRequirement.version, "0.1.21+16696ba2");
+  assert.notDeepStrictEqual(deep.outputs, recent.outputs, "parallel research routes must never overwrite the same files");
+  for (const [task, marker] of [[deep, "权威治理证据"], [recent, "最近三十天实践"]]) {
+    const record = JSON.parse(files.get(task.taskPath).content);
+    record.status = "awaiting_approval";
+    record.runId = `${task.taskId}_attempt-1`;
+    record.outputs = [`${project.directory}/research/evidence.md`, `${project.directory}/research/sources.md`];
+    record.outputHashes = Object.fromEntries(record.outputs.map((output) => [output, `${marker}-v1`]));
+    files.get(task.taskPath).content = `${JSON.stringify(record, null, 2)}\n`;
+    await plugin.writeText(`${project.directory}/runs/${record.runId}/workspace/research/evidence.md`, `# ${marker}\n\n证据正文\n`);
+    await plugin.writeText(`${project.directory}/runs/${record.runId}/workspace/research/sources.md`, `# ${marker}来源\n\n来源正文\n`);
+  }
+
+  await plugin.acceptCreationResearchResults(project.path);
+
+  assert.match(files.get(`${project.directory}/research/evidence.md`).content, /权威治理证据/);
+  assert.match(files.get(`${project.directory}/research/evidence.md`).content, /最近三十天实践/);
+  assert.match(files.get(`${project.directory}/research/sources.md`).content, /权威治理证据来源/);
+  assert.match(files.get(`${project.directory}/research/sources.md`).content, /最近三十天实践来源/);
+}
+
+async function testGeneratedDiagnosisCanAdvanceWhenLegacyTaskReceiptIsMissing() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "旧任务兼容", kind: "manual" }, { platform: "wechat" });
+  await plugin.confirmCreationRelations(project.path);
+  for (const filePath of [...files.keys()].filter((item) => item.includes("/_runner/queue/"))) files.delete(filePath);
+  const state = JSON.parse(files.get(`${project.directory}/workflow-state.json`).content);
+  delete state.taskRefs;
+  files.get(`${project.directory}/workflow-state.json`).content = `${JSON.stringify(state, null, 2)}\n`;
+  files.get(`${project.directory}/planning/diagnosis.md`).content = `# 材料诊断\n\n${"这是已经完成的真实诊断内容，包含材料成熟度、证据缺口和后续路径建议。".repeat(12)}\n`;
+
+  await plugin.chooseCreationResearchPath(project.path, "skip");
+
+  const updated = JSON.parse(files.get(`${project.directory}/workflow-state.json`).content);
+  assert.strictEqual(updated.currentStage, "brief");
+}
+
+async function testTaskVersionLabelsDoNotExposeContentHashes() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  assert.strictEqual(plugin.creationTaskVersionLabel({ attempts: 1, outputHashes: { "brief.md": "a".repeat(64) } }), "AI 生成版 v1");
+  assert.strictEqual(plugin.creationTaskVersionLabel({ attempts: 2, userVersion: "user-v3" }), "用户修改版 v3");
+}
+
+async function testCreationStageTasksUseExplicitContractsAndAuthorization() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "阶段任务", kind: "manual" }, { platform: "wechat" });
+  await plugin.confirmCreationRelations(project.path);
+
+  const diagnosis = await plugin.queueCreationStageTask(project.path, "diagnosis.materials");
+  assert.strictEqual(diagnosis.schemaVersion, 2);
+  assert.strictEqual(diagnosis.skillId, "writing-styles");
+  assert.strictEqual(diagnosis.network.required, false);
+  assert.strictEqual(diagnosis.network.authorized, false);
+  assert.deepStrictEqual([...diagnosis.outputs], [`${project.directory}/planning/diagnosis.md`]);
+
+  markCreationTaskAwaiting(files, project.path, "diagnosis.materials");
+  await plugin.chooseCreationResearchPath(project.path, "research");
+  await assert.rejects(
+    () => plugin.queueCreationStageTask(project.path, "research.evidence"),
+    /明确授权联网研究/,
+  );
+  const research = await plugin.queueCreationStageTask(project.path, "research.evidence", {
+    skillId: "deep-research-skills",
+    networkAuthorized: true,
+    researchGuidance: "重点查找真实失败案例与权威治理框架。",
+  });
+  assert.strictEqual(research.skillId, "deep-research-skills");
+  assert.strictEqual(research.network.required, true);
+  assert.strictEqual(research.network.authorized, true);
+  assert.ok(files.has(`${project.directory}/planning/research-request.md`));
+  assert.match(files.get(`${project.directory}/planning/research-request.md`).content, /真实失败案例/);
+  assert.deepStrictEqual([...research.outputs], [
+    `${project.directory}/research/routes/deep-research-skills/evidence.md`,
+    `${project.directory}/research/routes/deep-research-skills/sources.md`,
+  ]);
+  const persistedState = JSON.parse(files.get(`${project.directory}/workflow-state.json`).content);
+  assert.strictEqual(persistedState.research.taskState, "queued");
+  assert.deepStrictEqual([...persistedState.research.skills], ["deep-research-skills"]);
+
+  const queuedResearch = JSON.parse(files.get(research.taskPath).content);
+  queuedResearch.status = "awaiting_approval";
+  queuedResearch.outputHashes = { [`${project.directory}/research/evidence.md`]: "research-v1" };
+  files.get(research.taskPath).content = `${JSON.stringify(queuedResearch, null, 2)}\n`;
+  const accepted = await plugin.acceptCreationTask({ ...queuedResearch, taskPath: research.taskPath });
+  assert.strictEqual(accepted.workflowState.currentStage, "brief");
+  assert.strictEqual(accepted.workflowState.research.taskState, "accepted");
+  assert.strictEqual(accepted.workflowState.research.acceptedResultVersion, "research-v1");
+  const taskFiles = [...files.entries()]
+    .filter(([filePath]) => filePath.includes("/_runner/queue/") && filePath.endsWith(".json"))
+    .map(([, record]) => JSON.parse(record.content));
+  assert.ok(taskFiles.some((task) => task.kind === "brief.master" && task.status === "pending"), "accepting research should queue a separate master brief task");
+  const briefEntry = [...files.entries()].find(([, record]) => {
+    try { return JSON.parse(record.content).kind === "brief.master"; } catch (error) { return false; }
+  });
+  const queuedBrief = JSON.parse(briefEntry[1].content);
+  queuedBrief.status = "awaiting_approval";
+  queuedBrief.outputHashes = { [`${project.directory}/planning/master-brief.md`]: "brief-v2" };
+  queuedBrief.inputHashes = {
+    [`${project.directory}/project.md`]: "project-input-v1",
+    [`${project.directory}/planning/diagnosis.md`]: "diagnosis-input-v1",
+  };
+  briefEntry[1].content = `${JSON.stringify(queuedBrief, null, 2)}\n`;
+  const briefAccepted = await plugin.acceptCreationTask({ ...queuedBrief, taskPath: briefEntry[0] });
+  assert.strictEqual(briefAccepted.workflowState.currentStage, "plan");
+  assert.strictEqual(briefAccepted.workflowState.masterBriefVersion, "brief-v2");
+  const artifactRecords = files.get(`${project.directory}/artifacts.jsonl`).content.trim().split("\n").map(JSON.parse);
+  const briefArtifact = artifactRecords.find((record) => record.path === `${project.directory}/planning/master-brief.md`);
+  assert.ok(briefArtifact, "accepting a generated output should append an Artifact version record");
+  assert.strictEqual(briefArtifact.artifactId, `${project.id}:brief.master:planning/master-brief.md`);
+  assert.strictEqual(briefArtifact.contentHash, "brief-v2");
+  assert.deepStrictEqual({ ...briefArtifact.dependencyHashes }, { ...queuedBrief.inputHashes });
+  const approvalRecords = files.get(`${project.directory}/approvals.jsonl`).content.trim().split("\n").map(JSON.parse);
+  const briefApproval = approvalRecords.find((record) => record.taskId === queuedBrief.taskId);
+  assert.deepStrictEqual([...briefApproval.artifactVersionIds], [briefArtifact.artifactVersionId], "approval must name the exact immutable Artifact version it accepts");
+  const afterBriefTasks = [...files.entries()]
+    .filter(([filePath]) => filePath.includes("/_runner/queue/") && filePath.endsWith(".json"))
+    .map(([, record]) => JSON.parse(record.content));
+  assert.ok(afterBriefTasks.some((task) => task.kind === "wechat.plan" && task.status === "pending"), "accepting the brief should queue the selected platform plan only");
+  const planEntry = [...files.entries()].find(([, record]) => {
+    try { return JSON.parse(record.content).kind === "wechat.plan"; } catch (error) { return false; }
+  });
+  const queuedPlan = JSON.parse(planEntry[1].content);
+  queuedPlan.status = "awaiting_approval";
+  queuedPlan.outputHashes = {
+    [`${project.directory}/deliverables/wechat/wechat-001/outline.md`]: "outline-v1",
+    [`${project.directory}/deliverables/wechat/wechat-001/illustration-plan.md`]: "illustrations-v1",
+    [`${project.directory}/deliverables/wechat/wechat-001/illustration-plan.json`]: "illustrations-json-v1",
+  };
+  await plugin.writeText(`${project.directory}/deliverables/wechat/wechat-001/illustration-plan.json`, `${JSON.stringify({ schemaVersion: 1, items: [
+    { id: "hero", label: "开场解释图", skillId: "liangkeban-xiaoxiaoke-illustrations", fileName: "01-hero.png", insertionAnchor: "引言后" },
+    { id: "matrix", label: "风险矩阵", skillId: "baoyu-infographic", fileName: "02-matrix.png", insertionAnchor: "行动章节" },
+  ] }, null, 2)}\n`);
+  planEntry[1].content = `${JSON.stringify(queuedPlan, null, 2)}\n`;
+  const planAccepted = await plugin.acceptCreationTask({ ...queuedPlan, taskPath: planEntry[0] });
+  assert.strictEqual(planAccepted.workflowState.currentStage, "draft");
+  assert.strictEqual(planAccepted.workflowState.deliverables.wechat.outlineVersion, "outline-v1");
+  assert.strictEqual(planAccepted.workflowState.deliverables.wechat.illustrationPlanVersion, "illustrations-v1");
+  assert.ok([...files.values()].some((record) => {
+    try { return JSON.parse(record.content).kind === "wechat.draft"; } catch (error) { return false; }
+  }), "accepting the WeChat plan should queue its draft task");
+  const draftEntry = [...files.entries()].find(([, record]) => {
+    try { return JSON.parse(record.content).kind === "wechat.draft"; } catch (error) { return false; }
+  });
+  const queuedDraft = JSON.parse(draftEntry[1].content);
+  assert.ok(queuedDraft.inputs.includes(`${project.directory}/research/evidence.md`), "the writer must receive accepted research evidence instead of relying on a lossy brief summary");
+  assert.ok(queuedDraft.inputs.includes(`${project.directory}/research/sources.md`));
+  queuedDraft.status = "awaiting_approval";
+  queuedDraft.outputHashes = { [`${project.directory}/deliverables/wechat/wechat-001/drafts/v1.md`]: "article-v1" };
+  draftEntry[1].content = `${JSON.stringify(queuedDraft, null, 2)}\n`;
+  const draftAccepted = await plugin.acceptCreationTask({ ...queuedDraft, taskPath: draftEntry[0] });
+  assert.strictEqual(draftAccepted.workflowState.currentStage, "draft", "draft acceptance must wait for QA before advancing");
+  assert.strictEqual(draftAccepted.workflowState.deliverables.wechat.articleVersion, "article-v1");
+  const qaEntry = [...files.entries()].find(([, record]) => {
+    try { return JSON.parse(record.content).kind === "wechat.qa"; } catch (error) { return false; }
+  });
+  assert.ok(qaEntry, "accepting a text candidate should queue Writing Styles QA");
+  const queuedQa = JSON.parse(qaEntry[1].content);
+  assert.ok(queuedQa.inputs.includes(`${project.directory}/research/evidence.md`), "QA must inspect the same evidence available to the writer");
+  assert.ok(queuedQa.inputs.includes(`${project.directory}/research/sources.md`));
+  queuedQa.status = "awaiting_approval";
+  queuedQa.qualityScore = 94;
+  queuedQa.qualityPassed = false;
+  queuedQa.outputHashes = { [`${project.directory}/deliverables/wechat/wechat-001/qa.md`]: "qa-v1" };
+  qaEntry[1].content = `${JSON.stringify(queuedQa, null, 2)}\n`;
+  await assert.rejects(() => plugin.acceptCreationTask({ ...queuedQa, taskPath: qaEntry[0] }), /95/);
+  queuedQa.qualityScore = 96;
+  queuedQa.qualityPassed = true;
+  qaEntry[1].content = `${JSON.stringify(queuedQa, null, 2)}\n`;
+  const qaAccepted = await plugin.acceptCreationTask({ ...queuedQa, taskPath: qaEntry[0] });
+  assert.strictEqual(qaAccepted.workflowState.currentStage, "visual");
+  assert.strictEqual(qaAccepted.workflowState.deliverables.wechat.qaVersion, "qa-v1");
+  const visualEntries = [...files.entries()].filter(([, record]) => {
+    try { return JSON.parse(record.content).kind === "wechat.visual-item"; } catch (error) { return false; }
+  });
+  assert.strictEqual(visualEntries.length, 2, "passed QA should queue one durable Task per approved illustration");
+  for (const [taskPath, record] of visualEntries) {
+    const queuedVisual = JSON.parse(record.content);
+    queuedVisual.status = "awaiting_approval";
+    queuedVisual.outputHashes = { [queuedVisual.outputs[0]]: `${queuedVisual.childKey}-v1` };
+    record.content = `${JSON.stringify(queuedVisual, null, 2)}\n`;
+    await plugin.acceptCreationTask({ ...queuedVisual, taskPath });
+  }
+  const visualAccepted = await plugin.approveCreationVisualPackage(project.path, "wechat");
+  assert.strictEqual(visualAccepted.currentStage, "final");
+  assert.match(visualAccepted.deliverables.wechat.approvalVersion, /^[a-f0-9]{64}$/u);
+  const withXhs = await plugin.addCreationDeliverable(project.path, "xiaohongshu");
+  assert.ok(withXhs.deliverables.xiaohongshu);
+  const xhsActive = await plugin.activateCreationDeliverable(project.path, "xiaohongshu");
+  assert.strictEqual(xhsActive.activeDeliverable, "xiaohongshu");
+  assert.strictEqual(xhsActive.currentStage, "plan");
+}
+
+async function testLegacyPlanningEntryRoutesToDiagnosisOnly() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "旧入口恢复", kind: "manual" }, { platform: "wechat" });
+
+  const task = await plugin.queueCreationPlanningTask(project.path);
+
+  assert.strictEqual(task.kind, "diagnosis.materials");
+  assert.deepStrictEqual([...task.outputs], [`${project.directory}/planning/diagnosis.md`]);
+  assert.ok(!task.outputs.some((output) => /master-brief|outline/u.test(output)), "a legacy click must never revive the unsafe combined brief-and-outline task");
+}
+
+async function testSkippingResearchQueuesRestrictedBriefCandidate() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "受限简报", kind: "manual" }, { platform: "wechat" });
+  await plugin.confirmCreationRelations(project.path);
+  markCreationTaskAwaiting(files, project.path, "diagnosis.materials");
+  await plugin.chooseCreationResearchPath(project.path, "skip");
+  const tasks = [...files.entries()]
+    .filter(([filePath]) => filePath.includes("/_runner/queue/") && filePath.endsWith(".json"))
+    .map(([, record]) => JSON.parse(record.content));
+  const brief = tasks.find((task) => task.kind === "brief.master");
+  assert.ok(brief, "the restricted path still needs a generated brief candidate");
+  assert.strictEqual(brief.network.required, false);
+}
+
+async function testRepurposeSourceSearchIsMetadataOnlyAndReadsAfterConfirmation() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  const savedPath = "Learning/saved/agent-risk.md";
+  files.set(savedPath, { file: makeFile(savedPath, "# Agent risk\n\n正文"), content: "# Agent risk\n\n正文" });
+  plugin.app = app;
+  plugin.settings = {
+    creationProjectRoot: "Reading Capture/creation-projects",
+    articleLibraryRoots: "Learning",
+    articleLibraryExcludeRoots: ".obsidian",
+    readingRoot: "Reading Capture/notes",
+    defaultWritingStyle: "keke",
+  };
+  plugin.now = () => fixedNow;
+  let reads = 0;
+  const originalRead = app.vault.adapter.read;
+  app.vault.adapter.read = async (path) => { reads += 1; return originalRead(path); };
+  const originalVaultRead = app.vault.read;
+  app.vault.read = async (file) => { reads += 1; return originalVaultRead(file); };
+  const result = plugin.searchCreationSourceMetadata("agent-risk", { limit: 50, offset: 0 });
+  assert.strictEqual(result.total, 1);
+  assert.strictEqual(result.items[0].path, savedPath);
+  assert.strictEqual(reads, 0, "source search must not read article contents");
+
+  const project = await plugin.createCreationProject({ title: "改编项目", kind: "manual" }, { platform: "wechat" });
+  await plugin.startCreationRepurpose(project.path, savedPath, "xiaohongshu");
+  assert.ok(reads > 0, "content is read only after the user confirms the selected source");
+  const state = JSON.parse(files.get(`${project.directory}/workflow-state.json`).content);
+  assert.strictEqual(state.workflowMode, "article_repurpose");
+  assert.strictEqual(state.currentStage, "plan");
+  assert.strictEqual(state.activeDeliverable, "xiaohongshu");
+  assert.strictEqual(state.source.mainFile, savedPath);
+  assert.ok(files.has(`${project.directory}/sources/primary.md`));
+  const tasks = [...files.values()].map((record) => {
+    try { return JSON.parse(record.content); } catch (error) { return null; }
+  }).filter(Boolean);
+  const planTask = tasks.find((task) => task.kind === "xhs.plan");
+  assert.ok(planTask);
+  assert.ok(planTask.inputs.includes(`${project.directory}/sources/primary.md`));
+  assert.ok(!planTask.inputs.includes(savedPath), "Runner inputs remain project-contained");
+  assert.ok(planTask.outputs.includes(`${project.directory}/deliverables/xiaohongshu/xiaohongshu-001/proposals.json`), "the three proposal cards must come from a generated structured artifact");
+}
+
+async function testXhsPlanRendersGeneratedProposalsInsteadOfHardcodedCards() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => { registeredViews[type] = factory; };
+  plugin.loadData = async () => null;
+  let state = creationWorkflow.createWorkflowState({ projectId: "xhs-generated", title: "Generated", activeDeliverable: "xiaohongshu" });
+  state = { ...state, currentStage: "plan", masterBriefVersion: "brief-v1" };
+  const generated = [
+    {
+      id: "route-one",
+      name: "证据审计地图",
+      template: { visualSystem: "Swiss System", subTemplate: "审计轨迹", ratio: "3:4", routeRationale: "适合证据结构" },
+      palette: { theme: "ikb", primary: "深蓝", surface: "暖白", accent: "朱红", usage: "只用于边界" },
+      tradeoff: "信息密度高",
+    },
+    { id: "route-two", name: "上线闸门清单", template: "闸门卡", palette: "米白与朱红", tradeoff: "更便于收藏" },
+    { id: "route-three", name: "事故复盘时间线", template: "事件线", palette: "深灰与电蓝", tradeoff: "叙事性更强" },
+  ];
+  plugin.listCreationProjects = async () => [{
+    path: "Reading Capture/creation-projects/xhs-generated/project.md",
+    directory: "Reading Capture/creation-projects/xhs-generated",
+    title: "Generated",
+    platform: "xiaohongshu",
+    statusLabel: "方案审核",
+    primaryTitle: "Primary",
+    relatedTitles: [],
+    workflowState: state,
+    stageStates: creationWorkflow.deriveStageStates(state),
+    xhsPlan: "# 生成方案",
+    xhsProposals: generated,
+    tasks: [{ kind: "xhs.plan", status: "awaiting_approval", taskPath: "queue/xhs-plan.json", outputHashes: { plan: "plan-v1" } }],
+  }];
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-creation-project"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+  const texts = fakeElementTexts(view.containerEl.children[1]);
+
+  for (const proposal of generated) {
+    assert.ok(texts.includes(proposal.name));
+  }
+  assert.ok(texts.includes("Swiss System · 审计轨迹 · 3:4"));
+  assert.ok(texts.includes("ikb · 深蓝 · 暖白 · 朱红"));
+  assert.ok(!texts.includes("[object Object]"));
+  assert.ok(texts.includes("闸门卡"));
+  assert.ok(texts.includes("米白与朱红"));
+  assert.ok(!texts.includes("结构化评审板"), "the UI must not invent proposal content that was not generated by the selected Skills");
+}
+
+async function testXhsTaskChainUsesApprovedPlanAndIndependentDualQa() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "小红书完整链路", kind: "manual" }, { platform: "xiaohongshu" });
+  let state = await plugin.loadCreationWorkflowState(project.directory);
+  state.currentStage = "plan";
+  state.masterBriefVersion = "brief-v1";
+  await plugin.saveCreationWorkflowState(project.directory, state);
+  await plugin.saveCreationPlanDecision(project.path, "xiaohongshu", { selectedProposal: "route-one", planVersion: "plan-v1" });
+  const planTask = await plugin.queueCreationStageTask(project.path, "xhs.plan", { force: true });
+  let planRecord = JSON.parse(files.get(planTask.taskPath).content);
+  planRecord.status = "awaiting_approval";
+  planRecord.outputHashes = {
+    [`${project.directory}/deliverables/xiaohongshu/xiaohongshu-001/plan.md`]: "plan-v1",
+    [`${project.directory}/deliverables/xiaohongshu/xiaohongshu-001/proposals.json`]: "proposals-v1",
+  };
+  await plugin.writeText(`${project.directory}/deliverables/xiaohongshu/xiaohongshu-001/proposals.json`, `${JSON.stringify({ schemaVersion: 1, proposals: [{
+    id: "route-one",
+    name: "证据审计地图",
+    template: "Swiss System",
+    palette: "IKB",
+    pages: [
+      { page: 1, role: "封面", content: "五道风险闸门", sourceAnchor: "核心判断", visualEvidence: "总览" },
+      { page: 2, role: "行动", content: "上线评审表", sourceAnchor: "结尾", visualEvidence: "清单" },
+    ],
+  }] }, null, 2)}\n`);
+  files.get(planTask.taskPath).content = `${JSON.stringify(planRecord, null, 2)}\n`;
+  await plugin.acceptCreationTask({ ...planRecord, taskPath: planTask.taskPath });
+  const pageEntries = [...files.entries()].filter(([, record]) => {
+    try { return JSON.parse(record.content).kind === "xhs.card-page"; } catch (error) { return false; }
+  });
+  assert.strictEqual(pageEntries.length, 2);
+  for (const [, record] of pageEntries) {
+    const pageTask = JSON.parse(record.content);
+    pageTask.status = "awaiting_approval";
+    pageTask.outputHashes = { [pageTask.outputs[0]]: `${pageTask.childKey}-v1` };
+    record.content = `${JSON.stringify(pageTask, null, 2)}\n`;
+  }
+  await plugin.acceptXhsCardSetAndQueueQa(project.path);
+  const packageEntry = [...files.entries()].find(([, record]) => {
+    try { return JSON.parse(record.content).kind === "xhs.package"; } catch (error) { return false; }
+  });
+  assert.ok(packageEntry);
+  let packageTask = JSON.parse(packageEntry[1].content);
+  assert.ok(packageTask.inputs.includes(`${project.directory}/deliverables/xiaohongshu/xiaohongshu-001/plan-decision.json`), "full-set generation must use the exact proposal approved by the user");
+  packageTask.status = "awaiting_approval";
+  packageTask.qualityScore = 96;
+  packageTask.qualityPassed = true;
+  packageTask.outputHashes = {
+    [`${project.directory}/deliverables/xiaohongshu/xiaohongshu-001/caption.md`]: "caption-v1",
+    [`${project.directory}/deliverables/xiaohongshu/xiaohongshu-001/cards-manifest.md`]: "cards-v1",
+    [`${project.directory}/deliverables/xiaohongshu/xiaohongshu-001/visual-qa.md`]: "visual-qa-v1",
+  };
+  packageEntry[1].content = `${JSON.stringify(packageTask, null, 2)}\n`;
+  await plugin.acceptCreationTask({ ...packageTask, taskPath: packageEntry[0] });
+  const copyEntry = [...files.entries()].find(([, record]) => {
+    try { return JSON.parse(record.content).kind === "xhs.copy-qa"; } catch (error) { return false; }
+  });
+  assert.ok(copyEntry);
+  let copyTask = JSON.parse(copyEntry[1].content);
+  assert.ok(copyTask.outputs.includes(`${project.directory}/deliverables/xiaohongshu/xiaohongshu-001/caption.md`), "copy QA must be able to iteratively repair only the publishing copy");
+  assert.ok(copyTask.outputs.includes(`${project.directory}/deliverables/xiaohongshu/xiaohongshu-001/copy-qa.md`));
+  copyTask.status = "awaiting_approval";
+  copyTask.qualityScore = 97;
+  copyTask.qualityPassed = true;
+  copyTask.outputHashes = {
+    [`${project.directory}/deliverables/xiaohongshu/xiaohongshu-001/caption.md`]: "caption-v2",
+    [`${project.directory}/deliverables/xiaohongshu/xiaohongshu-001/copy-qa.md`]: "copy-qa-v2",
+  };
+  copyEntry[1].content = `${JSON.stringify(copyTask, null, 2)}\n`;
+  const accepted = await plugin.acceptCreationTask({ ...copyTask, taskPath: copyEntry[0] });
+  assert.strictEqual(accepted.workflowState.currentStage, "visual");
+  assert.strictEqual(accepted.workflowState.deliverables.xiaohongshu.cardVersion, "cards-v1");
+  assert.strictEqual(accepted.workflowState.deliverables.xiaohongshu.visualQaVersion, "visual-qa-v1");
+  assert.strictEqual(accepted.workflowState.deliverables.xiaohongshu.captionVersion, "caption-v2");
+  assert.strictEqual(accepted.workflowState.deliverables.xiaohongshu.copyQaVersion, "copy-qa-v2");
+}
+
+async function testWechatVisualChildrenRetainSuccessRetryFailureAndBlockFinalization() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "公众号逐图恢复", kind: "manual" }, { platform: "wechat" });
+  let state = await plugin.loadCreationWorkflowState(project.directory);
+  state.currentStage = "visual";
+  state.deliverables.wechat.stage = "visual";
+  state.deliverables.wechat.articleVersion = "article-v3";
+  state.deliverables.wechat.qaVersion = "qa-v3";
+  await plugin.saveCreationWorkflowState(project.directory, state);
+  await plugin.writeText(`${project.directory}/deliverables/wechat/wechat-001/drafts/v1.md`, "# 公众号正文\n\n## 引言\n\n会做任务不等于可以上线。\n\n## 核心章节\n\n五道风险闸门需要逐项验证。\n\n## 人工接管\n\n人工接管必须可以测试。\n");
+  await plugin.writeText(`${project.directory}/deliverables/wechat/wechat-001/illustration-plan.json`, `${JSON.stringify({
+    schemaVersion: 1,
+    articleVersion: "article-v3",
+    items: [
+      { id: "hero", label: "能力与可控性", skillId: "liangkeban-xiaoxiaoke-illustrations", fileName: "01-hero.png", insertionAnchor: "引言后", sourceAnchor: "## 引言" },
+      { id: "gates", label: "五道风险闸门", skillId: "baoyu-infographic", fileName: "02-gates.png", insertionAnchor: "核心章节前", sourceAnchor: "## 核心章节" },
+      { id: "handoff", label: "人工接管", skillId: "liangkeban-xiaoxiaoke-illustrations", fileName: "03-handoff.png", insertionAnchor: "第四节后", sourceAnchor: "## 人工接管" },
+    ],
+  }, null, 2)}\n`);
+
+  const children = await plugin.queueWechatVisualTasks(project.path);
+  assert.strictEqual(children.length, 3);
+  assert.strictEqual(new Set(children.map((task) => task.taskId)).size, 3, "each illustration must have a durable child Task");
+  assert.ok(children.every((task) => task.kind === "wechat.visual-item"));
+  assert.deepStrictEqual([...children].map((task) => task.childKey), ["hero", "gates", "handoff"]);
+  assert.ok(children[1].outputs.some((output) => output.endsWith("/visuals/02-gates.png")));
+  const referencedState = await plugin.loadCreationWorkflowState(project.directory);
+  assert.ok(children.every((child) => Object.values(referencedState.taskRefs).includes(child.taskPath)), "every child Task needs its own durable reference when adapter listing lags");
+
+  const records = children.map((task) => ({ task, record: JSON.parse(files.get(task.taskPath).content) }));
+  records[0].record.status = "completed";
+  records[0].record.outputHashes = { [records[0].record.outputs[0]]: "hero-v1" };
+  records[1].record.status = "failed";
+  records[1].record.error = "图中文字渲染失败";
+  records[2].record.status = "completed";
+  records[2].record.outputHashes = { [records[2].record.outputs[0]]: "handoff-v1" };
+  for (const { task, record } of records) files.get(task.taskPath).content = `${JSON.stringify(record, null, 2)}\n`;
+
+  await assert.rejects(() => plugin.approveCreationVisualPackage(project.path, "wechat"), /仍有 1 个配图任务未完成/u);
+  const retried = await plugin.retryCreationTask({ ...records[1].record, taskPath: records[1].task.taskPath });
+  assert.strictEqual(retried.status, "pending");
+  assert.strictEqual(JSON.parse(files.get(records[0].task.taskPath).content).status, "completed", "successful siblings must stay complete");
+  assert.strictEqual(JSON.parse(files.get(records[2].task.taskPath).content).status, "completed");
+
+  const retriedRecord = JSON.parse(files.get(records[1].task.taskPath).content);
+  retriedRecord.status = "completed";
+  retriedRecord.outputHashes = { [retriedRecord.outputs[0]]: "gates-v2" };
+  files.get(records[1].task.taskPath).content = `${JSON.stringify(retriedRecord, null, 2)}\n`;
+  const approved = await plugin.approveCreationVisualPackage(project.path, "wechat");
+  assert.strictEqual(approved.currentStage, "final");
+  assert.match(approved.deliverables.wechat.approvalVersion, /^[a-f0-9]{64}$/u, "the integrated visual approval must identify the exact child set");
+
+  await plugin.saveCreationManualVersion(project.path, "wechatDraft", "# 公众号正文\n\n## 引言\n\n会做任务不等于可以上线。\n\n## 核心章节\n\n五道风险闸门需要逐项验证。\n\n## 人工接管\n\n人工接管必须有演练、超时和明确负责人。\n");
+  const staleChildren = children.map((child) => JSON.parse(files.get(child.taskPath).content));
+  assert.strictEqual(staleChildren[0].status, "completed", "an image whose anchored source section did not change must remain valid");
+  assert.strictEqual(staleChildren[1].status, "completed");
+  assert.strictEqual(staleChildren[2].status, "stale", "only the image anchored to the changed section becomes stale");
+  assert.strictEqual(staleChildren[0].outputHashes[staleChildren[0].outputs[0]], "hero-v1");
+  assert.strictEqual(staleChildren[1].outputHashes[staleChildren[1].outputs[0]], "gates-v2");
+  assert.strictEqual(staleChildren[2].outputHashes[staleChildren[2].outputs[0]], "handoff-v1", "stale image output remains available for comparison");
+  const reopened = await plugin.loadCreationWorkflowState(project.directory);
+  assert.strictEqual(reopened.currentStage, "draft");
+  assert.ok(reopened.deliverables.wechat.staleStages.includes("visual"));
+  assert.ok(reopened.deliverables.wechat.staleStages.includes("final"));
+}
+
+async function testXhsCardChildrenRetainSuccessfulPagesAndRetryOnlyFailure() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "小红书逐页恢复", kind: "manual" }, { platform: "xiaohongshu" });
+  let state = await plugin.loadCreationWorkflowState(project.directory);
+  state.currentStage = "draft";
+  state.masterBriefVersion = "brief-v1";
+  state.deliverables.xiaohongshu.stage = "draft";
+  state.deliverables.xiaohongshu.planVersion = "plan-v1";
+  await plugin.saveCreationWorkflowState(project.directory, state);
+  const deliverableRoot = `${project.directory}/deliverables/xiaohongshu/xiaohongshu-001`;
+  await plugin.writeText(`${deliverableRoot}/proposals.json`, `${JSON.stringify({ schemaVersion: 1, proposals: [{
+    id: "route-a",
+    name: "审计轨迹",
+    template: "Swiss System",
+    palette: "IKB",
+    pageCount: 3,
+    pages: [
+      { page: 1, role: "封面", content: "上线前先过五道闸门", sourceAnchor: "核心判断", visualEvidence: "总览" },
+      { page: 2, role: "问题", content: "会做任务不等于可上线", sourceAnchor: "引言", visualEvidence: "对照" },
+      { page: 3, role: "行动", content: "保存评审表", sourceAnchor: "结尾", visualEvidence: "清单" },
+    ],
+  }] }, null, 2)}\n`);
+  await plugin.saveCreationPlanDecision(project.path, "xiaohongshu", { selectedProposal: "route-a", planVersion: "plan-v1" });
+
+  const children = await plugin.queueXhsCardTasks(project.path);
+  assert.strictEqual(children.length, 3);
+  assert.deepStrictEqual([...children].map((task) => task.childKey), ["page-01", "page-02", "page-03"]);
+  assert.ok(children[2].outputs.some((output) => output.endsWith("/images/xhs-03.png")));
+  const records = children.map((task) => ({ task, record: JSON.parse(files.get(task.taskPath).content) }));
+  for (const [index, item] of records.entries()) {
+    item.record.status = index === 1 ? "failed" : "awaiting_approval";
+    item.record.error = index === 1 ? "第二页中文断行失败" : "";
+    item.record.outputHashes = index === 1 ? {} : { [item.record.outputs[0]]: `page-${index + 1}-v1` };
+    files.get(item.task.taskPath).content = `${JSON.stringify(item.record, null, 2)}\n`;
+  }
+  await assert.rejects(() => plugin.acceptXhsCardSetAndQueueQa(project.path), /仍有 1 页未生成成功/u);
+  await plugin.retryCreationTask({ ...records[1].record, taskPath: records[1].task.taskPath });
+  assert.strictEqual(JSON.parse(files.get(records[0].task.taskPath).content).status, "awaiting_approval");
+  assert.strictEqual(JSON.parse(files.get(records[2].task.taskPath).content).status, "awaiting_approval");
+  const repaired = JSON.parse(files.get(records[1].task.taskPath).content);
+  repaired.status = "awaiting_approval";
+  repaired.outputHashes = { [repaired.outputs[0]]: "page-2-v2" };
+  files.get(records[1].task.taskPath).content = `${JSON.stringify(repaired, null, 2)}\n`;
+
+  const packageTask = await plugin.acceptXhsCardSetAndQueueQa(project.path);
+  assert.strictEqual(packageTask.kind, "xhs.package");
+  assert.ok(packageTask.inputs.some((input) => input.endsWith("/images/xhs-01.png")));
+  assert.ok(packageTask.inputs.some((input) => input.endsWith("/images/xhs-02.png")));
+  assert.ok(packageTask.inputs.some((input) => input.endsWith("/images/xhs-03.png")));
+  assert.ok(children.every((child) => JSON.parse(files.get(child.taskPath).content).status === "completed"));
+  const firstQaAttempt = JSON.parse(files.get(packageTask.taskPath).content);
+  firstQaAttempt.status = "awaiting_approval";
+  firstQaAttempt.qualityScore = 91;
+  firstQaAttempt.qualityPassed = false;
+  firstQaAttempt.qualityIterations = 1;
+  files.get(packageTask.taskPath).content = `${JSON.stringify(firstQaAttempt, null, 2)}\n`;
+  const nextQaAttempt = await plugin.continueCreationQualityIteration({ ...firstQaAttempt, taskPath: packageTask.taskPath });
+  assert.deepStrictEqual([...nextQaAttempt.inputs], [...firstQaAttempt.inputs], "visual QA iteration must keep the exact accepted page artifacts as inputs");
+  assert.deepStrictEqual([...nextQaAttempt.outputDirectories], [], "visual QA iteration must not regain permission to overwrite page images");
+}
+
+async function testCreationViewExposesPerItemVisualRecoveryWithoutDiscardingSuccess() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => { registeredViews[type] = factory; };
+  plugin.loadData = async () => null;
+  let retried = "";
+  plugin.retryCreationTask = async (task) => { retried = task.childKey; return task; };
+  let state = creationWorkflow.createWorkflowState({ projectId: "xhs-partial-view", title: "XHS partial", activeDeliverable: "xiaohongshu" });
+  state.currentStage = "draft";
+  state.deliverables.xiaohongshu.stage = "draft";
+  state.deliverables.xiaohongshu.cardGroupId = "group-a";
+  plugin.listCreationProjects = async () => [{
+    path: "Reading Capture/creation-projects/xhs-partial-view/project.md",
+    directory: "Reading Capture/creation-projects/xhs-partial-view",
+    title: "XHS partial",
+    platform: "xiaohongshu",
+    statusLabel: "内容审核",
+    primaryTitle: "Primary",
+    relatedTitles: [],
+    workflowState: state,
+    stageStates: creationWorkflow.deriveStageStates(state),
+    xhsCardsManifest: "",
+    tasks: [
+      { kind: "xhs.card-page", groupId: "group-a", childKey: "page-01", childLabel: "第 1 页 · 封面", skillId: "keke-social-card-skill", status: "awaiting_approval", outputs: ["Reading Capture/creation-projects/xhs-partial-view/deliverables/xiaohongshu/xiaohongshu-001/images/xhs-01.png"] },
+      { kind: "xhs.card-page", groupId: "group-a", childKey: "page-02", childLabel: "第 2 页 · 问题", skillId: "keke-social-card-skill", status: "failed", error: "中文断行失败", outputs: ["Reading Capture/creation-projects/xhs-partial-view/deliverables/xiaohongshu/xiaohongshu-001/images/xhs-02.png"], taskPath: "queue/page-02.json" },
+    ],
+  }];
+  await plugin.onload();
+  const view = registeredViews["reading-capture-creation-project"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+  const texts = fakeElementTexts(view.containerEl.children[1]);
+  assert.ok(texts.includes("逐页生成：1/2 页可审核。成功页面会保留，失败页面只重试自身。"));
+  assert.ok(texts.includes("中文断行失败"));
+  assert.ok(texts.includes("仅重试此页"));
+  assert.ok(!texts.includes("重试此任务"), "visual child failures must expose one authoritative inline retry action");
+  assert.ok(!texts.includes("取消任务"), "visual child failures must not duplicate generic task actions above the stage workspace");
+  const allElements = [];
+  const collect = (node) => { allElements.push(node); for (const child of node.children || []) collect(child); };
+  collect(view.containerEl.children[1]);
+  const batch = allElements.find((element) => element.tag === "button" && element.text === "确认当前页面集，启动整套视觉与文案质检");
+  assert.strictEqual(batch.disabled, true, "one failed page must block package QA without hiding the successful page");
+  const retry = allElements.find((element) => element.tag === "button" && element.text === "仅重试此页");
+  await retry.listeners.click();
+  assert.strictEqual(retried, "page-02");
+}
+
+async function testCreationProjectViewShowsEightStageEntryContract() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => { registeredViews[type] = factory; };
+  plugin.loadData = async () => null;
+  plugin.listCreationProjects = async () => [{
+    path: "Reading Capture/creation-projects/project-1/project.md",
+    directory: "Reading Capture/creation-projects/project-1",
+    title: "Project 1",
+    platform: "wechat",
+    statusLabel: "策划中",
+    primaryTitle: "Primary",
+    relatedTitles: [],
+    workflowState: creationWorkflow.createWorkflowState({
+      projectId: "project-1",
+      title: "Project 1",
+      workflowMode: "idea_creation",
+      activeDeliverable: "wechat",
+    }),
+    stageStates: {
+      relations: "current",
+      diagnosis: "blocked",
+      research: "blocked",
+      brief: "blocked",
+      plan: "blocked",
+      draft: "blocked",
+      visual: "blocked",
+      final: "blocked",
+    },
+    latestTask: null,
+  }];
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-creation-project"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+  const texts = fakeElementTexts(view.containerEl.children[1]);
+  for (const label of ["项目与灵感", "素材诊断", "研究与证据", "主简报审核", "平台内容方案", "内容审核", "视觉方案", "定稿与导出"]) {
+    assert.ok(texts.includes(label), `stage navigation should show ${label}`);
+  }
+  assert.ok(texts.includes("从创作灵感开始"));
+  assert.ok(texts.includes("我确认当前主灵感正确"));
+  assert.ok(texts.includes("我确认关联灵感范围正确"));
+  assert.ok(texts.includes("确认项目输入，进入素材诊断"));
+  assert.ok(!texts.includes("确认简报与提纲"), "stage one must not expose the legacy combined approval");
+}
+
+async function testCreationProjectViewShowsDiagnosisContract() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => { registeredViews[type] = factory; };
+  plugin.loadData = async () => null;
+  let selectedDecision = "";
+  plugin.chooseCreationResearchPath = async (_projectPath, decision) => { selectedDecision = decision; };
+  const workflowState = creationWorkflow.enterDiagnosis(creationWorkflow.createWorkflowState({
+    projectId: "project-2",
+    title: "Diagnosis",
+    workflowMode: "idea_creation",
+    activeDeliverable: "wechat",
+  }));
+  plugin.listCreationProjects = async () => [{
+    path: "Reading Capture/creation-projects/project-2/project.md",
+    directory: "Reading Capture/creation-projects/project-2",
+    title: "Diagnosis",
+    platform: "wechat",
+    statusLabel: "整理素材",
+    primaryTitle: "Primary",
+    relatedTitles: [],
+    workflowState,
+    stageStates: creationWorkflow.deriveStageStates(workflowState),
+  }];
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-creation-project"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+  const texts = fakeElementTexts(view.containerEl.children[1]);
+  for (const text of ["先看材料够不够，再决定是否研究", "补充本地材料", "直接进入研究配置", "本次不做联网研究", "我的补充材料", "联网研究指导"]) {
+    assert.ok(texts.includes(text), `diagnosis should show ${text}`);
+  }
+  const researchButton = fakeElementByText(view.containerEl.children[1], "直接进入研究配置");
+  assert.ok(researchButton && researchButton.listeners.click, "research action should be wired");
+  await researchButton.listeners.click();
+  assert.strictEqual(selectedDecision, "research");
+}
+
+async function testCreationTaskAlertsExplainRecoveryByWaitingReason() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => { registeredViews[type] = factory; };
+  plugin.loadData = async () => null;
+  plugin.listCreationProjects = async () => [{
+    path: "Reading Capture/creation-projects/project-alert/project.md",
+    directory: "Reading Capture/creation-projects/project-alert",
+    title: "Recovery",
+    platform: "wechat",
+    statusLabel: "等待处理",
+    primaryTitle: "Primary",
+    relatedTitles: [],
+    workflowState: creationWorkflow.createWorkflowState({ projectId: "project-alert", title: "Recovery", activeDeliverable: "wechat" }),
+    stageStates: {},
+    tasks: [
+      { status: "waiting_user", skillId: "missing-demo", waitingReason: "missing_skill", error: "skill not found" },
+      { status: "waiting_user", skillId: "upgrade-demo", waitingReason: "skill_permission_expansion", error: "permission expansion" },
+      { status: "waiting_user", skillId: "permission-demo", waitingReason: "credentials_or_permission", error: "permission denied" },
+    ],
+  }];
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-creation-project"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+  const texts = fakeElementTexts(view.containerEl.children[1]);
+  assert.ok(texts.includes("本机缺少任务锁定的 Skill 版本，或已安装内容未通过摘要校验。安装前可查看来源、固定版本、依赖和权限。"));
+  assert.ok(texts.includes("Skill 新版本扩大了读取、写入、联网或凭证权限。旧版本仍保留，新版本需重新批准后才能安装。"));
+  assert.ok(texts.includes("查看并安装固定版本"));
+  assert.ok(texts.includes("查看权限变化"));
+}
+
+function testPublicationReviewModalUsesWideCompactGrid() {
+  const main = fs.readFileSync(path.join(__dirname, "../plugin/main.js"), "utf8");
+  const css = fs.readFileSync(path.join(__dirname, "../plugin/styles.css"), "utf8");
+  assert.match(main, /class CreationPublicationReviewModal[\s\S]*?modalEl\.addClass\([^\n]*reading-capture-publication-review-shell/, "publication review should widen the modal shell, not only its inner content");
+  assert.match(css, /\.reading-capture-modal-shell\.reading-capture-publication-review-shell\s*\{[\s\S]*?width:\s*min\(920px/, "publication review shell should be wide enough for the two-column review grid");
+  assert.match(css, /\.reading-capture-publication-review-grid\s*\{[\s\S]*?grid-template-columns:\s*repeat\(2/, "publication review fields should remain a compact two-column grid on normal windows");
+}
+
+async function testCreationProjectViewShowsOrderedResearchAuthorizationContract() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => { registeredViews[type] = factory; };
+  plugin.loadData = async () => null;
+  const queuedResearchSkills = [];
+  plugin.queueCreationStageTask = async (_projectPath, kind, options) => { queuedResearchSkills.push([kind, options.skillId]); return {}; };
+  const base = creationWorkflow.enterDiagnosis(creationWorkflow.createWorkflowState({ projectId: "p3", title: "Research", activeDeliverable: "wechat" }));
+  const workflowState = creationWorkflow.chooseResearchDecision(base, "research");
+  plugin.listCreationProjects = async () => [{
+    path: "Reading Capture/creation-projects/p3/project.md",
+    directory: "Reading Capture/creation-projects/p3",
+    title: "Research",
+    platform: "wechat",
+    statusLabel: "研究配置",
+    primaryTitle: "Primary",
+    relatedTitles: [],
+    workflowState,
+    stageStates: creationWorkflow.deriveStageStates(workflowState),
+    tasks: [],
+  }];
+  await plugin.onload();
+  const view = registeredViews["reading-capture-creation-project"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+  const texts = fakeElementTexts(view.containerEl.children[1]);
+  const ordered = ["1. 选择研究能力", "2. 核对发送内容", "3. 选择本阶段如何结束"];
+  let last = -1;
+  for (const text of ordered) {
+    const index = texts.indexOf(text);
+    assert.ok(index > last, `${text} should appear in explicit order`);
+    last = index;
+  }
+  assert.ok(texts.includes("Deep Research Skills"));
+  assert.ok(texts.includes("Last30Days"));
+  assert.ok(texts.includes("查看完整发送清单"));
+  assert.ok(texts.includes("授权以上内容并开始研究"));
+  assert.ok(texts.includes("改变决定：本次不联网"));
+  const allElements = [];
+  const collect = (node) => { allElements.push(node); for (const child of node.children || []) collect(child); };
+  collect(view.containerEl.children[1]);
+  const start = allElements.find((element) => element.tag === "button" && element.text === "授权以上内容并开始研究");
+  const viewScope = allElements.find((element) => element.tag === "button" && element.text === "查看完整发送清单");
+  const authorization = allElements.find((element) => element.tag === "input" && element.attrs.type === "checkbox" && !element.attrs.value && element.checked !== true);
+  authorization.checked = true;
+  authorization.listeners.change();
+  assert.strictEqual(start.disabled, true, "authorization alone must not bypass scope review");
+  viewScope.listeners.click();
+  assert.strictEqual(start.disabled, false, "reviewing the scope after authorization must immediately enable the start action");
+  const selectedRoute = allElements.find((element) => element.tag === "input" && element.value === "deep-research-skills");
+  const disabledRoute = allElements.find((element) => element.tag === "input" && element.value === "last30days");
+  assert.strictEqual(disabledRoute.disabled, true, "unsafe optional research routes must be visibly unavailable before authorization");
+  delete selectedRoute.attrs;
+  await start.listeners.click();
+  assert.deepStrictEqual(queuedResearchSkills, [["research.evidence", "deep-research-skills"]], "the browser input value must be used without relying on fake attrs metadata");
+}
+
+async function testCreationProjectViewShowsBriefBeforeApproval() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => { registeredViews[type] = factory; };
+  plugin.loadData = async () => null;
+  let state = creationWorkflow.enterDiagnosis(creationWorkflow.createWorkflowState({ projectId: "p4", title: "Brief", activeDeliverable: "wechat" }));
+  state = creationWorkflow.chooseResearchDecision(state, "skip");
+  plugin.listCreationProjects = async () => [{
+    path: "Reading Capture/creation-projects/p4/project.md",
+    directory: "Reading Capture/creation-projects/p4",
+    title: "Brief",
+    platform: "wechat",
+    statusLabel: "受限简报",
+    primaryTitle: "Primary",
+    relatedTitles: [],
+    workflowState: state,
+    stageStates: creationWorkflow.deriveStageStates(state),
+    masterBrief: "# 创作简报\n\n核心判断：必须先建立可回滚机制。",
+    tasks: [{ kind: "brief.master", status: "awaiting_approval", attempts: 2, taskPath: "queue/brief.json", outputHashes: { brief: "hash-v2" } }],
+  }];
+  await plugin.onload();
+  const view = registeredViews["reading-capture-creation-project"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+  const texts = fakeElementTexts(view.containerEl.children[1]);
+  assert.ok(texts.includes("完整创作简报"));
+  const briefEditor = fakeElementsByClass(view.containerEl.children[1], "reading-capture-creation-brief-editor")[0];
+  assert.ok(briefEditor && briefEditor.value.includes("必须先建立可回滚机制"), "brief content must be visible before approval");
+  assert.ok(texts.includes("我已阅读完整简报"));
+  assert.ok(texts.includes("确认简报 AI 生成版 v2，进入平台方案"));
+  const approve = fakeElementByText(view.containerEl.children[1], "确认简报 AI 生成版 v2，进入平台方案");
+  assert.strictEqual(approve.disabled, true, "approval stays disabled until the visible brief is acknowledged");
+}
+
+async function testCreationProjectListUsesActiveDeliverableAndFriendlyWorkflowStatus() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = {
+    creationProjectRoot: "Reading Capture/creation-projects",
+    defaultWritingStyle: "keke",
+  };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "状态展示", kind: "manual" }, { platform: "wechat" });
+  let state = await plugin.loadCreationWorkflowState(project.directory);
+  state = {
+    ...state,
+    currentStage: "final",
+    activeDeliverable: "xiaohongshu",
+    deliverables: {
+      ...state.deliverables,
+      xiaohongshu: { ...state.deliverables.xiaohongshu, stage: "final", approvalVersion: "xhs-v1" },
+    },
+  };
+  await plugin.saveCreationWorkflowState(project.directory, state);
+
+  const [listed] = await plugin.listCreationProjects();
+  assert.strictEqual(listed.platform, "xiaohongshu", "the current-project badge follows the active deliverable, not the project's first platform");
+  assert.strictEqual(listed.statusLabel, "定稿与导出", "internal workflow slugs must never leak into the visible status badge");
+  assert.ok(!listed.statusLabel.includes("-"));
+}
+
+async function testCreationFinalStageMatchesInspectablePublishingPackageContract() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => { registeredViews[type] = factory; };
+  plugin.loadData = async () => null;
+  plugin.settings = {
+    creationProjectRoot: "Reading Capture/creation-projects",
+    wechatPublishingRoot: "Work/business/content-accounts/wechat",
+    xiaohongshuPublishingRoot: "Work/business/content-accounts/xiaohongshu",
+  };
+  const workflowState = creationWorkflow.createWorkflowState({
+    projectId: "final-xhs",
+    title: "最终包",
+    workflowMode: "article_repurpose",
+    activeDeliverable: "xiaohongshu",
+  });
+  workflowState.currentStage = "final";
+  workflowState.deliverables.xiaohongshu = {
+    ...workflowState.deliverables.xiaohongshu,
+    stage: "final",
+    cardVersion: "a".repeat(64),
+    captionVersion: "b".repeat(64),
+    visualQaVersion: "visual-qa-v1",
+    copyQaVersion: "copy-qa-v2",
+    approvalVersion: "package-v1",
+  };
+  plugin.listCreationProjects = async () => [{
+    path: "Reading Capture/creation-projects/final-xhs/project.md",
+    directory: "Reading Capture/creation-projects/final-xhs",
+    title: "最终包",
+    platform: "xiaohongshu",
+    statusLabel: "定稿与导出",
+    primaryTitle: "最终包",
+    relatedTitles: [],
+    workflowState,
+    stageStates: {
+      relations: "complete",
+      diagnosis: "skipped",
+      research: "skipped",
+      brief: "skipped",
+      plan: "complete",
+      draft: "complete",
+      visual: "complete",
+      final: "current",
+    },
+    xhsCaption: "这是一段很长、但不应直接铺满定稿页的发布文案。",
+    xhsImageFiles: Array.from({ length: 8 }, (_, index) => ({
+      name: `xhs-${String(index + 1).padStart(2, "0")}.png`,
+      path: `Reading Capture/creation-projects/final-xhs/images/xhs-${String(index + 1).padStart(2, "0")}.png`,
+    })),
+    latestPublication: {
+      platform: "xiaohongshu",
+      projectId: "final-xhs",
+      deliverableId: "xiaohongshu-001",
+      snapshotId: "snapshot-final-xhs",
+      targetDirectory: "Work/business/content-accounts/xiaohongshu/20260720_最终包",
+    },
+    tasks: [],
+  }];
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-creation-project"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+  const texts = fakeElementTexts(view.containerEl.children[1]);
+
+  for (const expected of [
+    "小红书定稿包将复制到独立发布目录",
+    "最终卡片 PNG",
+    "最终发布文案",
+    "来源与素材记录",
+    "阻塞问题",
+    "小红书发布包内容",
+    "导出前最后确认",
+    "预览小红书发布包",
+    "完成检查后创建快照",
+    "记录发布与复盘",
+  ]) assert.ok(texts.includes(expected), `final stage should show ${expected}`);
+  assert.ok(texts.includes("卡片已确认"));
+  assert.ok(texts.includes("文案已确认"));
+  assert.ok(!texts.some((text) => /\b[a-f0-9]{64}\b/u.test(text)), "content hashes are persistence details and must not appear as user-facing versions");
+  assert.ok(!texts.includes("这是一段很长、但不应直接铺满定稿页的发布文案。"), "the final stage summarizes the package instead of dumping the full article into the workspace");
+}
+
+async function testCreationProjectViewRefreshesWhileRunnerTaskIsActive() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => { registeredViews[type] = factory; };
+  plugin.loadData = async () => null;
+  const state = creationWorkflow.createWorkflowState({ projectId: "refresh", title: "自动刷新", activeDeliverable: "wechat" });
+  let loads = 0;
+  plugin.listCreationProjects = async () => {
+    loads += 1;
+    return [{
+      path: "Reading Capture/creation-projects/refresh/project.md",
+      directory: "Reading Capture/creation-projects/refresh",
+      title: "自动刷新",
+      platform: "wechat",
+      statusLabel: "项目与灵感",
+      primaryTitle: "自动刷新",
+      relatedTitles: [],
+      workflowState: state,
+      stageStates: creationWorkflow.deriveStageStates(state),
+      tasks: [{ kind: "diagnosis.materials", status: loads === 1 ? "running" : "awaiting_approval" }],
+    }];
+  };
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-creation-project"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.onOpen();
+  assert.strictEqual(loads, 1);
+  assert.ok(view.autoRefreshTimer && typeof view.autoRefreshTimer.callback === "function", "the view should monitor durable Runner task state");
+  await view.autoRefreshTimer.callback();
+  assert.strictEqual(loads, 2, "an active Runner task should refresh the view without requiring an Obsidian restart");
+  view.onClose();
+  assert.strictEqual(view.autoRefreshTimer, null);
+}
+
+async function testLocalSkillRunnerRejectsReusedPidBeforeStarting() {
+  const storage = new Map([
+    ["reading-capture:skill-runner:TestVault", "enabled"],
+    ["reading-capture:skill-runner:TestVault:pid", "4242"],
+  ]);
+  const localStorage = {
+    getItem(key) { return storage.has(key) ? storage.get(key) : null; },
+    setItem(key, value) { storage.set(key, String(value)); },
+    removeItem(key) { storage.delete(key); },
+  };
+  const launches = [];
+  const childProcess = {
+    execFileSync(command, args) {
+      if (command === "/bin/ps") {
+        assert.strictEqual(JSON.stringify(args), JSON.stringify(["-p", "4242", "-o", "command="]));
+        return "/Applications/Unrelated.app/Contents/MacOS/Unrelated\n";
+      }
+      assert.strictEqual(command, "/bin/zsh");
+      if (args[1] === "command -v node") return "/opt/homebrew/bin/node\n";
+      launches.push(args[1]);
+      return "5252\n";
+    },
+  };
+  const fakeProcess = {
+    execPath: "/Applications/Obsidian.app/Contents/MacOS/Obsidian",
+    env: {},
+    kill(pid, signal) {
+      assert.strictEqual(pid, 4242);
+      assert.strictEqual(signal, 0);
+    },
+  };
+  const PluginClass = loadPluginClass({ childProcess, localStorage, process: fakeProcess, dirname: "/Applications/Obsidian.app/Contents/Resources" });
+  const plugin = new PluginClass();
+  plugin.manifest = { id: "reading-capture" };
+  plugin.app = {
+    vault: {
+      getName() { return "TestVault"; },
+      adapter: { getBasePath() { return "/vault"; } },
+    },
+  };
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects" };
+  plugin.ensureLocalSkillRunnerOwnership = async () => ({ ownerDeviceId: "device-test", epoch: 1 });
+
+  await plugin.startLocalSkillRunner();
+  assert.strictEqual(launches.length, 1, "a live but unrelated reused PID must not suppress Runner startup");
+  assert.ok(launches[0].includes("/usr/bin/nohup '/opt/homebrew/bin/node'"), "the background Runner must resolve the login-shell Node runtime instead of relaunching Electron as Node");
+  assert.ok(launches[0].includes("'/vault/.obsidian/plugins/reading-capture/skill-runner.js'"));
+  assert.ok(launches[0].includes("--vault '/vault'"));
+  assert.ok(launches[0].includes("--creation-root 'Reading Capture/creation-projects'"));
+  assert.ok(launches[0].includes("--device-id 'device-test'"));
+  assert.ok(launches[0].includes("--epoch '1'"));
+  assert.strictEqual(storage.get("reading-capture:skill-runner:TestVault:pid"), "5252");
+}
+
+async function testLocalSkillRunnerClearsExitedChildAndCanRestart() {
+  const storage = new Map([["reading-capture:skill-runner:TestVault", "enabled"]]);
+  const localStorage = {
+    getItem(key) { return storage.has(key) ? storage.get(key) : null; },
+    setItem(key, value) { storage.set(key, String(value)); },
+    removeItem(key) { storage.delete(key); },
+  };
+  const launches = [];
+  const childProcess = {
+    execFileSync(command, args) {
+      if (command === "/bin/zsh" && args[1] === "command -v node") return "/opt/homebrew/bin/node\n";
+      if (command === "/bin/zsh") {
+        launches.push(args[1]);
+        return `${6000 + launches.length - 1}\n`;
+      }
+      if (command === "/bin/ps") return "";
+      throw new Error(`Unexpected command: ${command}`);
+    },
+  };
+  const fakeProcess = {
+    env: {},
+    kill(pid, signal) {
+      assert.strictEqual(signal, 0);
+      if (pid >= 6000) throw new Error("exited");
+    },
+  };
+  const PluginClass = loadPluginClass({ childProcess, localStorage, process: fakeProcess, dirname: "/Applications/Obsidian.app/Contents/Resources" });
+  const plugin = new PluginClass();
+  plugin.manifest = { id: "reading-capture" };
+  plugin.app = {
+    vault: {
+      getName() { return "TestVault"; },
+      adapter: { getBasePath() { return "/vault"; } },
+    },
+  };
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects" };
+  plugin.ensureLocalSkillRunnerOwnership = async () => ({ ownerDeviceId: "device-test", epoch: 1 });
+
+  await plugin.startLocalSkillRunner();
+  assert.strictEqual(launches.length, 1);
+  assert.strictEqual(storage.get("reading-capture:skill-runner:TestVault:pid"), "6000");
+  await plugin.startLocalSkillRunner();
+  assert.strictEqual(launches.length, 2, "a later watchdog or user action must be able to restart an exited Runner");
+  assert.strictEqual(storage.get("reading-capture:skill-runner:TestVault:pid"), "6001");
+  const status = JSON.parse(storage.get("reading-capture:skill-runner:TestVault:status"));
+  assert.strictEqual(status.state, "running");
+  assert.ok(status.logPath.includes("reading-capture-skill-runner-TestVault.log"));
+}
+
+async function testLocalSkillRunnerReplacesLegacyUnfencedProcess() {
+  const storage = new Map([["reading-capture:skill-runner:TestVault:pid", "4242"]]);
+  const localStorage = {
+    getItem(key) { return storage.has(key) ? storage.get(key) : null; },
+    setItem(key, value) { storage.set(key, String(value)); },
+    removeItem(key) { storage.delete(key); },
+  };
+  let launched = 0;
+  const signals = [];
+  const childProcess = {
+    execFileSync(command, args) {
+      if (command === "/bin/ps") return "/opt/homebrew/bin/node /vault/.obsidian/plugins/reading-capture/skill-runner.js --vault /vault --creation-root 'Reading Capture/creation-projects'\n";
+      if (args[1] === "command -v node") return "/opt/homebrew/bin/node\n";
+      launched += 1;
+      return "5252\n";
+    },
+  };
+  const fakeProcess = {
+    env: {},
+    kill(pid, signal) {
+      assert.strictEqual(pid, 4242);
+      signals.push(signal);
+    },
+  };
+  const PluginClass = loadPluginClass({ childProcess, localStorage, process: fakeProcess, dirname: "/Applications/Obsidian.app/Contents/Resources" });
+  const plugin = new PluginClass();
+  plugin.manifest = { id: "reading-capture" };
+  plugin.app = { vault: { getName() { return "TestVault"; }, adapter: { getBasePath() { return "/vault"; } } } };
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects" };
+  plugin.ensureLocalSkillRunnerOwnership = async () => ({ ownerDeviceId: "device-test", epoch: 7 });
+
+  await plugin.startLocalSkillRunner();
+  assert.ok(signals.includes("SIGTERM"), "a legacy process without fencing arguments must be retired before upgrade");
+  assert.strictEqual(launched, 1);
+  assert.strictEqual(storage.get("reading-capture:skill-runner:TestVault:pid"), "5252");
+}
+
+async function testLocalSkillRunnerRestartsWhenDeployedScriptChanges() {
+  const storage = new Map([
+    ["reading-capture:skill-runner:TestVault", "enabled"],
+    ["reading-capture:skill-runner:TestVault:pid", "4242"],
+    ["reading-capture:skill-runner:TestVault:status", JSON.stringify({ state: "running", pid: 4242, scriptDigest: "old-digest" })],
+  ]);
+  const localStorage = {
+    getItem(key) { return storage.has(key) ? storage.get(key) : null; },
+    setItem(key, value) { storage.set(key, String(value)); },
+    removeItem(key) { storage.delete(key); },
+  };
+  const signals = [];
+  let launched = 0;
+  const childProcess = {
+    execFileSync(command, args) {
+      if (command === "/bin/ps") return "/opt/homebrew/bin/node /vault/.obsidian/plugins/reading-capture/skill-runner.js --vault /vault --creation-root 'Reading Capture/creation-projects' --device-id device-test --epoch 7\n";
+      if (args[1] === "command -v node") return "/opt/homebrew/bin/node\n";
+      launched += 1;
+      return "5252\n";
+    },
+  };
+  const fakeProcess = {
+    env: {},
+    kill(pid, signal) {
+      assert.strictEqual(pid, 4242);
+      signals.push(signal);
+    },
+  };
+  const PluginClass = loadPluginClass({ childProcess, localStorage, process: fakeProcess, dirname: "/Applications/Obsidian.app/Contents/Resources" });
+  const plugin = new PluginClass();
+  plugin.manifest = { id: "reading-capture" };
+  plugin.app = { vault: { getName() { return "TestVault"; }, adapter: { getBasePath() { return "/vault"; } } } };
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects" };
+  plugin.ensureLocalSkillRunnerOwnership = async () => ({ ownerDeviceId: "device-test", epoch: 7 });
+  plugin.localSkillRunnerScriptDigest = () => "new-digest";
+
+  await plugin.startLocalSkillRunner();
+  assert.ok(signals.includes("SIGTERM"), "deploying a changed Runner script must retire the still-running old process");
+  assert.strictEqual(launched, 1);
+  assert.strictEqual(storage.get("reading-capture:skill-runner:TestVault:pid"), "5252");
+  assert.strictEqual(JSON.parse(storage.get("reading-capture:skill-runner:TestVault:status")).scriptDigest, "new-digest");
+}
+
+async function testViewedCreationStageControlsNavigationHighlight() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => { registeredViews[type] = factory; };
+  plugin.loadData = async () => null;
+  const workflowState = creationWorkflow.createWorkflowState({ projectId: "viewed", title: "Viewed", activeDeliverable: "wechat" });
+  workflowState.currentStage = "diagnosis";
+  plugin.listCreationProjects = async () => [{
+    path: "Reading Capture/creation-projects/viewed/project.md",
+    directory: "Reading Capture/creation-projects/viewed",
+    title: "Viewed",
+    platform: "wechat",
+    statusLabel: "素材诊断",
+    primaryTitle: "Viewed",
+    relatedTitles: [],
+    workflowState,
+    stageStates: Object.fromEntries(creationWorkflow.WORKFLOW_STAGES.map((stage) => [stage.id, stage.id === "relations" ? "complete" : stage.id === "diagnosis" ? "current" : "blocked"])),
+    tasks: [],
+  }];
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-creation-project"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+  const buttons = fakeElementsByTag(view.containerEl.children[1], "button");
+  const relationsButton = buttons.find((button) => fakeElementTexts(button).includes("项目与灵感"));
+  assert.ok(relationsButton && relationsButton.listeners.click);
+  await relationsButton.listeners.click();
+  const viewedButtons = fakeElementsByClass(view.containerEl.children[1], "is-viewed");
+  assert.strictEqual(viewedButtons.length, 1);
+  assert.ok(fakeElementTexts(viewedButtons[0]).includes("项目与灵感"), "the navigation highlight must identify the stage whose canvas is visible");
+}
+
+async function testLocalRunnerOwnershipRequiresRelinquishmentBeforeTransfer() {
+  const storageA = new Map();
+  const storageB = new Map();
+  const makeStorage = (store) => ({
+    getItem(key) { return store.has(key) ? store.get(key) : null; },
+    setItem(key, value) { store.set(key, String(value)); },
+    removeItem(key) { store.delete(key); },
+  });
+  const { app, files } = makeFakeApp();
+  app.vault.getName = () => "SharedVault";
+  app.vault.adapter.getBasePath = () => "/vault";
+  const PluginA = loadPluginClass({ localStorage: makeStorage(storageA) });
+  const pluginA = new PluginA();
+  pluginA.app = app;
+  pluginA.settings = { creationProjectRoot: "Reading Capture/creation-projects" };
+  const ownerA = await pluginA.ensureLocalSkillRunnerOwnership();
+  assert.strictEqual(ownerA.epoch, 1);
+  assert.strictEqual(ownerA.state, "active");
+  assert.ok(ownerA.ownerDeviceId);
+
+  const PluginB = loadPluginClass({ localStorage: makeStorage(storageB) });
+  const pluginB = new PluginB();
+  pluginB.app = app;
+  pluginB.settings = { creationProjectRoot: "Reading Capture/creation-projects" };
+  await assert.rejects(() => pluginB.ensureLocalSkillRunnerOwnership(), /另一台电脑/u);
+
+  await pluginA.relinquishLocalSkillRunnerOwnership();
+  const ownerB = await pluginB.ensureLocalSkillRunnerOwnership();
+  assert.strictEqual(ownerB.epoch, 2);
+  assert.notStrictEqual(ownerB.ownerDeviceId, ownerA.ownerDeviceId);
+  const ownerRecord = JSON.parse(files.get("Reading Capture/creation-projects/_runner/owner.json").content);
+  assert.strictEqual(ownerRecord.ownerDeviceId, ownerB.ownerDeviceId);
+  assert.strictEqual(ownerRecord.state, "active");
 }
 
 async function testVersionPathTooltipAndCopy() {
@@ -2304,6 +4383,58 @@ testCaptureWritesAnnotationAndIndex()
   .then(testOpenLibraryVersionUsesReaderForMarkdownAndObsidianForPdf)
   .then(testTopicPoolOpensBestArticleFromDirectorySource)
   .then(testGenericDefaultSettings)
+  .then(testCreationProjectCreateAppendAndList)
+  .then(testCreationProjectListExcludesRunnerWorkspaceCopies)
+  .then(testConfirmCreationRelationsPersistsDiagnosisStage)
+  .then(testCreationCoordinationWritesDoNotDependOnVaultModifyCache)
+  .then(testRunnerTaskStatusBypassesStaleVaultCache)
+  .then(testRunnerTasksFallBackToVaultIndexWhenAdapterListingLags)
+  .then(testRunnerAcceptsRelativeAdapterListings)
+  .then(testProjectLoadsTaskFromDurableReferenceWithoutQueueListing)
+  .then(testCreationProjectVisualFilesUseNaturalFilenameOrder)
+  .then(testProjectRecoversTaskReferenceFromRunHistory)
+  .then(testProjectReadsMarkdownRunReceiptWhenJsonIsNotIndexed)
+  .then(testRunnerResultReceiptRecoversStaleQueueFile)
+  .then(testWorkflowStateBypassesStaleVaultCache)
+  .then(testProjectStatusRecoversLaggingWorkflowStage)
+  .then(testRelatedInspirationCanBeUnlinkedWithoutRemovingPrimary)
+  .then(testManualArtifactEditCreatesNamedVersionAndUpdatesApprovalTarget)
+  .then(testAiRevisionSupersedesStaleQualityCheck)
+  .then(testXhsCaptionRevisionNeverRegeneratesAcceptedCards)
+  .then(testFailedQaCanReturnProjectToResearchConfiguration)
+  .then(testFinalExportCreatesImmutableNamedSnapshot)
+  .then(testXhsFinalExportUsesCanonicalPublishingPackage)
+  .then(testConcurrentSnapshotExportReservesDistinctVersionDirectories)
+  .then(testExportWriteFailureNeverExposesPartialSnapshotAsFinal)
+  .then(testPublicationReviewProjectsIdempotentTopicMinerFeedback)
+  .then(testCreationResearchDecisionPersistsDistinctPaths)
+  .then(testParallelResearchRoutesKeepOutputsSeparateAndMergeOnAcceptance)
+  .then(testGeneratedDiagnosisCanAdvanceWhenLegacyTaskReceiptIsMissing)
+  .then(testTaskVersionLabelsDoNotExposeContentHashes)
+  .then(testCreationStageTasksUseExplicitContractsAndAuthorization)
+  .then(testLegacyPlanningEntryRoutesToDiagnosisOnly)
+  .then(testSkippingResearchQueuesRestrictedBriefCandidate)
+  .then(testRepurposeSourceSearchIsMetadataOnlyAndReadsAfterConfirmation)
+  .then(testXhsPlanRendersGeneratedProposalsInsteadOfHardcodedCards)
+  .then(testXhsTaskChainUsesApprovedPlanAndIndependentDualQa)
+  .then(testWechatVisualChildrenRetainSuccessRetryFailureAndBlockFinalization)
+  .then(testXhsCardChildrenRetainSuccessfulPagesAndRetryOnlyFailure)
+  .then(testCreationViewExposesPerItemVisualRecoveryWithoutDiscardingSuccess)
+  .then(testCreationProjectViewShowsEightStageEntryContract)
+  .then(testCreationProjectViewShowsDiagnosisContract)
+  .then(testCreationTaskAlertsExplainRecoveryByWaitingReason)
+  .then(testPublicationReviewModalUsesWideCompactGrid)
+  .then(testCreationProjectViewShowsOrderedResearchAuthorizationContract)
+  .then(testCreationProjectViewShowsBriefBeforeApproval)
+  .then(testCreationProjectListUsesActiveDeliverableAndFriendlyWorkflowStatus)
+  .then(testCreationFinalStageMatchesInspectablePublishingPackageContract)
+  .then(testCreationProjectViewRefreshesWhileRunnerTaskIsActive)
+  .then(testLocalSkillRunnerRejectsReusedPidBeforeStarting)
+  .then(testLocalSkillRunnerClearsExitedChildAndCanRestart)
+  .then(testLocalSkillRunnerReplacesLegacyUnfencedProcess)
+  .then(testLocalSkillRunnerRestartsWhenDeployedScriptChanges)
+  .then(testViewedCreationStageControlsNavigationHighlight)
+  .then(testLocalRunnerOwnershipRequiresRelinquishmentBeforeTransfer)
   .then(testVersionPathTooltipAndCopy)
   .then(testReaderSidebarKeepsAnnotationNavigationFocused)
   .then(testReaderPreservesExpandedDetailsAndPositionAfterRefresh)

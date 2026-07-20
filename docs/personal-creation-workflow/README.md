@@ -4,7 +4,7 @@ Status: approved V1 design baseline
 
 Branch: `personal/topic-miner`
 
-Last updated: 2026-07-19
+Last updated: 2026-07-20
 
 ## Purpose
 
@@ -28,8 +28,11 @@ The written rules remain authoritative for behavior, persistence, validation, an
 | Document | Responsibility |
 |---|---|
 | `personal-topic-miner-creation-workflow-design.md` | Product and technical design for projects, Tasks, Artifacts, Approvals, Runner, Skills, storage, export, security, and V1 scope |
+| `skill-runtime-security-audit.md` | Pinned-source dependency, environment-secret, network and remaining sandbox audit for all seven managed Skills |
 | `interaction-spec.md` | Eight-stage information architecture, user actions, review gates, platform branches, editing rules, visual semantics, error states, and navigation behavior |
 | `path-validation-matrix.md` | End-to-end scenarios, expected transitions, blocking conditions, and development acceptance evidence |
+| `implementation-plan.md` | Design-to-code mapping, existing-code disposition, TDD slices, evidence requirements, and commit boundaries |
+| `progress-2026-07-20.md` | Latest implementation status, real-environment evidence, remaining acceptance gaps, and restart point |
 
 ## Approved prototype
 
@@ -49,11 +52,14 @@ stage=relations | diagnosis | research | brief | plan | draft | visual | final
 
 The prototype is the approved visual baseline, not executable product logic. The real Creation Project view must reproduce its layout, dimensions and proportions, spacing, typography, colors, borders, control hierarchy, labels, stage presentation, and visible states 1:1. It uses temporary browser state and simulated results, so the real implementation must additionally persist project truth in the Vault and execute work through durable Tasks. Product data, browser chrome, and temporary prototype-only simulation controls are not visual product requirements.
 
+The frozen prototype, eight stage screenshots regenerated from that final HTML, the approved detach dialog, 1105 × 768 reference viewport, and SHA-256 manifest are versioned under [`baseline/`](baseline/). `release:check` fails if any approved baseline asset changes without an explicit manifest update. Early screenshots that predate the final entry and platform-flow revisions are kept under `baseline/superseded/` and are not acceptance references. Real Obsidian captures are kept separately under `baseline/actual-2026-07-20/` so product data and application chrome are never mistaken for the reference design.
+
 ## Core approved decisions
 
 - Obsidian is the control surface. The user must not reopen Codex to continue a project.
 - The Vault is the durable source of project, Task, Artifact, version, Approval, and export state.
 - Skill Runner orchestrates existing Skills; it does not reimplement research, writing, or visual generation.
+- Each new Runner Task carries a registry-approved immutable Skill requirement. The registry preserves approved historical manifests so old projects remain reinstallable after catalog upgrades, while unknown or modified manifests are rejected. First-use installation goes into Reading Capture's machine-local runtime, verifies the copied content digest, and never mutates the interactive global Codex profile. A broader permission envelope pauses only the affected Task and requires a new machine approval.
 - V1 executes Codex Skills only. Claude Code, Hermes, and OpenClaw are future adapters.
 - A project has one primary inspiration and may have multiple related inspirations.
 - A project may contain independent WeChat and Xiaohongshu Deliverables at different stages.

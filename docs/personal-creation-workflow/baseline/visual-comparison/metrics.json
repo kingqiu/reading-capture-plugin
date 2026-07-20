@@ -1,0 +1,58 @@
+[
+  {
+    "stage": "01-relations",
+    "width": 1105,
+    "height": 681,
+    "mae": 0.071,
+    "rms": 0.1672
+  },
+  {
+    "stage": "02-diagnosis",
+    "width": 1105,
+    "height": 681,
+    "mae": 0.0649,
+    "rms": 0.1597
+  },
+  {
+    "stage": "03-research",
+    "width": 1105,
+    "height": 681,
+    "mae": 0.0646,
+    "rms": 0.1546
+  },
+  {
+    "stage": "04-brief",
+    "width": 1105,
+    "height": 681,
+    "mae": 0.0708,
+    "rms": 0.167
+  },
+  {
+    "stage": "05-plan",
+    "width": 1105,
+    "height": 681,
+    "mae": 0.0695,
+    "rms": 0.1664
+  },
+  {
+    "stage": "06-draft",
+    "width": 1105,
+    "height": 681,
+    "mae": 0.0717,
+    "rms": 0.1684
+  },
+  {
+    "stage": "07-visual",
+    "width": 1105,
+    "height": 681,
+    "mae": 0.0688,
+    "rms": 0.1651
+  },
+  {
+    "stage": "08-final",
+    "width": 1105,
+    "height": 681,
+    "mae": 0.0589,
+    "rms": 0.1528
+  }
+]

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "approvedAt": "2026-07-19",
+  "viewport": {
+    "width": 1105,
+    "height": 768
+  },
+  "files": {
+    "01-project-inspirations.png": "73c5ed1e3047da6fbf1f7480a0bd3aee819cd5fa2ebfded6f6c7b27e7cc6b26f",
+    "02-material-diagnosis.png": "dc77f24ecd9a23235625febfc64b26ce999779444c40fb5cece664b4dae71f37",
+    "03-research-control.png": "dca149b72c486761bc8c45f086068574cba1c85adbd7416a8279cedce7a10ff7",
+    "04-master-brief-review.png": "74929b2fe5ae7804199baa0d49b3bc741cea4a08084a0d0eb4897c87cf8d2591",
+    "05-platform-plan.png": "78ced95633c149242fbb7c7de00f7ae9a9b2ace01c775d18c6b0a46f7c8ddb52",
+    "06-content-review.png": "fa0d54a84479b4845f21b1e4737a427ce1c40dc219f330c077a1016c2867bf18",
+    "07-visual-plan.png": "ded9838dd6b1e659f51453afbc90a1774c18d73d2297619b7d1011373a8077e4",
+    "08-final-export.png": "ea2f88aefde8080bd85cf779c2d1eceee8327b531b894ab21520bc70dd1d93f6",
+    "09-detach-impact-dialog.jpeg": "1d1f5965dd76e168a6209f8b8edef5b18ebe771c957ff3ec8de727177669110c",
+    "creation-workflow-prototype.html": "33d7123c649b13b4d542a34f68ca55018193a830a7ae8a091a846066c27d79bd"
+  }
+}

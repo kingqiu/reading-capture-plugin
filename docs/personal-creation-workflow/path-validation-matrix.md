@@ -1,10 +1,22 @@
 # Creation Workflow Path Validation Matrix
 
-Status: V1 pre-development acceptance baseline
+Status: V1 implementation verification in progress
 
 Branch: `personal/topic-miner`
 
-Last updated: 2026-07-19
+Last updated: 2026-07-20
+
+## 0. 2026-07-20 verification status
+
+- W8 passed in the real Obsidian view with a controlled partial-failure fixture: confirmed images remained openable, the failed child exposed only `仅重试这张图`, and final acceptance stayed blocked.
+- W9 passed in the same fixture: a changed text dependency marked only the affected image stale and required an individual rerun; unaffected images remained available.
+- X9 passed in the real Obsidian view: two successful pages remained openable, one failed page exposed only `仅重试此页`, and package QA stayed disabled until every page was ready.
+- The generic task-alert renderer no longer duplicates the per-image/per-page recovery action above the stage-specific controls.
+- A real managed Keke Social Card Task completed end to end through Runner, the pinned Skill/runtime, Playwright and Chromium, producing a valid `1080 × 1440` PNG and receipt.
+- A real managed WeChat illustration Task completed end to end through Runner and the pinned 小小克 Skill, producing a valid 16:9 PNG and receipt.
+- Eight-stage real Obsidian captures were repeated at a calibrated 100% application zoom. The plugin content viewport and frozen prototype reference are archived separately; all comparison images use the same `1105 px` width. Dynamic project copy and persisted completion state are explicitly excluded from pixel-threshold claims.
+- E3 atomic export failure is covered by deterministic failure injection: the source project remains intact, no partial final directory is exposed, and the staging directory retains `_EXPORT_INCOMPLETE.json`.
+- C4 ownership fencing, lease recovery and stale epoch rejection are covered by automated multi-device simulations. A physical second-Mac handoff remains an environmental acceptance item, not an untested code path presented as complete.
 
 ## 1. Purpose
 
@@ -367,8 +379,30 @@ Every milestone also verifies:
 - generic bundle contains no personal directory defaults;
 - generic plugin works in a clean Vault without Codex or Runner.
 
-## 9. Current pre-code tabletop result
+## 9. Current implementation evidence
 
-The approved prototype and written design now cover the successful branches for W1–W6, X1–X7, and C1–C5, plus visible recovery intent for W7–W9, X8–X9, R1–R5, and E1–E3.
+Automated coverage and real-Vault exercises now establish the following implementation evidence:
 
-These are design results, not implementation evidence. Every row remains pending until exercised against real plugin code and real Vault files.
+- WeChat idea creation has run through diagnosis, two research routes, merged evidence, brief, outline, repeated draft/QA improvement, real illustration generation, final export structure, and immutable snapshot handling.
+- Xiaohongshu native and saved-article paths cover source reuse, three generated proposals, approved-plan binding, full package creation, independent visual/copy QA at the 95 threshold, and canonical publishing-package export.
+- Concurrent export produces the base directory and `_v2` without overwriting.
+- Export writes the complete package into a uniquely named staging directory and only exposes the final directory through one adapter rename after every file and both manifests succeed. A pre-promotion failure leaves `_EXPORT_INCOMPLETE.json` in staging and never exposes a partial final snapshot.
+- Publication review is append-only and idempotent; revisions link to their previous record, preserve the immutable snapshot, and project the latest per-inspiration feedback for Topic Miner.
+- Plugin reload leaves exactly one background Runner. The active process includes the registered device ID and fencing epoch; the synchronized owner heartbeat remains active.
+- Runner tests cover owner fencing, leases, same-owner expired-lease recovery, foreign-owner blocking, three-attempt retry/backoff, cancellation-before-promotion, and synchronized-record redaction.
+- New Tasks lock an allowlisted Skill source, immutable version, artifact digest, manifest digest, declared dependencies, and permission envelope in `project-lock.yaml`. The allowlist retains immutable historical manifests, so an existing Task can reinstall and run its exact approved version after the current catalog advances; a same-ID manifest not present in that history is rejected. The machine-local manager installs into an isolated Reading Capture runtime, verifies before and after copying, retains previous digests after failed upgrades, and never writes its install path or machine approval metadata into synchronized Task state.
+- The Runner refuses missing, tampered, or registry-mismatched managed Skills before creating an Attempt. Permission expansion is computed per read/write/network/secret category and requires a new approval while the previous installed digest remains intact.
+- The real Creation Project view and publication-review modal were visually inspected in Obsidian against the approved design structure. The latest modal uses a compact 920 px shell, three-column metadata row, two-column review fields, and visible save action.
+- Runner Attempts persist input SHA-256 values; accepted outputs append immutable Artifact-version records with dependency hashes and exact Approval targets. Manual versions persist real content SHA-256 values. Platform-specific invalidation does not rewind the other platform.
+- The final prototype and stage screenshots are frozen at 1105×768 with checked hashes. Real eight-stage captures and a deterministic difference-report tool are archived separately.
+- Release checks inspect the generic `main` branch and reject personal workflow, Runner, directory, or Skill markers in its source and runtime list.
+
+Still pending formal acceptance evidence:
+
+- R2/R3's managed installation, pinned source/version/digests, permission-difference presentation, explicit installation approval, failed-upgrade retention, and machine-state redaction are implemented. Keke's Playwright packages and exact Chromium executable digest are locked; Academic Research Suite's Python dependency closure is locked and verified; NPM provisioning uses an ignore-scripts install and checks actual versions. Browser digest failure cleanup, undeclared-secret subprocess isolation, escaping-path rejection and declared-output-only promotion are covered by tests. Formal closure still requires the Keke real managed install once external execution is available, the narrow Last30Days profile, and a real-app exercise of both the missing-Skill and permission-expansion dialogs.
+- Generic source/package isolation is automated, but a separate clean-Vault generic build installation remains outstanding.
+- The pixel-diff harness and archived sets exist. A formal passing pixel gate still requires content-only Obsidian captures at exactly 1105×768 with fixture data normalized to the prototype; current whole-window captures intentionally fail dimension validation.
+- Full cross-machine transfer has been implemented as relinquish plus epoch increment and tested at the ownership-record level, but has not been exercised on a second physical computer.
+- E3 now has deterministic fault-injection coverage for a mid-export write failure and verifies source preservation, absence of a partial final directory, and an identifiable staging marker. W8/W9, X9, and an E3 real-app demonstration still need deliberate real-app fault injection.
+
+No scenario should be called fully accepted solely from the above summary. The detailed evidence rules in section 2 remain the acceptance gate.
