@@ -167,6 +167,8 @@ function testRunnerBuildsStageSpecificPrompts() {
   const briefPrompt = runner.buildPrompt(briefTask, projectDirectory);
   assert.match(briefPrompt, /\$writing-styles/);
   assert.match(briefPrompt, /创作简报/);
+  assert.match(briefPrompt, /可选 growth 元数据/);
+  assert.match(briefPrompt, /不得要求补填/);
   assert.doesNotMatch(briefPrompt, /联网研究/);
 
   const qaTask = makeTask({

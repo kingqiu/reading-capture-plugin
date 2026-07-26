@@ -22,6 +22,7 @@ const TASK_REGISTRY = Object.freeze({
       "完成材料诊断、创作简报与首个平台提纲。",
       "1. diagnosis.md 必须给出 D0-D3 材料成熟度、已有证据、缺口、风险与建议研究路线。",
       "2. master-brief.md 必须包含目标读者、核心判断、读者价值、主灵感与关联灵感、证据与缺口、平台角度、禁止夸大的表述。",
+      "2a. 如果输入材料包含 Topic miner 的可选 growth 元数据，保留内容任务、首要读者动作、平台角色、栏目关系和待验证假设；字段缺失时继续流程，不得阻塞旧项目。",
       "3. outline.md 必须给出与项目首个平台匹配的结构，并标注每节所依赖的素材或证据。",
       "4. 不生成初稿，不生成图片，不假装已经完成联网研究。",
     ],
@@ -49,6 +50,7 @@ const TASK_REGISTRY = Object.freeze({
     instruction: [
       "基于已确认的项目关系、材料诊断和研究证据生成创作简报。",
       "创作简报必须包含内容定位、核心判断、目标读者、读者价值、证据边界、平台方向与禁止夸大的表述。",
+      "如果上游提供可选 growth 元数据，将其作为内容增长任务附加段落写入简报；没有 growth 元数据时不得要求补填，也不得改变现有产物契约。",
       "只生成简报，不生成平台提纲、初稿或图片。",
     ],
   },
@@ -838,6 +840,11 @@ async function executeTask(taskPath, task, options) {
     await appendJsonl(eventsPath, { event: "outputs-validated", at: completedAt, outputHashes });
     return waiting;
   } catch (error) {
+    if (error && error.code === "ENOENT") {
+      error.retryable = false;
+      error.waitingReason = "codex_unavailable";
+      error.message = `找不到 Codex CLI：${options.codex}。请安装或重新启用 Codex CLI 后重试。`;
+    }
     const failedAt = nowIso(options);
     const retryable = error && error.retryable !== false && attempt < 3;
     const terminalWaiting = Boolean(error && error.waitingReason);

@@ -192,6 +192,37 @@ function reopenResearch(state) {
   };
 }
 
+function restoreContentReviewAfterResearchReturn(state, researchVersion) {
+  if (!state || state.workflowMode !== "idea_creation" || state.currentStage !== "research") {
+    throw new Error("content review recovery requires the research stage");
+  }
+  const platform = state.activeDeliverable;
+  if (!state.deliverables[platform]) throw new Error("active deliverable is missing");
+  const stageOverrides = { ...(state.stageOverrides || {}) };
+  for (const stage of ["brief", "plan", "draft"]) delete stageOverrides[stage];
+  return {
+    ...state,
+    currentStage: "draft",
+    briefMode: "evidence_backed",
+    research: {
+      ...state.research,
+      decision: "research",
+      taskState: "accepted",
+      acceptedResultVersion: String(researchVersion || state.research && state.research.acceptedResultVersion || "restored"),
+    },
+    stageOverrides,
+    deliverables: {
+      ...state.deliverables,
+      [platform]: {
+        ...state.deliverables[platform],
+        stage: "draft",
+        taskState: "qa_review",
+        staleStages: ["visual", "final"],
+      },
+    },
+  };
+}
+
 function approveMasterBrief(state, version) {
   if (!state || state.currentStage !== "brief") throw new Error("master brief approval requires the brief stage");
   if (!String(version || "").trim()) throw new Error("master brief version is required");
@@ -403,6 +434,7 @@ module.exports = {
   normalizeWorkflowState,
   recordDeliverableVersions,
   reopenResearch,
+  restoreContentReviewAfterResearchReturn,
   selectRepurposeSource,
   startRepurposeWorkflow,
   setStageOverride,

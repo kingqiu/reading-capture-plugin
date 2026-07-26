@@ -174,6 +174,7 @@ function makeFakeApp() {
   return {
     sourceFile,
     files,
+    folders,
     app: {
       vault,
       metadataCache: {
@@ -217,6 +218,7 @@ function makeFakeElement(tag = "div") {
     children: [],
     dataset: {},
     listeners: {},
+    emptyCalls: 0,
     disabled: false,
     value: "",
     scrollTop: 0,
@@ -227,6 +229,7 @@ function makeFakeElement(tag = "div") {
       },
     },
     empty() {
+      this.emptyCalls += 1;
       this.children = [];
       this.text = "";
     },
@@ -1125,6 +1128,14 @@ async function testTopicPoolPrefersTopicMinerProjectionJsonWhenAvailable() {
           duplicateRisk: "中",
           timing: "先补材料",
           firstAction: "先列出 Meta 的时间线。",
+          growth: {
+            contentRole: "专业定位型",
+            targetAction: "收藏",
+            platformFit: ["wechat", "xiaohongshu"],
+            seriesRelation: "AI 转型案例",
+            accountPromise: "持续拆解 AI 落地中的真实案例",
+            growthHypothesis: "真实案例比抽象判断更适合建立定位",
+          },
           sourcePaths: ["Learning/web/articles/meta-90-days/article_zh.md"],
           sourceLabels: ["Meta 工程组织解构"],
           updatedAt: "2026-07-09",
@@ -1163,6 +1174,12 @@ async function testTopicPoolPrefersTopicMinerProjectionJsonWhenAvailable() {
   assert.strictEqual(topics[0].sourceTitle, "Meta 工程组织解构");
   assert.strictEqual(topics[0].feedback, "想写");
   assert.strictEqual(topics[0].feedbackNote, "补一组组织转型材料。");
+  assert.strictEqual(topics[0].growth.contentRole, "专业定位型");
+  assert.strictEqual(topics[0].growth.targetAction, "收藏");
+  assert.deepStrictEqual([...topics[0].growth.platformFit], ["wechat", "xiaohongshu"]);
+  assert.strictEqual(topics[0].growth.seriesRelation, "AI 转型案例");
+  assert.strictEqual(topics[0].growth.accountPromise, "持续拆解 AI 落地中的真实案例");
+  assert.strictEqual(topics[0].growth.growthHypothesis, "真实案例比抽象判断更适合建立定位");
 }
 
 function testTopicMinerReportParsesBulletedSourceSection() {
@@ -2069,6 +2086,30 @@ async function testConfirmCreationRelationsPersistsDiagnosisStage() {
   assert.strictEqual(stateAfterQueue.taskRefs["diagnosis.materials"], queued[0]);
 }
 
+async function testCancelledDiagnosisTaskCanBeReturnedToRunnerQueue() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "可恢复诊断", kind: "manual" }, { platform: "wechat" });
+  await plugin.confirmCreationRelations(project.path);
+  const taskPath = [...files.keys()].find((filePath) => filePath.includes("/_runner/queue/") && filePath.endsWith(".json"));
+  const pending = JSON.parse(files.get(taskPath).content);
+  const cancelled = await plugin.cancelCreationTask({ ...pending, taskPath });
+  assert.strictEqual(cancelled.status, "cancelled");
+
+  const restarted = await plugin.retryCreationTask({ ...cancelled, taskPath });
+
+  assert.strictEqual(restarted.status, "pending");
+  const persisted = JSON.parse(files.get(taskPath).content);
+  assert.strictEqual(persisted.status, "pending");
+  assert.strictEqual(persisted.error, "");
+  assert.strictEqual(persisted.waitingReason, null);
+  assert.strictEqual(persisted.nextAttemptAt, null);
+}
+
 async function testCreationCoordinationWritesDoNotDependOnVaultModifyCache() {
   const PluginClass = loadPluginClass();
   const plugin = new PluginClass();
@@ -2395,6 +2436,7 @@ async function testAiRevisionSupersedesStaleQualityCheck() {
   const project = await plugin.createCreationProject({ title: "AI 改稿失效旧质检", kind: "manual" }, { platform: "wechat" });
   await plugin.ensureFolder(`${project.directory}/deliverables/wechat/wechat-001/drafts`);
   await plugin.writeText(`${project.directory}/deliverables/wechat/wechat-001/drafts/v1.md`, "# 当前公众号正文\n\n这是等待改稿的正文。\n");
+  await plugin.writeText(`${project.directory}/deliverables/wechat/wechat-001/qa.md`, "# 质量报告\n\nL2：需要补足来源边界。\n");
   const draft = await plugin.queueCreationStageTask(project.path, "wechat.draft", { force: true });
   const qa = await plugin.queueCreationStageTask(project.path, "wechat.qa", { force: true });
   for (const queued of [draft, qa]) {
@@ -2408,6 +2450,7 @@ async function testAiRevisionSupersedesStaleQualityCheck() {
   assert.strictEqual(JSON.parse(files.get(draft.taskPath).content).status, "superseded");
   assert.strictEqual(JSON.parse(files.get(qa.taskPath).content).status, "superseded", "a QA result for the previous draft must disappear as soon as a new AI revision is requested");
   assert.strictEqual(JSON.parse(files.get(revised.taskPath).content).status, "pending");
+  assert.ok(JSON.parse(files.get(revised.taskPath).content).inputs.includes(`${project.directory}/deliverables/wechat/wechat-001/qa.md`), "AI revisions requested after QA must receive the current QA report");
 }
 
 async function testXhsCaptionRevisionNeverRegeneratesAcceptedCards() {
@@ -2465,6 +2508,69 @@ async function testFailedQaCanReturnProjectToResearchConfiguration() {
   assert.strictEqual(reopened.currentStage, "research");
   assert.strictEqual(reopened.research.decision, "research");
   assert.strictEqual(JSON.parse(files.get(qa.taskPath).content).status, "superseded");
+}
+
+async function testReopenedResearchCanRestoreContentReviewAndRecordHumanQaOverride() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "恢复正文审核", kind: "manual" }, { platform: "wechat" });
+  let state = await plugin.loadCreationWorkflowState(project.directory);
+  state = creationWorkflow.enterDiagnosis(state);
+  state = creationWorkflow.chooseResearchDecision(state, "research");
+  state = creationWorkflow.acceptResearchResult(state, "research-v1");
+  state = creationWorkflow.approveMasterBrief(state, "brief-v1");
+  state = creationWorkflow.approvePlatformPlan(state, "wechat", { outlineVersion: "outline-v1", illustrationPlanVersion: "illustrations-v1" });
+  state = creationWorkflow.recordDeliverableVersions(state, "wechat", { articleVersion: "draft-v1", taskState: "qa_queued" });
+  state = creationWorkflow.reopenResearch(state);
+  await plugin.saveCreationWorkflowState(project.directory, state);
+  await plugin.writeText(`${project.directory}/deliverables/wechat/wechat-001/qa.md`, "# 质量报告\n\nTOTAL_SCORE: 92\n\n这份报告可供人工审核。\n");
+  const taskPath = (kind) => `${plugin.creationProjectRoot()}/_runner/queue/${kind.replace(/\./g, "-")}.json`;
+  const writeTask = async (kind, status, extra = {}) => {
+    const task = {
+      schemaVersion: 2,
+      taskId: `restore-${kind}`,
+      projectId: project.id,
+      projectPath: project.path,
+      projectDirectory: project.directory,
+      kind,
+      skillId: "writing-styles",
+      status,
+      outputs: [`${project.directory}/${kind === "research.evidence" ? "research/routes/deep-research-skills/evidence.md" : kind === "wechat.qa" ? "deliverables/wechat/wechat-001/qa.md" : `deliverables/wechat/wechat-001/${kind}.md`}`],
+      outputHashes: { [`${project.directory}/output-${kind}.md`]: `${kind}-v1` },
+      ...extra,
+    };
+    await plugin.writeText(taskPath(kind), `${JSON.stringify(task, null, 2)}\n`);
+    return { ...task, taskPath: taskPath(kind) };
+  };
+  await writeTask("research.evidence", "completed", { skillId: "deep-research-skills" });
+  await writeTask("brief.master", "completed");
+  await writeTask("wechat.plan", "completed");
+  await writeTask("wechat.draft", "completed");
+  await writeTask("wechat.qa", "superseded", {
+    qualityThreshold: 95,
+    qualityScore: 92,
+    qualityPassed: false,
+    error: "质量检查要求补充证据，后续产物等待新研究结果后重建",
+  });
+
+  const restoredState = await plugin.restoreCreationContentReview(project.path);
+  assert.strictEqual(restoredState.currentStage, "draft");
+  assert.strictEqual(restoredState.research.taskState, "accepted");
+  assert.strictEqual(JSON.parse(files.get(taskPath("wechat.qa")).content).status, "awaiting_approval");
+  const restoredQa = { ...JSON.parse(files.get(taskPath("wechat.qa")).content), taskPath: taskPath("wechat.qa") };
+  await assert.rejects(() => plugin.acceptCreationTask(restoredQa), /未达到 95 分/u, "the automatic quality gate must remain enforced without an explicit human override");
+  let visualQueueCount = 0;
+  plugin.queueWechatVisualTasks = async () => { visualQueueCount += 1; };
+  await plugin.acceptCreationTask(restoredQa, { allowQualityOverride: true });
+  const finalState = await plugin.loadCreationWorkflowState(project.directory);
+  assert.strictEqual(finalState.currentStage, "visual");
+  assert.strictEqual(visualQueueCount, 1);
+  assert.strictEqual(JSON.parse(files.get(taskPath("wechat.qa")).content).status, "completed");
+  assert.match(files.get(`${project.directory}/approvals.jsonl`).content, /"qualityOverride":true/u);
 }
 
 async function testFinalExportCreatesImmutableNamedSnapshot() {
@@ -2980,6 +3086,107 @@ async function testRepurposeSourceSearchIsMetadataOnlyAndReadsAfterConfirmation(
   assert.ok(planTask.outputs.includes(`${project.directory}/deliverables/xiaohongshu/xiaohongshu-001/proposals.json`), "the three proposal cards must come from a generated structured artifact");
 }
 
+async function testSupportingSourcesCanBeAddedTogetherAfterMetadataOnlySelection() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  const firstPath = "Learning/saved/one/article_zh.md";
+  const secondPath = "Learning/saved/two/article_zh.md";
+  files.set(firstPath, { file: makeFile(firstPath, "# First\n\n本地材料一"), content: "# First\n\n本地材料一" });
+  files.set(secondPath, { file: makeFile(secondPath, "# Second\n\n本地材料二"), content: "# Second\n\n本地材料二" });
+  plugin.app = app;
+  plugin.settings = {
+    creationProjectRoot: "Reading Capture/creation-projects",
+    articleLibraryRoots: "Learning/saved",
+    articleLibraryExcludeRoots: ".obsidian",
+    readingRoot: "Reading Capture/notes",
+    defaultWritingStyle: "keke",
+  };
+  plugin.now = () => fixedNow;
+  let reads = 0;
+  const originalRead = app.vault.adapter.read;
+  app.vault.adapter.read = async (filePath) => { reads += 1; return originalRead(filePath); };
+  const project = await plugin.createCreationProject({ title: "多份本地材料", kind: "manual" }, { platform: "wechat" });
+  reads = 0;
+  const metadata = plugin.searchCreationSourceMetadata("article_zh", { limit: 50 });
+  assert.strictEqual(metadata.items.length, 2, "metadata search should return both same-name files");
+  assert.strictEqual(reads, 0, "metadata search must not read selected files");
+
+  await plugin.addCreationSupportingSources(project.path, [firstPath, secondPath]);
+
+  const state = JSON.parse(files.get(`${project.directory}/workflow-state.json`).content);
+  assert.deepStrictEqual(state.source.supportingFiles.map((item) => item.path), [firstPath, secondPath]);
+  assert.ok(files.has(`${project.directory}/sources/supporting/01_article_zh.md`));
+  assert.ok(files.has(`${project.directory}/sources/supporting/02_article_zh.md`));
+  assert.ok(reads >= 2, "selected files are read only when the batch is confirmed");
+  const diagnosisTasks = [...files.values()]
+    .map((record) => { try { return JSON.parse(record.content); } catch (error) { return null; } })
+    .filter((task) => task && task.kind === "diagnosis.materials");
+  assert.strictEqual(diagnosisTasks.length, 1, "a multi-file confirmation should queue one diagnosis refresh");
+}
+
+async function testSupportingPickerShowsFullNamesAndDefersMultiSelectionUntilConfirmation() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => { registeredViews[type] = factory; };
+  plugin.loadData = async () => null;
+  const workflowState = creationWorkflow.enterDiagnosis(creationWorkflow.createWorkflowState({
+    projectId: "picker-project",
+    title: "Picker",
+    workflowMode: "idea_creation",
+    activeDeliverable: "wechat",
+  }));
+  const projectPath = "Reading Capture/creation-projects/picker-project/project.md";
+  plugin.listCreationProjects = async () => [{
+    path: projectPath,
+    directory: "Reading Capture/creation-projects/picker-project",
+    title: "Picker",
+    platform: "wechat",
+    statusLabel: "整理素材",
+    primaryTitle: "Primary",
+    relatedTitles: [],
+    workflowState,
+    stageStates: creationWorkflow.deriveStageStates(workflowState),
+  }];
+  plugin.searchCreationSourceMetadata = () => ({ total: 2, items: [
+    { name: "article_zh.md", title: "article_zh", path: "Learning/saved/one/article_zh.md", kind: "markdown", size: 101 },
+    { name: "article_zh.md", title: "article_zh", path: "Learning/saved/two/article_zh.md", kind: "markdown", size: 202 },
+  ] });
+  plugin.articleLibraryEmptyMessage = () => "empty";
+  let added = null;
+  plugin.addCreationSupportingSources = async (path, paths) => { added = { path, paths }; };
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-creation-project"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+  const openPicker = fakeElementByText(view.containerEl.children[1], "选择本地材料");
+  await openPicker.listeners.click();
+  const texts = fakeElementTexts(view.containerEl.children[1]);
+  assert.ok(texts.includes("选择本地补充材料"));
+  assert.ok(texts.filter((text) => text === "article_zh.md").length >= 2, "same-name files should retain their full filenames");
+  assert.ok(texts.includes("Learning/saved/one/article_zh.md"));
+  assert.ok(texts.includes("Learning/saved/two/article_zh.md"));
+  const checkboxes = fakeElementsByTag(view.containerEl.children[1], "input").filter((input) => input.attrs.type === "checkbox");
+  assert.strictEqual(checkboxes.length, 2);
+  checkboxes[0].checked = true;
+  checkboxes[0].listeners.change();
+  checkboxes[1].checked = true;
+  checkboxes[1].listeners.change();
+  assert.strictEqual(added, null, "checking rows must not read or add files before confirmation");
+  const confirm = fakeElementByText(view.containerEl.children[1], "加入项目并重新诊断");
+  await confirm.listeners.click();
+  assert.strictEqual(added.path, projectPath);
+  assert.deepStrictEqual([...added.paths], ["Learning/saved/one/article_zh.md", "Learning/saved/two/article_zh.md"]);
+}
+
 async function testXhsPlanRendersGeneratedProposalsInsteadOfHardcodedCards() {
   const PluginClass = loadPluginClass();
   const plugin = new PluginClass();
@@ -3122,7 +3329,7 @@ async function testXhsTaskChainUsesApprovedPlanAndIndependentDualQa() {
 async function testWechatVisualChildrenRetainSuccessRetryFailureAndBlockFinalization() {
   const PluginClass = loadPluginClass();
   const plugin = new PluginClass();
-  const { app, files } = makeFakeApp();
+  const { app, files, folders } = makeFakeApp();
   plugin.app = app;
   plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
   plugin.now = () => fixedNow;
@@ -3143,6 +3350,13 @@ async function testWechatVisualChildrenRetainSuccessRetryFailureAndBlockFinaliza
       { id: "handoff", label: "人工接管", skillId: "liangkeban-xiaoxiaoke-illustrations", fileName: "03-handoff.png", insertionAnchor: "第四节后", sourceAnchor: "## 人工接管" },
     ],
   }, null, 2)}\n`);
+
+  const originalAdapterWrite = app.vault.adapter.write.bind(app.vault.adapter);
+  app.vault.adapter.write = async (filePath, content) => {
+    const parent = String(filePath).split("/").slice(0, -1).join("/");
+    if (!folders.has(parent)) throw new Error(`ENOENT: missing parent folder ${parent}`);
+    return originalAdapterWrite(filePath, content);
+  };
 
   const children = await plugin.queueWechatVisualTasks(project.path);
   assert.strictEqual(children.length, 3);
@@ -3188,6 +3402,80 @@ async function testWechatVisualChildrenRetainSuccessRetryFailureAndBlockFinaliza
   assert.strictEqual(reopened.currentStage, "draft");
   assert.ok(reopened.deliverables.wechat.staleStages.includes("visual"));
   assert.ok(reopened.deliverables.wechat.staleStages.includes("final"));
+}
+
+async function testWechatVisualTaskCanChangeSkillAndPromptBeforeFinalAcceptance() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "逐图可调整", kind: "manual" }, { platform: "wechat" });
+  let state = await plugin.loadCreationWorkflowState(project.directory);
+  state.currentStage = "visual";
+  state.deliverables.wechat.stage = "visual";
+  state.deliverables.wechat.visualGroupId = "wechat-visual-editable";
+  await plugin.saveCreationWorkflowState(project.directory, state);
+  await plugin.writeText(`${project.directory}/deliverables/wechat/wechat-001/visuals/requests/gates.json`, `${JSON.stringify({
+    schemaVersion: 1,
+    groupId: "wechat-visual-editable",
+    id: "gates",
+    label: "五道风险闸门",
+    skillId: "baoyu-infographic",
+    purpose: "用清晰的风险矩阵解释五道闸门",
+  }, null, 2)}\n`);
+  const task = await plugin.queueCreationStageTask(project.path, "wechat.visual-item", {
+    skillId: "baoyu-infographic",
+    childKey: "gates",
+    childLabel: "五道风险闸门",
+    groupId: "wechat-visual-editable",
+    requiredChildCount: 1,
+    inputOverride: ["project.md", "deliverables/wechat/wechat-001/visuals/requests/gates.json"],
+    outputOverride: ["deliverables/wechat/wechat-001/visuals/02-gates.png", "deliverables/wechat/wechat-001/visuals/results/gates.json"],
+  });
+  const queuedTask = JSON.parse(files.get(task.taskPath).content);
+  queuedTask.status = "awaiting_approval";
+  files.get(task.taskPath).content = `${JSON.stringify(queuedTask, null, 2)}\n`;
+  task.status = "awaiting_approval";
+  const next = await plugin.editCreationVisualTask(task, {
+    skillId: "liangkeban-xiaoxiaoke-illustrations",
+    prompt: "用两颗半小小克风格，画出五道风险闸门的工程现场隐喻，留白充足，不放文字。",
+  });
+  assert.strictEqual(next.skillId, "liangkeban-xiaoxiaoke-illustrations");
+  assert.strictEqual(next.status, "pending");
+  assert.strictEqual(JSON.parse(files.get(task.taskPath).content).status, "superseded");
+  const request = JSON.parse(files.get(`${project.directory}/deliverables/wechat/wechat-001/visuals/requests/gates.json`).content);
+  assert.strictEqual(request.skillId, "liangkeban-xiaoxiaoke-illustrations");
+  assert.match(request.prompt, /两颗半小小克/);
+  assert.strictEqual(request.previousTaskId, task.taskId);
+  const savedState = JSON.parse(files.get(`${project.directory}/workflow-state.json`).content);
+  assert.strictEqual(savedState.currentStage, "visual");
+  assert.strictEqual(savedState.deliverables.wechat.taskState, "visual_children_queued");
+}
+
+async function testVisualTaskPromptRewriteUsesSelectedSkillDesignBrief() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const request = {
+    label: "Loop 在节点内，Graph 在节点之间",
+    purpose: "把 Loop 与 Graph 从替代关系改写为嵌套和组合关系",
+    insertionAnchor: "解释 Graph Engineering 的核心段落之后",
+  };
+  const xiaoxiaoke = plugin.buildCreationVisualPrompt(request, {}, "liangkeban-xiaoxiaoke-illustrations");
+  assert.match(xiaoxiaoke, /1600×900/u);
+  assert.match(xiaoxiaoke, /纯白背景/u);
+  assert.match(xiaoxiaoke, /小小克 IP/u);
+  assert.match(xiaoxiaoke, /节点内 Loop/u);
+  assert.match(xiaoxiaoke, /至少保留 35% 留白/u);
+  assert.match(xiaoxiaoke, /不要复刻旧图/u);
+  assert.ok(xiaoxiaoke.length > 650, "小小克重写提示词必须保留完整的视觉、构图与禁忌约束");
+
+  const infographic = plugin.buildCreationVisualPrompt(request, {}, "baoyu-infographic");
+  assert.match(infographic, /technical-schematic/u);
+  assert.match(infographic, /structural-breakdown/u);
+  assert.match(infographic, /节点内部的 Loop/u);
+  assert.ok(infographic.length > 550, "信息图重写提示词必须包含完整信息结构与视觉约束");
 }
 
 async function testXhsCardChildrenRetainSuccessfulPagesAndRetryOnlyFailure() {
@@ -3310,6 +3598,53 @@ async function testCreationViewExposesPerItemVisualRecoveryWithoutDiscardingSucc
   assert.strictEqual(retried, "page-02");
 }
 
+async function testWechatVisualViewSummarizesBlockedAndPendingWork() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => { registeredViews[type] = factory; };
+  plugin.loadData = async () => null;
+  let state = creationWorkflow.createWorkflowState({ projectId: "wechat-visual-status", title: "Wechat visual status", activeDeliverable: "wechat" });
+  state.currentStage = "visual";
+  state.deliverables.wechat.stage = "visual";
+  state.deliverables.wechat.taskState = "visual_children_queued";
+  state.deliverables.wechat.visualGroupId = "group-a";
+  plugin.listCreationProjects = async () => [{
+    path: "Reading Capture/creation-projects/wechat-visual-status/project.md",
+    directory: "Reading Capture/creation-projects/wechat-visual-status",
+    title: "Wechat visual status",
+    platform: "wechat",
+    statusLabel: "视觉方案",
+    primaryTitle: "Primary",
+    relatedTitles: [],
+    workflowState: state,
+    stageStates: creationWorkflow.deriveStageStates(state),
+    wechatVisualManifest: "",
+    wechatVisualFiles: [],
+    tasks: [
+      { kind: "wechat.visual-item", groupId: "group-a", childKey: "image-01", childLabel: "已确认图", skillId: "liangkeban-xiaoxiaoke-illustrations", status: "completed" },
+      { kind: "wechat.visual-item", groupId: "group-a", childKey: "image-02", childLabel: "待验收图", skillId: "liangkeban-xiaoxiaoke-illustrations", status: "awaiting_approval" },
+      { kind: "wechat.visual-item", groupId: "group-a", childKey: "image-03", childLabel: "缺 Skill 图", skillId: "baoyu-infographic", status: "waiting_user", waitingReason: "missing_skill", error: "本机尚未安装任务锁定的 Skill 版本", skillRequirement: { skillId: "baoyu-infographic" } },
+    ],
+  }];
+  await plugin.onload();
+  const view = registeredViews["reading-capture-creation-project"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+  const texts = fakeElementTexts(view.containerEl.children[1]);
+  assert.ok(texts.includes("配图任务状态 · 1/3 已确认"));
+  assert.ok(texts.includes("已确认 1 张 · 已生成待你验收 1 张 · 正在执行 0 张 · 需要处理 1 张"));
+  assert.ok(texts.includes("查看并安装固定版本"));
+  assert.ok(texts.includes("查看并安装固定版本，然后继续 1 张图"));
+  assert.ok(!texts.includes("查看任务执行与异常恢复"), "task status must be visible without an unopened disclosure");
+}
+
 async function testCreationProjectViewShowsEightStageEntryContract() {
   const PluginClass = loadPluginClass();
   const plugin = new PluginClass();
@@ -3425,6 +3760,51 @@ async function testCreationProjectViewShowsDiagnosisContract() {
   assert.strictEqual(selectedDecision, "research");
 }
 
+async function testDiagnosisReviewReturnsToResearchWithoutRepeatingDecision() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => { registeredViews[type] = factory; };
+  plugin.loadData = async () => null;
+  let decisionCalls = 0;
+  plugin.chooseCreationResearchPath = async () => { decisionCalls += 1; };
+  let workflowState = creationWorkflow.enterDiagnosis(creationWorkflow.createWorkflowState({
+    projectId: "project-return-to-research",
+    title: "Research configured",
+    workflowMode: "idea_creation",
+    activeDeliverable: "wechat",
+  }));
+  workflowState = creationWorkflow.chooseResearchDecision(workflowState, "research");
+  plugin.listCreationProjects = async () => [{
+    path: "Reading Capture/creation-projects/project-return-to-research/project.md",
+    directory: "Reading Capture/creation-projects/project-return-to-research",
+    title: "Research configured",
+    platform: "wechat",
+    statusLabel: "研究与证据",
+    primaryTitle: "Primary",
+    relatedTitles: [],
+    workflowState,
+    stageStates: creationWorkflow.deriveStageStates(workflowState),
+  }];
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-creation-project"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  view.displayedStage = "diagnosis";
+  await view.reload();
+  const returnButton = fakeElementByText(view.containerEl.children[1], "返回研究配置");
+  assert.ok(returnButton && returnButton.listeners.click, "reviewed diagnosis should offer a return to the active research stage");
+  await returnButton.listeners.click();
+  assert.strictEqual(decisionCalls, 0, "returning to research must not submit the diagnosis decision a second time");
+  assert.ok(fakeElementTexts(view.containerEl.children[1]).includes("研究范围由你决定"), "return action should render the research configuration stage");
+}
+
 async function testCreationTaskAlertsExplainRecoveryByWaitingReason() {
   const PluginClass = loadPluginClass();
   const plugin = new PluginClass();
@@ -3465,6 +3845,61 @@ async function testCreationTaskAlertsExplainRecoveryByWaitingReason() {
   assert.ok(texts.includes("查看权限变化"));
 }
 
+async function testCancelledDiagnosisCanRestartFromTheCurrentProjectPage() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => { registeredViews[type] = factory; };
+  plugin.loadData = async () => null;
+  const projectPath = "Reading Capture/creation-projects/cancelled-diagnosis/project.md";
+  const cancelledTask = {
+    taskPath: "Reading Capture/creation-projects/_runner/queue/cancelled-diagnosis.json",
+    projectPath,
+    kind: "diagnosis.materials",
+    skillId: "writing-styles",
+    status: "cancelled",
+    error: "已由用户取消",
+  };
+  let restarted = null;
+  plugin.retryCreationTask = async (task) => { restarted = task; return { ...task, status: "pending" }; };
+  const workflowState = creationWorkflow.enterDiagnosis(creationWorkflow.createWorkflowState({
+    projectId: "cancelled-diagnosis",
+    title: "Cancelled diagnosis",
+    workflowMode: "idea_creation",
+    activeDeliverable: "wechat",
+  }));
+  plugin.listCreationProjects = async () => [{
+    path: projectPath,
+    directory: "Reading Capture/creation-projects/cancelled-diagnosis",
+    title: "Cancelled diagnosis",
+    platform: "wechat",
+    statusLabel: "素材诊断",
+    primaryTitle: "Primary",
+    relatedTitles: [],
+    workflowState,
+    stageStates: creationWorkflow.deriveStageStates(workflowState),
+    tasks: [cancelledTask],
+  }];
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-creation-project"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+  const texts = fakeElementTexts(view.containerEl.children[1]);
+  assert.ok(texts.includes("材料诊断等待重新启动"));
+  assert.ok(texts.includes("重新启动此任务"));
+  assert.ok(!texts.includes("取消任务"), "a cancelled task must not offer a second cancellation");
+  const restart = fakeElementByText(view.containerEl.children[1], "重新启动此任务");
+  await restart.listeners.click();
+  assert.strictEqual(restarted, cancelledTask);
+}
+
 function testPublicationReviewModalUsesWideCompactGrid() {
   const main = fs.readFileSync(path.join(__dirname, "../plugin/main.js"), "utf8");
   const css = fs.readFileSync(path.join(__dirname, "../plugin/styles.css"), "utf8");
@@ -3487,6 +3922,8 @@ async function testCreationProjectViewShowsOrderedResearchAuthorizationContract(
   plugin.loadData = async () => null;
   const queuedResearchSkills = [];
   plugin.queueCreationStageTask = async (_projectPath, kind, options) => { queuedResearchSkills.push([kind, options.skillId]); return {}; };
+  let savedResearchGuidance = null;
+  plugin.saveCreationResearchGuidance = async (projectPath, content) => { savedResearchGuidance = { projectPath, content }; };
   const base = creationWorkflow.enterDiagnosis(creationWorkflow.createWorkflowState({ projectId: "p3", title: "Research", activeDeliverable: "wechat" }));
   const workflowState = creationWorkflow.chooseResearchDecision(base, "research");
   plugin.listCreationProjects = async () => [{
@@ -3497,6 +3934,8 @@ async function testCreationProjectViewShowsOrderedResearchAuthorizationContract(
     statusLabel: "研究配置",
     primaryTitle: "Primary",
     relatedTitles: [],
+    diagnosis: "# 材料诊断\n\n## 结论\n\n需要核验真实生产案例与权威来源。",
+    researchRequest: "优先核验近两年的生产案例。",
     workflowState,
     stageStates: creationWorkflow.deriveStageStates(workflowState),
     tasks: [],
@@ -3506,7 +3945,7 @@ async function testCreationProjectViewShowsOrderedResearchAuthorizationContract(
   view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
   await view.reload();
   const texts = fakeElementTexts(view.containerEl.children[1]);
-  const ordered = ["1. 选择研究能力", "2. 核对发送内容", "3. 选择本阶段如何结束"];
+  const ordered = ["1. 选择研究能力", "2. 本次发送范围与修改入口", "3. 选择本阶段如何结束"];
   let last = -1;
   for (const text of ordered) {
     const index = texts.indexOf(text);
@@ -3515,26 +3954,94 @@ async function testCreationProjectViewShowsOrderedResearchAuthorizationContract(
   }
   assert.ok(texts.includes("Deep Research Skills"));
   assert.ok(texts.includes("Last30Days"));
-  assert.ok(texts.includes("查看完整发送清单"));
+  assert.ok(texts.includes("第 2 步的诊断结论会自动带入本次研究"));
+  assert.ok(texts.includes("自动带入：完整材料诊断（包括成熟度、已有证据、缺口、风险与建议研究路线）。"));
+  assert.ok(texts.includes("补充研究指导（可留空）"));
+  assert.ok(texts.includes("展开本次诊断结论"));
+  assert.ok(texts.includes("以下内容会成为本次研究的上下文"));
+  assert.ok(texts.includes("返回第 1 步调整关联灵感"));
+  assert.ok(texts.includes("返回第 2 步调整材料与研究方向"));
   assert.ok(texts.includes("授权以上内容并开始研究"));
   assert.ok(texts.includes("改变决定：本次不联网"));
   const allElements = [];
   const collect = (node) => { allElements.push(node); for (const child of node.children || []) collect(child); };
   collect(view.containerEl.children[1]);
   const start = allElements.find((element) => element.tag === "button" && element.text === "授权以上内容并开始研究");
-  const viewScope = allElements.find((element) => element.tag === "button" && element.text === "查看完整发送清单");
+  const startHint = allElements.find((element) => element.tag === "small" && element.classes.has("reading-capture-creation-start-hint"));
+  assert.strictEqual(startHint.textContent, "还需完成：确认以上发送范围并勾选联网研究授权。");
+  const guidance = allElements.find((element) => element.tag === "textarea");
+  assert.strictEqual(guidance.value, "优先核验近两年的生产案例。", "saved guidance must remain visible as optional additional direction");
+  guidance.value = "只核验真实生产案例。";
+  await guidance.listeners.blur();
+  assert.deepStrictEqual(savedResearchGuidance, {
+    projectPath: "Reading Capture/creation-projects/p3/project.md",
+    content: "只核验真实生产案例。",
+  }, "additional research guidance must persist before the task is started");
   const authorization = allElements.find((element) => element.tag === "input" && element.attrs.type === "checkbox" && !element.attrs.value && element.checked !== true);
   authorization.checked = true;
   authorization.listeners.change();
-  assert.strictEqual(start.disabled, true, "authorization alone must not bypass scope review");
-  viewScope.listeners.click();
-  assert.strictEqual(start.disabled, false, "reviewing the scope after authorization must immediately enable the start action");
+  assert.strictEqual(start.disabled, false, "authorization should enable research once a route is selected; viewing the scope is not an irreversible gate");
+  assert.strictEqual(startHint.textContent, "已完成核对与授权，可以开始研究。");
   const selectedRoute = allElements.find((element) => element.tag === "input" && element.value === "deep-research-skills");
   const disabledRoute = allElements.find((element) => element.tag === "input" && element.value === "last30days");
   assert.strictEqual(disabledRoute.disabled, true, "unsafe optional research routes must be visibly unavailable before authorization");
   delete selectedRoute.attrs;
   await start.listeners.click();
   assert.deepStrictEqual(queuedResearchSkills, [["research.evidence", "deep-research-skills"]], "the browser input value must be used without relying on fake attrs metadata");
+}
+
+async function testResearchReviewOpensRouteOutputsBeforeAcceptance() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => { registeredViews[type] = factory; };
+  plugin.loadData = async () => null;
+  const opened = [];
+  plugin.openCreationProjectFile = (filePath) => { opened.push(filePath); };
+  const directory = "Reading Capture/creation-projects/review-route";
+  const workflowState = creationWorkflow.chooseResearchDecision(
+    creationWorkflow.enterDiagnosis(creationWorkflow.createWorkflowState({ projectId: "review-route", title: "Route review", activeDeliverable: "wechat" })),
+    "research",
+  );
+  plugin.listCreationProjects = async () => [{
+    path: `${directory}/project.md`,
+    directory,
+    title: "Route review",
+    platform: "wechat",
+    statusLabel: "研究与证据",
+    primaryTitle: "Primary",
+    relatedTitles: [],
+    workflowState,
+    stageStates: creationWorkflow.deriveStageStates(workflowState),
+    tasks: [{
+      taskId: "route-review",
+      kind: "research.evidence",
+      skillId: "deep-research-skills",
+      status: "awaiting_approval",
+      outputs: [`${directory}/research/routes/deep-research-skills/evidence.md`, `${directory}/research/routes/deep-research-skills/sources.md`],
+    }],
+  }];
+  await plugin.onload();
+  const view = registeredViews["reading-capture-creation-project"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+  const texts = fakeElementTexts(view.containerEl.children[1]);
+  assert.ok(texts.includes("Deep Research Skills · 等待你的审核"));
+  assert.ok(texts.includes("请先检查每条研究路线的独立证据与来源。点击接受后，系统才会把已确认内容合并到项目的研究总汇。"));
+  const evidence = fakeElementByText(view.containerEl.children[1], "查看研究证据");
+  const sources = fakeElementByText(view.containerEl.children[1], "查看来源与冲突");
+  evidence.listeners.click();
+  sources.listeners.click();
+  assert.deepStrictEqual(opened, [
+    `${directory}/research/routes/deep-research-skills/evidence.md`,
+    `${directory}/research/routes/deep-research-skills/sources.md`,
+  ], "review buttons must open route outputs, never the pre-acceptance placeholder summary files");
 }
 
 async function testCreationProjectViewShowsBriefBeforeApproval() {
@@ -3724,7 +4231,13 @@ async function testCreationProjectViewRefreshesWhileRunnerTaskIsActive() {
       relatedTitles: [],
       workflowState: state,
       stageStates: creationWorkflow.deriveStageStates(state),
-      tasks: [{ kind: "diagnosis.materials", status: loads === 1 ? "running" : "awaiting_approval" }],
+      tasks: [{
+        taskId: "diagnosis-refresh",
+        kind: "diagnosis.materials",
+        status: loads < 3 ? "running" : "awaiting_approval",
+        attempts: 1,
+        heartbeatAt: loads === 1 ? "2026-07-23T14:00:00.000Z" : "2026-07-23T14:00:05.000Z",
+      }],
     }];
   };
 
@@ -3734,8 +4247,13 @@ async function testCreationProjectViewRefreshesWhileRunnerTaskIsActive() {
   await view.onOpen();
   assert.strictEqual(loads, 1);
   assert.ok(view.autoRefreshTimer && typeof view.autoRefreshTimer.callback === "function", "the view should monitor durable Runner task state");
+  const initialPaints = view.containerEl.children[1].emptyCalls || 0;
   await view.autoRefreshTimer.callback();
   assert.strictEqual(loads, 2, "an active Runner task should refresh the view without requiring an Obsidian restart");
+  assert.strictEqual(view.containerEl.children[1].emptyCalls || 0, initialPaints, "a heartbeat alone should not repaint the entire workbench");
+  await view.autoRefreshTimer.callback();
+  assert.strictEqual(loads, 3);
+  assert.strictEqual(view.containerEl.children[1].emptyCalls || 0, initialPaints + 1, "a lifecycle transition should repaint once so the result review becomes available");
   view.onClose();
   assert.strictEqual(view.autoRefreshTimer, null);
 }
@@ -3759,6 +4277,7 @@ async function testLocalSkillRunnerRejectsReusedPidBeforeStarting() {
       }
       assert.strictEqual(command, "/bin/zsh");
       if (args[1] === "command -v node") return "/opt/homebrew/bin/node\n";
+      if (args[1] === "command -v codex") return "/Applications/ChatGPT.app/Contents/Resources/codex\n";
       launches.push(args[1]);
       return "5252\n";
     },
@@ -3789,6 +4308,7 @@ async function testLocalSkillRunnerRejectsReusedPidBeforeStarting() {
   assert.ok(launches[0].includes("'/vault/.obsidian/plugins/reading-capture/skill-runner.js'"));
   assert.ok(launches[0].includes("--vault '/vault'"));
   assert.ok(launches[0].includes("--creation-root 'Reading Capture/creation-projects'"));
+  assert.ok(launches[0].includes("--codex '/Applications/ChatGPT.app/Contents/Resources/codex'"), "the background Runner must receive the resolved Codex CLI path rather than a bare command name");
   assert.ok(launches[0].includes("--device-id 'device-test'"));
   assert.ok(launches[0].includes("--epoch '1'"));
   assert.strictEqual(storage.get("reading-capture:skill-runner:TestVault:pid"), "5252");
@@ -3805,6 +4325,7 @@ async function testLocalSkillRunnerClearsExitedChildAndCanRestart() {
   const childProcess = {
     execFileSync(command, args) {
       if (command === "/bin/zsh" && args[1] === "command -v node") return "/opt/homebrew/bin/node\n";
+      if (command === "/bin/zsh" && args[1] === "command -v codex") return "/Applications/ChatGPT.app/Contents/Resources/codex\n";
       if (command === "/bin/zsh") {
         launches.push(args[1]);
         return `${6000 + launches.length - 1}\n`;
@@ -3856,6 +4377,7 @@ async function testLocalSkillRunnerReplacesLegacyUnfencedProcess() {
     execFileSync(command, args) {
       if (command === "/bin/ps") return "/opt/homebrew/bin/node /vault/.obsidian/plugins/reading-capture/skill-runner.js --vault /vault --creation-root 'Reading Capture/creation-projects'\n";
       if (args[1] === "command -v node") return "/opt/homebrew/bin/node\n";
+      if (args[1] === "command -v codex") return "/Applications/ChatGPT.app/Contents/Resources/codex\n";
       launched += 1;
       return "5252\n";
     },
@@ -3897,6 +4419,7 @@ async function testLocalSkillRunnerRestartsWhenDeployedScriptChanges() {
     execFileSync(command, args) {
       if (command === "/bin/ps") return "/opt/homebrew/bin/node /vault/.obsidian/plugins/reading-capture/skill-runner.js --vault /vault --creation-root 'Reading Capture/creation-projects' --device-id device-test --epoch 7\n";
       if (args[1] === "command -v node") return "/opt/homebrew/bin/node\n";
+      if (args[1] === "command -v codex") return "/Applications/ChatGPT.app/Contents/Resources/codex\n";
       launched += 1;
       return "5252\n";
     },
@@ -3921,6 +4444,50 @@ async function testLocalSkillRunnerRestartsWhenDeployedScriptChanges() {
   assert.strictEqual(launched, 1);
   assert.strictEqual(storage.get("reading-capture:skill-runner:TestVault:pid"), "5252");
   assert.strictEqual(JSON.parse(storage.get("reading-capture:skill-runner:TestVault:status")).scriptDigest, "new-digest");
+}
+
+async function testLocalSkillRunnerReplacesBareCodexProcessEvenWhenStatusLooksCurrent() {
+  const storage = new Map([
+    ["reading-capture:skill-runner:TestVault", "enabled"],
+    ["reading-capture:skill-runner:TestVault:pid", "4242"],
+    ["reading-capture:skill-runner:TestVault:status", JSON.stringify({ state: "running", pid: 4242, scriptDigest: "current-digest" })],
+  ]);
+  const localStorage = {
+    getItem(key) { return storage.has(key) ? storage.get(key) : null; },
+    setItem(key, value) { storage.set(key, String(value)); },
+    removeItem(key) { storage.delete(key); },
+  };
+  const signals = [];
+  let launched = 0;
+  const childProcess = {
+    execFileSync(command, args) {
+      if (command === "/bin/ps") return "/opt/homebrew/bin/node /vault/.obsidian/plugins/reading-capture/skill-runner.js --vault /vault --creation-root 'Reading Capture/creation-projects' --codex codex --device-id device-test --epoch 7\n";
+      if (args[1] === "command -v node") return "/opt/homebrew/bin/node\n";
+      if (args[1] === "command -v codex") return "/Applications/ChatGPT.app/Contents/Resources/codex\n";
+      launched += 1;
+      return "5252\n";
+    },
+  };
+  const fakeProcess = {
+    env: {},
+    kill(pid, signal) {
+      assert.strictEqual(pid, 4242);
+      signals.push(signal);
+    },
+  };
+  const PluginClass = loadPluginClass({ childProcess, localStorage, process: fakeProcess, dirname: "/Applications/Obsidian.app/Contents/Resources" });
+  const plugin = new PluginClass();
+  plugin.manifest = { id: "reading-capture" };
+  plugin.app = { vault: { getName() { return "TestVault"; }, adapter: { getBasePath() { return "/vault"; } } } };
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects" };
+  plugin.ensureLocalSkillRunnerOwnership = async () => ({ ownerDeviceId: "device-test", epoch: 7 });
+  plugin.localSkillRunnerScriptDigest = () => "current-digest";
+
+  await plugin.startLocalSkillRunner();
+  assert.ok(signals.includes("SIGTERM"), "a Runner started with bare codex must be retired even if stale status metadata says its script is current");
+  assert.strictEqual(launched, 1, "the replacement Runner must be started with the resolved executable");
+  const status = JSON.parse(storage.get("reading-capture:skill-runner:TestVault:status"));
+  assert.strictEqual(status.codexExecutable, "/Applications/ChatGPT.app/Contents/Resources/codex");
 }
 
 async function testViewedCreationStageControlsNavigationHighlight() {
@@ -4155,6 +4722,65 @@ async function testReaderPreservesExpandedDetailsAndPositionAfterRefresh() {
   assert.deepStrictEqual(details.map((item) => item.open), [true, false]);
   assert.strictEqual(body.scrollTop, 640);
   assert.strictEqual(body.scrollLeft, 12);
+}
+
+async function testCreationTaskProgressMakesBackgroundExecutionInspectable() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  plugin.now = () => "2026-07-23T13:30:00.000Z";
+  const registeredViews = {};
+  plugin.app = { workspace: { on() { return {}; } } };
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => { registeredViews[type] = factory; };
+  await plugin.onload();
+  const view = registeredViews["reading-capture-creation-project"]({});
+  const canvas = makeFakeElement();
+  view.renderCreationTaskProgress(canvas, {
+    tasks: [{
+      taskId: "task_diagnosis",
+      kind: "diagnosis.materials",
+      status: "running",
+      skillId: "writing-styles",
+      attempts: 2,
+      runId: "task_diagnosis_attempt-2",
+      startedAt: "2026-07-23T13:28:30.000Z",
+      heartbeatAt: "2026-07-23T13:29:58.000Z",
+    }],
+  });
+  const texts = fakeElementTexts(canvas);
+  assert.ok(texts.includes("后台执行状态"));
+  assert.ok(texts.includes("正在后台执行 · 材料诊断"));
+  assert.ok(texts.some((text) => text.includes("writing-styles 正在处理第 2 次执行")));
+  assert.ok(texts.some((text) => text.includes("最近活动：")));
+  assert.ok(texts.includes("立即刷新"));
+}
+
+async function testCreationViewRestoresCanvasScrollAfterBackgroundRefresh() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  plugin.app = { workspace: { on() { return {}; } } };
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => { registeredViews[type] = factory; };
+  await plugin.onload();
+  const view = registeredViews["reading-capture-creation-project"]({});
+  const canvas = { scrollTop: 684, scrollLeft: 19 };
+  const host = {
+    querySelector(selector) {
+      return selector === ".reading-capture-creation-canvas" ? canvas : null;
+    },
+  };
+  view.containerEl = { children: [null, host] };
+  const state = view.captureCreationScrollState();
+  canvas.scrollTop = 0;
+  canvas.scrollLeft = 0;
+  view.restoreCreationScrollState(state);
+  assert.strictEqual(canvas.scrollTop, 684, "background refresh must retain the reader's vertical position");
+  assert.strictEqual(canvas.scrollLeft, 19, "background refresh must retain the reader's horizontal position");
 }
 
 async function testReaderDisplayControlsAdjustFontSizeAndLineHeight() {
@@ -4410,6 +5036,7 @@ testCaptureWritesAnnotationAndIndex()
   .then(testCreationProjectCreateAppendAndList)
   .then(testCreationProjectListExcludesRunnerWorkspaceCopies)
   .then(testConfirmCreationRelationsPersistsDiagnosisStage)
+  .then(testCancelledDiagnosisTaskCanBeReturnedToRunnerQueue)
   .then(testCreationCoordinationWritesDoNotDependOnVaultModifyCache)
   .then(testRunnerTaskStatusBypassesStaleVaultCache)
   .then(testRunnerTasksFallBackToVaultIndexWhenAdapterListingLags)
@@ -4426,6 +5053,7 @@ testCaptureWritesAnnotationAndIndex()
   .then(testAiRevisionSupersedesStaleQualityCheck)
   .then(testXhsCaptionRevisionNeverRegeneratesAcceptedCards)
   .then(testFailedQaCanReturnProjectToResearchConfiguration)
+  .then(testReopenedResearchCanRestoreContentReviewAndRecordHumanQaOverride)
   .then(testFinalExportCreatesImmutableNamedSnapshot)
   .then(testXhsFinalExportUsesCanonicalPublishingPackage)
   .then(testConcurrentSnapshotExportReservesDistinctVersionDirectories)
@@ -4439,16 +5067,24 @@ testCaptureWritesAnnotationAndIndex()
   .then(testLegacyPlanningEntryRoutesToDiagnosisOnly)
   .then(testSkippingResearchQueuesRestrictedBriefCandidate)
   .then(testRepurposeSourceSearchIsMetadataOnlyAndReadsAfterConfirmation)
+  .then(testSupportingSourcesCanBeAddedTogetherAfterMetadataOnlySelection)
+  .then(testSupportingPickerShowsFullNamesAndDefersMultiSelectionUntilConfirmation)
   .then(testXhsPlanRendersGeneratedProposalsInsteadOfHardcodedCards)
   .then(testXhsTaskChainUsesApprovedPlanAndIndependentDualQa)
   .then(testWechatVisualChildrenRetainSuccessRetryFailureAndBlockFinalization)
+  .then(testWechatVisualTaskCanChangeSkillAndPromptBeforeFinalAcceptance)
+  .then(testVisualTaskPromptRewriteUsesSelectedSkillDesignBrief)
   .then(testXhsCardChildrenRetainSuccessfulPagesAndRetryOnlyFailure)
   .then(testCreationViewExposesPerItemVisualRecoveryWithoutDiscardingSuccess)
+  .then(testWechatVisualViewSummarizesBlockedAndPendingWork)
   .then(testCreationProjectViewShowsEightStageEntryContract)
   .then(testCreationProjectViewShowsDiagnosisContract)
+  .then(testDiagnosisReviewReturnsToResearchWithoutRepeatingDecision)
   .then(testCreationTaskAlertsExplainRecoveryByWaitingReason)
+  .then(testCancelledDiagnosisCanRestartFromTheCurrentProjectPage)
   .then(testPublicationReviewModalUsesWideCompactGrid)
   .then(testCreationProjectViewShowsOrderedResearchAuthorizationContract)
+  .then(testResearchReviewOpensRouteOutputsBeforeAcceptance)
   .then(testCreationProjectViewShowsBriefBeforeApproval)
   .then(testCreationProjectListUsesActiveDeliverableAndFriendlyWorkflowStatus)
   .then(testCreationFinalStageMatchesInspectablePublishingPackageContract)
@@ -4457,11 +5093,14 @@ testCaptureWritesAnnotationAndIndex()
   .then(testLocalSkillRunnerClearsExitedChildAndCanRestart)
   .then(testLocalSkillRunnerReplacesLegacyUnfencedProcess)
   .then(testLocalSkillRunnerRestartsWhenDeployedScriptChanges)
+  .then(testLocalSkillRunnerReplacesBareCodexProcessEvenWhenStatusLooksCurrent)
   .then(testViewedCreationStageControlsNavigationHighlight)
   .then(testLocalRunnerOwnershipRequiresRelinquishmentBeforeTransfer)
   .then(testVersionPathTooltipAndCopy)
   .then(testReaderSidebarKeepsAnnotationNavigationFocused)
   .then(testReaderPreservesExpandedDetailsAndPositionAfterRefresh)
+  .then(testCreationTaskProgressMakesBackgroundExecutionInspectable)
+  .then(testCreationViewRestoresCanvasScrollAfterBackgroundRefresh)
   .then(testReaderDisplayControlsAdjustFontSizeAndLineHeight)
   .then(testReaderBodyUsesDisplaySettingVariables)
   .then(testReadingRecordViewGroupsAnnotationsAndSwitchesMarkdownInPlace)

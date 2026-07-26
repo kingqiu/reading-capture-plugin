@@ -407,6 +407,65 @@ class CreationProjectModal extends Modal {
   }
 }
 
+class VisualTaskEditorModal extends Modal {
+  constructor(app, plugin, task, onSaved) {
+    super(app);
+    this.plugin = plugin;
+    this.task = task;
+    this.onSaved = onSaved;
+    this.request = {};
+  }
+
+  async onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.modalEl.addClass("reading-capture-modal-shell");
+    contentEl.addClass("reading-capture-modal", "reading-capture-visual-task-editor-modal");
+    contentEl.createEl("div", { cls: "reading-capture-creation-kicker", text: "VISUAL TASK EDITOR" });
+    contentEl.createEl("h2", { text: `调整配图：${this.task.childLabel || this.task.childKey || "当前任务"}` });
+    contentEl.createEl("p", { text: "更换 Skill 或修改提示词都会保留当前版本，并创建一条新的待生成任务；新图生成并验收前，不能进入最终定稿。" });
+    const requestPath = (this.task.inputs || []).find((value) => /\/visuals\/requests\/[^/]+\.json$/u.test(value));
+    if (requestPath && await this.plugin.pathExists(requestPath)) {
+      try { this.request = JSON.parse(await this.plugin.readText(requestPath)); } catch (error) { this.request = {}; }
+    }
+    const skillLabel = contentEl.createEl("label", { text: "配图 Skill" });
+    const skill = skillLabel.createEl("select");
+    for (const [value, label] of [["liangkeban-xiaoxiaoke-illustrations", "两颗半小小克配图"], ["baoyu-infographic", "宝玉 Infographic"]]) {
+      skill.createEl("option", { attr: { value }, text: label });
+    }
+    skill.value = this.request.skillId || this.task.skillId || "liangkeban-xiaoxiaoke-illustrations";
+    const promptLabel = contentEl.createEl("label", { text: "配图生成提示词" });
+    const prompt = promptLabel.createEl("textarea", { attr: { rows: "8" } });
+    prompt.value = String(this.request.prompt || this.request.purpose || this.request.label || this.task.childLabel || "");
+    const promptTools = contentEl.createDiv({ cls: "reading-capture-visual-prompt-tools" });
+    const rewrite = promptTools.createEl("button", { text: "按当前 Skill 生成完整提示词" });
+    rewrite.addEventListener("click", () => {
+      prompt.value = this.plugin.buildCreationVisualPrompt(this.request, this.task, skill.value);
+      prompt.dispatchEvent(new Event("input"));
+    });
+    const hint = contentEl.createEl("p", { cls: "reading-capture-hint", text: "保存后会立即重新排队；原图会归档到 visuals/versions，不会被当作已验收版本覆盖。" });
+    const buttons = contentEl.createDiv({ cls: "reading-capture-button-row" });
+    const save = buttons.createEl("button", { cls: "mod-cta", text: "保存并重新生成" });
+    buttons.createEl("button", { text: "取消" }).addEventListener("click", () => this.close());
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      try {
+        await this.plugin.editCreationVisualTask(this.task, { skillId: skill.value, prompt: prompt.value });
+        hint.textContent = "已保存，新的配图任务已排队。";
+        this.close();
+        if (this.onSaved) await this.onSaved();
+      } catch (error) {
+        hint.textContent = `保存失败：${error && error.message ? error.message : String(error)}`;
+        save.disabled = false;
+      }
+    });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
 class ManagedSkillInstallModal extends Modal {
   constructor(app, plugin, task, onInstalled) {
     super(app);
@@ -846,6 +905,7 @@ class ReadingCaptureReaderView extends ItemView {
     });
 
     const canvas = workspace.createDiv({ cls: "reading-capture-creation-canvas" });
+    this.renderCreationTaskProgress(canvas, selected);
     this.renderCreationTaskAlerts(canvas, selected);
     const renderStage = {
       relations: () => this.renderApprovedRelations(canvas, selected),
@@ -862,9 +922,14 @@ class ReadingCaptureReaderView extends ItemView {
 
   renderCreationTaskAlerts(canvas, selected) {
     const inlineRecoveryKinds = new Set(["wechat.visual-item", "xhs.card-page"]);
+    const taskKey = (task) => `${task.kind || ""}:${task.skillId || ""}:${task.childKey || ""}:${task.groupId || ""}`;
+    const activeTaskKeys = new Set((selected.tasks || [])
+      .filter((task) => ["pending", "running", "awaiting_approval"].includes(task.status))
+      .map(taskKey));
     const actionable = (selected.tasks || []).filter((task) => (
-      ["failed", "waiting_user", "partial"].includes(task.status)
+      ["failed", "waiting_user", "partial", "cancelled"].includes(task.status)
       && !inlineRecoveryKinds.has(task.kind)
+      && (task.status !== "cancelled" || !activeTaskKeys.has(taskKey(task)))
     ));
     if (!actionable.length) return;
     const recoveryByReason = {
@@ -879,6 +944,10 @@ class ReadingCaptureReaderView extends ItemView {
       skill_runtime_disabled: {
         message: "该研究能力的受控执行边界尚未完成，本版本不会安装、重试或调用它。请选择其他研究能力。",
         action: "",
+      },
+      codex_unavailable: {
+        message: "本机 Runner 找不到 Codex CLI。请确认 ChatGPT 或 Codex CLI 已安装；修复后可从这里重新执行。",
+        action: "修复后重试",
       },
       credentials_or_permission: {
         message: "任务需要额外凭证或文件权限。完成授权后，可从这里重新执行。",
@@ -898,7 +967,10 @@ class ReadingCaptureReaderView extends ItemView {
       const alert = alerts.createDiv({ cls: `reading-capture-creation-task-alert is-${task.status}` });
       const copy = alert.createDiv();
       copy.createEl("strong", { text: `${this.plugin.creationTaskStatusLabel(task.status)} · ${task.skillId}` });
-      const recovery = recoveryByReason[task.waitingReason] || {
+      const recovery = task.status === "cancelled" ? {
+        message: "此任务已取消，项目内容和输入都还保留。重新启动后会从当前材料重新执行。",
+        action: "重新启动此任务",
+      } : recoveryByReason[task.waitingReason] || {
         message: task.error || "任务需要你处理后才能继续。已完成的其他任务和临时结果会保留。",
         action: "重试此任务",
       };
@@ -919,10 +991,84 @@ class ReadingCaptureReaderView extends ItemView {
           await this.reload();
         });
       }
-      actions.createEl("button", { text: "取消任务" }).addEventListener("click", async () => {
-        await this.plugin.cancelCreationTask(task);
-        await this.reload();
-      });
+      if (task.status !== "cancelled") {
+        actions.createEl("button", { text: "取消任务" }).addEventListener("click", async () => {
+          await this.plugin.cancelCreationTask(task);
+          await this.reload();
+        });
+      }
+    }
+  }
+
+  creationTaskKindLabel(task) {
+    const labels = {
+      "diagnosis.materials": "材料诊断",
+      "research.evidence": "联网研究",
+      "brief.master": "主简报",
+      "wechat.plan": "公众号内容方案",
+      "wechat.draft": "公众号初稿",
+      "wechat.qa": "公众号内容质检",
+      "wechat.visual": "公众号视觉方案",
+      "wechat.visual-item": "公众号配图",
+      "xhs.plan": "小红书内容方案",
+      "xhs.samples": "小红书样张",
+      "xhs.card-page": "小红书单页卡片",
+      "xhs.package": "小红书发布包",
+      "xhs.copy-qa": "小红书文案质检",
+    };
+    return task && (task.childLabel || labels[task.kind]) || "后台任务";
+  }
+
+  creationTaskTimeLabel(value) {
+    const timestamp = Date.parse(String(value || ""));
+    if (!Number.isFinite(timestamp)) return "刚刚";
+    return new Intl.DateTimeFormat("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(new Date(timestamp));
+  }
+
+  creationTaskElapsedLabel(task) {
+    const startedAt = Date.parse(String(task && (task.startedAt || task.updatedAt) || ""));
+    const current = Date.parse(this.plugin && typeof this.plugin.now === "function" ? this.plugin.now() : new Date().toISOString());
+    if (!Number.isFinite(startedAt) || !Number.isFinite(current)) return "刚刚开始";
+    const seconds = Math.max(0, Math.floor((current - startedAt) / 1000));
+    if (seconds < 60) return `已运行 ${seconds} 秒`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `已运行 ${minutes} 分钟`;
+    return `已运行 ${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟`;
+  }
+
+  renderCreationTaskProgress(canvas, selected) {
+    const active = (selected.tasks || [])
+      .filter((task) => ["pending", "running"].includes(task.status))
+      .sort((left, right) => (Date.parse(right.updatedAt || right.createdAt || "") || 0) - (Date.parse(left.updatedAt || left.createdAt || "") || 0));
+    if (!active.length) return;
+
+    const panel = canvas.createDiv({ cls: "reading-capture-creation-task-progress" });
+    const heading = panel.createDiv({ cls: "reading-capture-creation-task-progress-head" });
+    const headingCopy = heading.createDiv();
+    headingCopy.createEl("strong", { text: "后台执行状态" });
+    headingCopy.createEl("small", { text: "每 5 秒检查任务状态；只有状态变化才更新，不打断当前阅读位置。" });
+    const refresh = heading.createEl("button", { text: "立即刷新" });
+    refresh.addEventListener("click", async () => {
+      if (typeof this.reload === "function") await this.reload();
+    });
+
+    for (const task of active.slice(0, 3)) {
+      const row = panel.createDiv({ cls: `reading-capture-creation-task-progress-row is-${task.status}` });
+      const copy = row.createDiv();
+      const state = task.status === "running" ? "正在后台执行" : "已进入队列，等待 Runner 接手";
+      copy.createEl("strong", { text: `${state} · ${this.creationTaskKindLabel(task)}` });
+      copy.createEl("p", { text: task.status === "running"
+        ? `${task.skillId || "Skill Runner"} 正在处理第 ${Math.max(1, Number(task.attempts) || 1)} 次执行。${this.creationTaskElapsedLabel(task)}`
+        : `${task.skillId || "Skill Runner"} 已收到任务，Runner 将自动开始处理。` });
+      const meta = row.createDiv({ cls: "reading-capture-creation-task-progress-meta" });
+      meta.createEl("span", { text: `状态：${this.plugin.creationTaskStatusLabel(task.status)}` });
+      meta.createEl("span", { text: `最近活动：${this.creationTaskTimeLabel(task.heartbeatAt || task.updatedAt || task.startedAt || task.createdAt)}` });
+      if (task.status === "running" && task.runId) meta.createEl("span", { text: `执行批次：${task.runId.replace(`${task.taskId}_`, "")}` });
     }
   }
 
@@ -1166,6 +1312,7 @@ class ReadingCaptureReaderView extends ItemView {
     const diagnosisTask = (selected.tasks || []).find((task) => task.kind === "diagnosis.materials");
     const diagnosisReady = !!(diagnosisTask && ["awaiting_approval", "completed"].includes(diagnosisTask.status))
       || (!diagnosisTask && this.plugin.isCompletedCreationDiagnosis(selected.diagnosis));
+    const diagnosisRecoverable = !!(diagnosisTask && ["failed", "waiting_user", "partial", "cancelled", "stale"].includes(diagnosisTask.status));
     const diagnosisStateLabel = diagnosisReady
       ? "诊断已生成 · 等待你选择路径"
       : diagnosisTask
@@ -1173,8 +1320,8 @@ class ReadingCaptureReaderView extends ItemView {
         : "未找到诊断任务";
     head.createEl("span", { cls: "reading-capture-creation-state", text: diagnosisStateLabel });
     const summary = screen.createDiv({ cls: "reading-capture-creation-diagnosis-card" });
-    summary.createEl("strong", { text: diagnosisReady ? "材料诊断已经生成" : "正在根据当前灵感和材料生成诊断" });
-    summary.createEl("p", { text: selected.diagnosis || "诊断结果会分别说明主题、读者价值、证据和真实场景是否充分。" });
+    summary.createEl("strong", { text: diagnosisReady ? "材料诊断已经生成" : diagnosisRecoverable ? "材料诊断等待重新启动" : "正在根据当前灵感和材料生成诊断" });
+    summary.createEl("p", { text: diagnosisRecoverable ? (diagnosisTask.error || "此前诊断没有完成；可在页面顶部重新启动任务。") : (selected.diagnosis || "诊断结果会分别说明主题、读者价值、证据和真实场景是否充分。") });
     screen.createEl("h3", { text: "你可以参与的操作" });
     const actions = screen.createDiv({ cls: "reading-capture-creation-diagnosis-actions" });
     const local = actions.createDiv({ cls: "reading-capture-creation-action-card" });
@@ -1185,15 +1332,29 @@ class ReadingCaptureReaderView extends ItemView {
       this.isSupportingPickerOpen = !this.isSupportingPickerOpen;
       await this.render();
     });
+    const isResearchConfigured = selected.workflowState.currentStage === "research";
     const research = actions.createDiv({ cls: "reading-capture-creation-action-card" });
-    research.createEl("h3", { text: "进入联网研究" });
-    research.createEl("p", { text: "补充材料和研究指导都是可选项；也可以直接使用默认研究配置。" });
-    const researchButton = research.createEl("button", { cls: "mod-cta", text: "直接进入研究配置" });
-    researchButton.disabled = !diagnosisReady;
+    research.createEl("h3", { text: isResearchConfigured ? "研究配置已就绪" : "进入联网研究" });
+    research.createEl("p", { text: isResearchConfigured
+      ? "项目已经进入第 3 步“研究与证据”。你正在回看诊断结果，点击可返回当前研究配置。"
+      : "补充材料和研究指导都是可选项；也可以直接使用默认研究配置。" });
+    const researchButton = research.createEl("button", { cls: "mod-cta", text: isResearchConfigured ? "返回研究配置" : "直接进入研究配置" });
+    researchButton.disabled = !isResearchConfigured && !diagnosisReady;
     researchButton.addEventListener("click", async () => {
       researchButton.disabled = true;
-      await this.plugin.chooseCreationResearchPath(selected.path, "research");
-      await this.reload();
+      if (isResearchConfigured) {
+        this.displayedStage = "research";
+        await this.render();
+        return;
+      }
+      try {
+        await this.plugin.chooseCreationResearchPath(selected.path, "research");
+        this.displayedStage = "";
+        await this.reload();
+      } catch (error) {
+        researchButton.disabled = false;
+        new Notice(`无法进入研究配置：${error.message || String(error)}`);
+      }
     });
     const skip = actions.createDiv({ cls: "reading-capture-creation-action-card" });
     skip.createEl("h3", { text: "本次不做联网研究" });
@@ -1255,8 +1416,8 @@ class ReadingCaptureReaderView extends ItemView {
     const picker = screen.createDiv({ cls: "reading-capture-creation-source-picker" });
     const head = picker.createDiv({ cls: "reading-capture-creation-source-picker-head" });
     const copy = head.createDiv();
-    copy.createEl("h3", { text: "选择一份本地补充材料" });
-    copy.createEl("p", { text: "仅按标题和路径搜索元数据；确认后才读取并复制到当前项目。每次最多显示 50 项。" });
+    copy.createEl("h3", { text: "选择本地补充材料" });
+    copy.createEl("p", { text: "可同时选择多份。列表只搜索文件名和 Vault 路径；确认后才读取并复制到当前项目。每次最多显示 50 项。" });
     head.createEl("button", { text: "关闭" }).addEventListener("click", async () => {
       this.isSupportingPickerOpen = false;
       await this.render();
@@ -1265,26 +1426,70 @@ class ReadingCaptureReaderView extends ItemView {
     const search = controls.createEl("input", { attr: { type: "search", placeholder: "搜索标题或 Vault 路径…", "aria-label": "搜索本地补充材料" } });
     const resultMeta = controls.createEl("span");
     const results = picker.createDiv({ cls: "reading-capture-creation-source-results" });
-    const renderResults = () => {
-      const page = this.plugin.searchCreationSourceMetadata(search.value, { offset: 0, limit: 50 });
-      results.empty();
-      resultMeta.textContent = `${page.items.length} / ${page.total}`;
+    const selection = picker.createDiv({ cls: "reading-capture-creation-source-selection" });
+    const selectedSummary = selection.createEl("p");
+    const clear = selection.createEl("button", { text: "清除选择" });
+    const confirm = selection.createEl("button", { cls: "mod-cta", text: "加入项目并重新诊断" });
+    const selectedPaths = new Set();
+    let offset = 0;
+    let loadMoreButton = null;
+    const updateSelection = () => {
+      const count = selectedPaths.size;
+      selectedSummary.textContent = count ? `已选择 ${count} 份本地材料` : "尚未选择本地材料";
+      clear.disabled = count === 0;
+      confirm.disabled = count === 0;
+    };
+    const renderResults = (append = false) => {
+      const page = this.plugin.searchCreationSourceMetadata(search.value, { offset, limit: 50 });
+      if (loadMoreButton && typeof loadMoreButton.remove === "function") loadMoreButton.remove();
+      loadMoreButton = null;
+      if (!append) results.empty();
+      resultMeta.textContent = `${Math.min(offset + page.items.length, page.total)} / ${page.total}`;
       for (const item of page.items) {
-        const row = results.createEl("button", { cls: "reading-capture-creation-source-row" });
+        const row = results.createEl("label", { cls: "reading-capture-creation-source-row is-selectable" });
+        const checkbox = row.createEl("input", { attr: { type: "checkbox", "aria-label": `选择 ${item.name || item.path}` } });
+        checkbox.checked = selectedPaths.has(item.path);
+        if (checkbox.checked) row.addClass("is-selected");
         const rowCopy = row.createDiv();
-        rowCopy.createEl("strong", { text: item.title });
+        rowCopy.createEl("strong", { text: item.name || item.title });
         rowCopy.createEl("small", { text: item.path });
-        row.createEl("span", { text: item.kind === "pdf" ? "PDF" : "Markdown" });
-        row.addEventListener("click", async () => {
-          row.disabled = true;
-          await this.plugin.addCreationSupportingSource(selected.path, item.path);
-          this.isSupportingPickerOpen = false;
-          new Notice("本地材料已加入项目，并重新生成材料诊断。");
-          await this.reload();
+        row.createEl("span", { text: `${item.kind === "pdf" ? "PDF" : "Markdown"} · ${item.size} bytes` });
+        checkbox.addEventListener("change", () => {
+          if (checkbox.checked) selectedPaths.add(item.path);
+          else selectedPaths.delete(item.path);
+          if (checkbox.checked) row.addClass("is-selected");
+          else row.removeClass("is-selected");
+          updateSelection();
         });
       }
+      if (offset + page.items.length < page.total) {
+        loadMoreButton = results.createEl("button", { text: "加载下一批 50 项" });
+        loadMoreButton.addEventListener("click", () => { offset += 50; renderResults(true); });
+      }
+      if (!page.total) results.createEl("p", { cls: "reading-capture-creation-empty-copy", text: this.plugin.articleLibraryEmptyMessage() });
     };
-    search.addEventListener("input", renderResults);
+    search.addEventListener("input", () => { offset = 0; renderResults(); });
+    clear.addEventListener("click", () => {
+      selectedPaths.clear();
+      updateSelection();
+      renderResults();
+    });
+    confirm.addEventListener("click", async () => {
+      const paths = [...selectedPaths];
+      if (!paths.length) return;
+      confirm.disabled = true;
+      clear.disabled = true;
+      try {
+        await this.plugin.addCreationSupportingSources(selected.path, paths);
+        this.isSupportingPickerOpen = false;
+        new Notice(`已加入 ${paths.length} 份本地材料，并重新生成材料诊断。`);
+        await this.reload();
+      } catch (error) {
+        new Notice(`加入本地材料失败：${error && error.message ? error.message : "请稍后重试"}`);
+        updateSelection();
+      }
+    });
+    updateSelection();
     renderResults();
   }
 
@@ -1302,9 +1507,19 @@ class ReadingCaptureReaderView extends ItemView {
     if (tasks.length && reviewable.length === tasks.length) {
       screen.createEl("h3", { text: "研究结果等待审核" });
       const result = screen.createDiv({ cls: "reading-capture-creation-result-review" });
-      result.createEl("p", { text: "研究证据、来源、冲突与未解决缺口已经生成。接受前可打开文件逐条检查。" });
-      result.createEl("button", { text: "查看研究证据" }).addEventListener("click", () => this.plugin.openCreationProjectFile(`${selected.directory}/research/evidence.md`));
-      result.createEl("button", { text: "查看来源与冲突" }).addEventListener("click", () => this.plugin.openCreationProjectFile(`${selected.directory}/research/sources.md`));
+      result.createEl("p", { text: "请先检查每条研究路线的独立证据与来源。点击接受后，系统才会把已确认内容合并到项目的研究总汇。" });
+      const outputPathFor = (task, fileName) => (task.outputs || []).find((output) => new RegExp(`/${fileName.replace(".", "\\.")}$`, "u").test(output))
+        || (task.runId ? `${selected.directory}/runs/${task.runId}/workspace/research/${fileName}` : `${selected.directory}/research/${fileName}`);
+      for (const task of reviewable) {
+        const route = result.createDiv({ cls: "reading-capture-creation-research-review-route" });
+        const requirement = task.skillRequirement || skillRegistry.skillRequirement(task.skillId);
+        const label = requirement && requirement.displayName || task.skillId || "研究路线";
+        route.createEl("strong", { text: `${label} · 等待你的审核` });
+        const evidencePath = outputPathFor(task, "evidence.md");
+        const sourcesPath = outputPathFor(task, "sources.md");
+        route.createEl("button", { text: "查看研究证据" }).addEventListener("click", () => this.plugin.openCreationProjectFile(evidencePath));
+        route.createEl("button", { text: "查看来源与冲突" }).addEventListener("click", () => this.plugin.openCreationProjectFile(sourcesPath));
+      }
       const accept = result.createEl("button", { cls: "mod-cta", text: "接受研究结果，生成主简报候选" });
       accept.addEventListener("click", async () => {
         accept.disabled = true;
@@ -1315,13 +1530,22 @@ class ReadingCaptureReaderView extends ItemView {
     }
     if (active.length) {
       screen.createEl("h3", { text: "研究任务执行状态" });
-      const taskList = screen.createDiv({ cls: "reading-capture-creation-task-list" });
+      const taskList = screen.createDiv({ cls: "reading-capture-creation-task-list reading-capture-creation-research-progress" });
       active.forEach((task) => {
-        const row = taskList.createDiv();
-        row.createEl("strong", { text: task.skillId });
-        row.createEl("span", { text: this.plugin.creationTaskStatusLabel(task.status) });
+        const row = taskList.createDiv({ cls: `reading-capture-creation-task-progress-row is-${task.status}` });
+        const taskCopy = row.createDiv();
+        const state = task.status === "running" ? "研究正在后台执行" : "研究已进入队列，等待 Runner 接手";
+        taskCopy.createEl("strong", { text: `${state} · ${this.creationTaskKindLabel(task)}` });
+        taskCopy.createEl("p", { text: task.status === "running"
+          ? `${task.skillId || "Skill Runner"} 正在进行第 ${Math.max(1, Number(task.attempts) || 1)} 次执行。${this.creationTaskElapsedLabel(task)}`
+          : `${task.skillId || "Skill Runner"} 已收到任务，正在等待本机 Runner 开始处理。` });
+        const meta = row.createDiv({ cls: "reading-capture-creation-task-progress-meta" });
+        meta.createEl("span", { text: `状态：${this.plugin.creationTaskStatusLabel(task.status)}` });
+        meta.createEl("span", { text: `最近活动：${this.creationTaskTimeLabel(task.heartbeatAt || task.updatedAt || task.startedAt || task.createdAt)}` });
       });
-      screen.createEl("p", { text: "可以关闭 Obsidian；本机 Runner 会继续执行。全部结果完成后再统一审核，不会自动生成主简报。" });
+      const expectation = screen.createDiv({ cls: "reading-capture-creation-research-progress-note" });
+      expectation.createEl("strong", { text: "完成后会自动切换到“研究结果等待审核”" });
+      expectation.createEl("p", { text: "研究过程只可靠地提供排队、执行、最近活动与完成状态，不虚构百分比。你可以继续做别的事；全部结果完成后再统一审核，不会自动生成主简报。" });
       return;
     }
     screen.createEl("h3", { text: "1. 选择研究能力" });
@@ -1343,32 +1567,82 @@ class ReadingCaptureReaderView extends ItemView {
       routeCopy.createEl("p", { text: description });
       routeInputs.push(input);
     });
-    screen.createEl("h3", { text: "2. 核对发送内容" });
-    const scope = screen.createDiv({ cls: "reading-capture-creation-transmission" });
-    scope.createEl("p", { text: "仅发送项目主题、两条灵感摘要、五个本地来源标题与证据缺口；不包含 Vault 其他文件。" });
-    const scopeDetails = scope.createDiv({ cls: "reading-capture-creation-transmission-details is-collapsed" });
-    scopeDetails.createEl("p", { text: `项目文件：${selected.path}` });
-    scopeDetails.createEl("p", { text: "输入：项目上下文、材料诊断、你填写的研究指导。输出只写回当前项目 research 目录。" });
-    let scopeViewed = false;
-    const viewScope = scope.createEl("button", { text: "查看完整发送清单" });
-    viewScope.addEventListener("click", () => {
-      scopeViewed = true;
-      scopeDetails.removeClass("is-collapsed");
-      viewScope.textContent = "发送清单已展开";
-      syncStart();
+    const inherited = screen.createDiv({ cls: "reading-capture-creation-research-context" });
+    inherited.createEl("strong", { text: "第 2 步的诊断结论会自动带入本次研究" });
+    inherited.createEl("p", { text: "无需把诊断内容重新粘贴到下方文本框。研究任务会读取完整材料诊断、项目主题与灵感上下文，并据此补足诊断中列出的证据缺口。" });
+    const inheritedList = inherited.createEl("ul");
+    inheritedList.createEl("li", { text: "自动带入：完整材料诊断（包括成熟度、已有证据、缺口、风险与建议研究路线）。" });
+    inheritedList.createEl("li", { text: "不会自动发送：Vault 里的其他文件或未被本项目引用的内容。" });
+    const diagnosisDetails = inherited.createDiv({ cls: "reading-capture-creation-research-context-details is-collapsed" });
+    diagnosisDetails.createEl("p", { text: selected.diagnosis || "尚未读取到诊断正文；研究任务仍会在执行时读取项目内的材料诊断文件。" });
+    const viewDiagnosis = inherited.createEl("button", { text: "展开本次诊断结论" });
+    viewDiagnosis.addEventListener("click", () => {
+      const collapsed = diagnosisDetails.hasClass("is-collapsed");
+      diagnosisDetails.toggleClass("is-collapsed", !collapsed);
+      viewDiagnosis.textContent = collapsed ? "收起本次诊断结论" : "展开本次诊断结论";
     });
-    const guidance = scope.createEl("textarea", { attr: { placeholder: "可选：补充研究问题、来源偏好、排除项或时间范围…" } });
-    const authorization = scope.createEl("label", { cls: "reading-capture-creation-authorization", text: "我已核对以上发送范围，并授权所选研究任务联网" });
+    screen.createEl("h3", { text: "2. 本次发送范围与修改入口" });
+    const scope = screen.createDiv({ cls: "reading-capture-creation-transmission" });
+    scope.createEl("strong", { text: "以下内容会成为本次研究的上下文" });
+    const scopeDetails = scope.createDiv({ cls: "reading-capture-creation-transmission-details" });
+    scopeDetails.createEl("p", { text: `项目主题：${selected.title}` });
+    scopeDetails.createEl("p", { text: `主灵感：${selected.primaryTitle || selected.title}` });
+    scopeDetails.createEl("p", { text: `关联灵感：${(selected.relatedTitles || []).length ? selected.relatedTitles.join("；") : "无"}` });
+    scopeDetails.createEl("p", { text: "完整材料诊断：已自动带入（可在上方卡片展开核对）。" });
+    scopeDetails.createEl("p", { text: "不会发送：Vault 其他文件，或未被本项目引用的本地文章正文。研究结果只写回当前项目。" });
+    const guidanceLabel = scope.createEl("label", { cls: "reading-capture-creation-guidance-label", text: "补充研究指导（可留空）" });
+    guidanceLabel.createEl("small", { text: "诊断结论已自动带入。仅在你要新增研究问题、指定来源或时间范围、排除某类信息，或纠正诊断方向时填写。" });
+    const guidance = scope.createEl("textarea", { attr: { placeholder: "例如：优先核验近两年的生产案例；排除纯营销文章。若没有额外要求，请留空。" } });
+    guidance.value = selected.researchRequest || "";
+    let guidanceSaveTimer = null;
+    const saveGuidance = async () => {
+      try {
+        await this.plugin.saveCreationResearchGuidance(selected.path, guidance.value);
+      } catch (error) {
+        new Notice(`保存研究指导失败：${error.message || String(error)}`);
+      }
+    };
+    guidance.addEventListener("input", () => {
+      if (guidanceSaveTimer) clearTimeout(guidanceSaveTimer);
+      guidanceSaveTimer = setTimeout(() => { void saveGuidance(); }, 450);
+    });
+    guidance.addEventListener("blur", async () => {
+      if (guidanceSaveTimer) {
+        clearTimeout(guidanceSaveTimer);
+        guidanceSaveTimer = null;
+      }
+      await saveGuidance();
+    });
+    const editScope = scope.createDiv({ cls: "reading-capture-creation-scope-edit" });
+    editScope.createEl("strong", { text: "如果上述范围不对，不要授权；可直接返回修改。" });
+    editScope.createEl("p", { text: "修改不会发送任何内容。第 1 步可调整关联灵感；若需更换项目主题，请使用顶部“切换项目”。调整材料会重新生成诊断；完成后再回到本页授权即可。" });
+    const editRelations = editScope.createEl("button", { text: "返回第 1 步调整关联灵感" });
+    editRelations.addEventListener("click", async () => {
+      this.displayedStage = "relations";
+      await this.render();
+    });
+    const editMaterials = editScope.createEl("button", { text: "返回第 2 步调整材料与研究方向" });
+    editMaterials.addEventListener("click", async () => {
+      this.displayedStage = "diagnosis";
+      await this.render();
+    });
+    const authorization = scope.createEl("label", { cls: "reading-capture-creation-authorization", text: "我确认以上范围无误，并授权所选研究任务联网" });
     const authorizationCheck = authorization.createEl("input", { attr: { type: "checkbox" } });
     screen.createEl("h3", { text: "3. 选择本阶段如何结束" });
     const ending = screen.createDiv({ cls: "reading-capture-creation-research-ending" });
     const start = ending.createEl("button", { cls: "mod-cta", text: "授权以上内容并开始研究" });
+    const startHint = ending.createEl("small", { cls: "reading-capture-creation-start-hint" });
     start.disabled = true;
     const syncStart = () => {
-      start.disabled = !(scopeViewed && authorizationCheck.checked && routeInputs.some((input) => input.checked));
+      const hasRoute = routeInputs.some((input) => input.checked);
+      start.disabled = !(authorizationCheck.checked && hasRoute);
+      if (!authorizationCheck.checked) startHint.textContent = "还需完成：确认以上发送范围并勾选联网研究授权。";
+      else if (!hasRoute) startHint.textContent = "还需完成：至少选择一种研究能力。";
+      else startHint.textContent = "已完成核对与授权，可以开始研究。";
     };
     authorizationCheck.addEventListener("change", syncStart);
     routeInputs.forEach((input) => input.addEventListener("change", syncStart));
+    syncStart();
     start.addEventListener("click", async () => {
       start.disabled = true;
       const skills = routeInputs.filter((input) => input.checked).map((input) => input.value);
@@ -1755,12 +2029,14 @@ class ReadingCaptureReaderView extends ItemView {
     revise.disabled = true;
     let hasManualChanges = false;
     let syncDraftGate = () => {};
+    let syncQuickRevision = () => {};
     editor.addEventListener("input", () => {
       hasManualChanges = true;
       saveManual.disabled = false;
       revise.disabled = true;
       editState.textContent = "工作草稿将在离开编辑框时自动保存；旧质量检查已不再适用";
       syncDraftGate();
+      syncQuickRevision();
     });
     editor.addEventListener("blur", async () => {
       if (!hasManualChanges) return;
@@ -1786,32 +2062,81 @@ class ReadingCaptureReaderView extends ItemView {
       qa.createEl("p", { text: qaTask.qualityPassed ? "当前版本达到 95 分门槛；仍需要完成两项人工确认。" : "未达到 95 分。请查看具体问题后加入 AI 修改意见或手工定位修改。" });
       qa.createEl("button", { text: "查看 L0–L4 完整报告" }).addEventListener("click", () => this.plugin.openCreationProjectFile(`${selected.directory}/deliverables/wechat/wechat-001/qa.md`));
       if (!qaTask.qualityPassed) {
-        const research = qa.createEl("button", { text: "证据不足？返回研究与证据" });
-        research.addEventListener("click", async () => {
-          research.disabled = true;
-          await this.plugin.reopenCreationResearch(selected.path);
-          this.displayedStage = "";
+        const repair = qa.createDiv({ cls: "reading-capture-creation-quality-override" });
+        repair.createEl("strong", { text: "先修改，再重新质检" });
+        repair.createEl("p", { text: "单纯重复运行不会让分数变高。这里会把当前质量报告交给 AI 生成一份新的正文候选；你审核并接受新候选后，系统会自动重新质检。你也可以直接编辑左侧正文，保存后会立即重检。" });
+        const reviseFromQa = repair.createEl("button", { text: "根据质量报告生成 AI 改稿候选" });
+        reviseFromQa.disabled = hasManualChanges;
+        syncQuickRevision = () => { reviseFromQa.disabled = hasManualChanges; };
+        reviseFromQa.addEventListener("click", async () => {
+          reviseFromQa.disabled = true;
+          await this.plugin.requestCreationRevision(selected.path, "wechatDraft", "请逐项处理当前质量报告（qa.md）列出的 L0–L4 问题：修正无法证实或不精确的表述，补足必要的来源边界，改善结构与可读性。不要虚构证据；无法可靠修复的结论请降级或删除。保留已确认的核心判断。");
+          new Notice("已创建基于质量报告的 AI 改稿候选；候选生成后，接受它即可自动重新质检。");
           await this.reload();
         });
+        const research = qa.createEl("button", { text: "需要补研究（会使后续候选失效）" });
+        research.addEventListener("click", async () => {
+          this.showResearchReopenConfirmation = true;
+          await this.render();
+        });
+        if (this.showResearchReopenConfirmation) {
+          const confirmation = qa.createDiv({ cls: "reading-capture-creation-reopen-research-confirmation" });
+          confirmation.createEl("strong", { text: "确认后会回到第 3 步，并使当前简报、提纲、正文与质检结果失效" });
+          confirmation.createEl("p", { text: "仅当你确实要补充或替换研究证据时继续。若只是要查看研究内容，请直接点击左侧第 3 步，不会改变当前工作流。" });
+          const label = confirmation.createEl("label", { text: "我理解重新研究后，需要重新审核后续候选" });
+          const acknowledged = label.createEl("input", { attr: { type: "checkbox" } });
+          const confirm = confirmation.createEl("button", { cls: "mod-warning", text: "确认重新开启研究" });
+          confirm.disabled = true;
+          acknowledged.addEventListener("change", () => { confirm.disabled = !acknowledged.checked; });
+          confirm.addEventListener("click", async () => {
+            confirm.disabled = true;
+            await this.plugin.reopenCreationResearch(selected.path);
+            this.showResearchReopenConfirmation = false;
+            this.displayedStage = "";
+            await this.reload();
+          });
+        }
       }
       const gate = screen.createDiv({ cls: "reading-capture-creation-gate" });
-      gate.createEl("h4", { text: "锁定当前文字版本" });
+      const qualityPassed = Boolean(qaTask.qualityPassed && Number(qaTask.qualityScore) >= Number(qaTask.qualityThreshold || 95));
+      gate.createEl("h4", { text: qualityPassed ? "锁定当前文字版本" : `自动质量门槛未通过（${qaTask.qualityScore || 0} / ${qaTask.qualityThreshold || 95}）` });
+      if (!qualityPassed) gate.createEl("p", { text: "你仍可人工决定是否继续：先完成下方三项确认，再明确以人工例外进入视觉方案。不会重新开启研究，也不会丢失当前正文。" });
       const readLabel = gate.createEl("label", { text: "我已通读当前完整正文" });
       const read = readLabel.createEl("input", { attr: { type: "checkbox" } });
       const proofLabel = gate.createEl("label", { text: "我已完成事实、引用和表达校对" });
       const proof = proofLabel.createEl("input", { attr: { type: "checkbox" } });
-      const lock = gate.createEl("button", { cls: "mod-cta", text: "确认文字版本，执行已批准配图计划" });
-      lock.disabled = true;
-      const sync = () => { lock.disabled = !(qaTask.qualityPassed && !hasManualChanges && read.checked && proof.checked); };
-      syncDraftGate = sync;
-      read.addEventListener("change", sync);
-      proof.addEventListener("change", sync);
-      lock.addEventListener("click", async () => {
+      if (qualityPassed) {
+        const lock = gate.createEl("button", { cls: "mod-cta", text: "确认文字版本，进入视觉方案" });
         lock.disabled = true;
-        await this.plugin.acceptCreationTask(qaTask);
-        this.displayedStage = "";
-        await this.reload();
-      });
+        const sync = () => { lock.disabled = !(!hasManualChanges && read.checked && proof.checked); };
+        syncDraftGate = sync;
+        read.addEventListener("change", sync);
+        proof.addEventListener("change", sync);
+        lock.addEventListener("click", async () => {
+          lock.disabled = true;
+          await this.plugin.acceptCreationTask(qaTask);
+          this.displayedStage = "";
+          await this.reload();
+        });
+      } else {
+        const override = gate.createDiv({ cls: "reading-capture-creation-quality-override" });
+        override.createEl("p", { text: "第 3 项是对低于自动门槛的明确确认。完成后，按钮会立即可用；此人工决定会被记录在项目审批记录中。" });
+        const label = override.createEl("label", { text: "我理解这是人工例外，后续视觉方案会基于当前未达门槛的正文生成" });
+        const acknowledged = label.createEl("input", { attr: { type: "checkbox" } });
+        const acceptOverride = override.createEl("button", { cls: "mod-cta", text: "人工确认当前版本，进入视觉方案" });
+        acceptOverride.disabled = true;
+        const syncOverride = () => { acceptOverride.disabled = hasManualChanges || !read.checked || !proof.checked || !acknowledged.checked; };
+        syncDraftGate = syncOverride;
+        read.addEventListener("change", syncOverride);
+        proof.addEventListener("change", syncOverride);
+        acknowledged.addEventListener("change", syncOverride);
+        acceptOverride.addEventListener("click", async () => {
+          acceptOverride.disabled = true;
+          await this.plugin.acceptCreationTask(qaTask, { allowQualityOverride: true });
+          this.displayedStage = "";
+          await this.reload();
+        });
+      }
     } else if (failedQaTask) {
       const gate = screen.createDiv({ cls: "reading-capture-creation-gate is-error" });
       gate.createEl("h4", { text: "质量检查未完成" });
@@ -1824,6 +2149,19 @@ class ReadingCaptureReaderView extends ItemView {
       });
     } else {
       const gate = screen.createDiv({ cls: "reading-capture-creation-gate" });
+      const recoverableQaTask = (selected.tasks || []).find((item) => item.kind === "wechat.qa" && item.status === "superseded" && /补充证据|新研究结果/u.test(String(item.error || "")));
+      if (recoverableQaTask && selected.workflowState.currentStage === "research") {
+        gate.createEl("h4", { text: "已从第 6 步返回研究配置" });
+        gate.createEl("p", { text: "此前的正文与质检报告仍保留，但因“重新开启研究”被标记为失效。若这次并没有修改研究内容，可恢复到该正文的质检审核，不需要重跑研究。" });
+        const restore = gate.createEl("button", { cls: "mod-cta", text: "恢复到当前正文审核" });
+        restore.addEventListener("click", async () => {
+          restore.disabled = true;
+          await this.plugin.restoreCreationContentReview(selected.path);
+          this.displayedStage = "draft";
+          await this.reload();
+        });
+        return;
+      }
       gate.createEl("h4", { text: task ? "初稿候选已生成" : "等待初稿候选" });
       gate.createEl("p", { text: "接受候选只会启动 Writing Styles 质量检查，不会直接锁定正文。" });
       const review = gate.createEl("button", { cls: "mod-cta", text: "接受当前候选并运行质量检查" });
@@ -1989,8 +2327,51 @@ class ReadingCaptureReaderView extends ItemView {
     copy.createEl("h2", { text: isXhs ? "小红书最终视觉与文案同步验收" : "验收已批准计划生成的公众号配图" });
     copy.createEl("p", { text: isXhs ? "检查页序、最弱页、封面承诺、中文断行、页脚、品牌署名和文案一致性。" : "逐张查看插入位置、执行 Skill、来源准确性和文章上下文；失败图片可单独重试。" });
     const currentVisualGroup = selected.workflowState.deliverables.wechat && selected.workflowState.deliverables.wechat.visualGroupId;
-    const visualTasks = (selected.tasks || []).filter((item) => item.kind === "wechat.visual-item" && (!currentVisualGroup || item.groupId === currentVisualGroup));
+    const visualTasks = (selected.tasks || []).filter((item) => item.kind === "wechat.visual-item" && !["superseded", "cancelled"].includes(item.status) && (!currentVisualGroup || item.groupId === currentVisualGroup));
     const task = (selected.tasks || []).find((item) => item.kind === "wechat.visual" && item.status === "awaiting_approval");
+    if (!isXhs && !visualTasks.length && selected.workflowState.deliverables.wechat && ["visual_queued", "visual_queue_failed"].includes(selected.workflowState.deliverables.wechat.taskState)) {
+      const recovery = screen.createDiv({ cls: "reading-capture-creation-gate is-error" });
+      recovery.createEl("h3", { text: "配图任务尚未创建" });
+      recovery.createEl("p", { text: selected.workflowState.deliverables.wechat.visualQueueError || "正文已通过审核，但逐图任务尚未写入队列。可安全重试，不会重新生成正文或重新质检。" });
+      const retry = recovery.createEl("button", { cls: "mod-cta", text: "重新创建已批准的配图任务" });
+      retry.addEventListener("click", async () => {
+        retry.disabled = true;
+        try {
+          const children = await this.plugin.retryWechatVisualTasks(selected.path);
+          new Notice(`已创建 ${children.length} 个逐图任务。`);
+        } catch (error) {
+          new Notice(`创建配图任务失败：${String(error && error.message || error)}`);
+        }
+        this.displayedStage = "";
+        await this.reload();
+      });
+      return;
+    }
+    if (!isXhs && visualTasks.length) {
+      const count = (statuses) => visualTasks.filter((item) => statuses.includes(item.status)).length;
+      const confirmed = count(["completed"]);
+      const awaitingReview = count(["awaiting_approval"]);
+      const running = count(["pending", "running"]);
+      const blocked = count(["waiting_user", "failed", "partial", "stale", "cancelled"]);
+      const summary = screen.createDiv({ cls: "reading-capture-creation-visual-summary" });
+      summary.createEl("h3", { text: `配图任务状态 · ${confirmed}/${visualTasks.length} 已确认` });
+      summary.createEl("p", { text: `已确认 ${confirmed} 张 · 已生成待你验收 ${awaitingReview} 张 · 正在执行 ${running} 张 · 需要处理 ${blocked} 张` });
+      if (blocked) {
+        const missingSkill = visualTasks.filter((item) => item.status === "waiting_user" && item.waitingReason === "missing_skill");
+        summary.createEl("strong", { text: missingSkill.length ? `${missingSkill.length} 张已阻塞：缺少锁定版本的 ${missingSkill[0].skillId}，不会自行继续。请在下方对应任务选择“查看并安装固定版本”。` : `${blocked} 张未完成：请在下方查看每张图的原因并处理或重试。` });
+        if (missingSkill.length && missingSkill[0].skillRequirement) {
+          const installAll = summary.createEl("button", { cls: "mod-cta", text: `查看并安装固定版本，然后继续 ${missingSkill.length} 张图` });
+          installAll.addEventListener("click", () => new ManagedSkillInstallModal(this.app, this.plugin, missingSkill[0], async () => {
+            await this.plugin.retryCreationTasksForSkill(selected.path, missingSkill[0].skillId);
+            await this.reload();
+          }).open());
+        }
+      } else if (running) {
+        summary.createEl("strong", { text: "任务仍在后台执行；状态变化会自动更新，不需要停在这里等待。" });
+      } else if (awaitingReview) {
+        summary.createEl("strong", { text: "没有后台任务在运行；请验收下方标记为“已生成”的图片。" });
+      }
+    }
     const manifest = screen.createDiv({ cls: "reading-capture-creation-visual-manifest" });
     manifest.createEl("h3", { text: isXhs ? "通过双重质检的发布包" : "配图与插入位置清单" });
     manifest.createEl("p", { text: isXhs ? (selected.xhsCardsManifest || "卡片清单等待载入。") : (selected.wechatVisualManifest || "配图任务正在执行或等待 Runner。") });
@@ -2009,18 +2390,35 @@ class ReadingCaptureReaderView extends ItemView {
       manifest.createEl("p", { cls: "reading-capture-creation-empty-copy", text: "当前还没有可验收的图片文件。" });
     }
     if (!isXhs && visualTasks.length) {
-      const execution = screen.createEl("details", { cls: "reading-capture-creation-visual-task-details" });
+      const execution = screen.createDiv({ cls: "reading-capture-creation-visual-task-details is-expanded" });
       const completeCount = visualTasks.filter((item) => item.status === "completed").length;
-      execution.createEl("summary", { text: `查看任务执行与异常恢复 · ${completeCount}/${visualTasks.length} 完成` });
+      execution.createEl("h3", { text: `逐图任务与异常恢复 · ${completeCount}/${visualTasks.length} 已确认` });
       const rows = execution.createDiv({ cls: "reading-capture-creation-task-list" });
       visualTasks.sort((left, right) => String(left.childKey || "").localeCompare(String(right.childKey || ""), undefined, { numeric: true })).forEach((child) => {
         const row = rows.createDiv({ cls: `reading-capture-creation-visual-child is-${child.status}` });
         const rowCopy = row.createDiv();
         rowCopy.createEl("strong", { text: child.childLabel || child.childKey || "配图任务" });
-        rowCopy.createEl("small", { text: `${child.skillId} · ${this.plugin.creationTaskStatusLabel(child.status)}` });
+        const statusText = child.status === "awaiting_approval"
+          ? "已生成，等待你验收"
+          : child.status === "completed"
+            ? "已确认"
+            : child.status === "waiting_user" && child.waitingReason === "missing_skill"
+              ? "已阻塞：需要安装锁定的 Skill 版本"
+              : this.plugin.creationTaskStatusLabel(child.status);
+        rowCopy.createEl("small", { text: `${this.plugin.visualSkillLabel(child.skillId)} · ${statusText}` });
         if (child.error) rowCopy.createEl("p", { text: child.error });
         const actions = row.createDiv();
-        if (["failed", "waiting_user", "partial", "stale"].includes(child.status)) {
+        const edit = actions.createEl("button", { text: "调整 Skill / 提示词" });
+        edit.addEventListener("click", () => this.plugin.openVisualTaskEditor(child, async () => {
+          await this.reload();
+        }));
+        if (["missing_skill", "skill_permission_expansion"].includes(child.waitingReason) && child.skillRequirement) {
+          const install = actions.createEl("button", { cls: "mod-cta", text: child.waitingReason === "skill_permission_expansion" ? "查看权限变化" : "查看并安装固定版本" });
+          install.addEventListener("click", () => new ManagedSkillInstallModal(this.app, this.plugin, child, async () => {
+            await this.plugin.retryCreationTasksForSkill(selected.path, child.skillId);
+            await this.reload();
+          }).open());
+        } else if (["failed", "waiting_user", "partial", "stale"].includes(child.status)) {
           const retry = actions.createEl("button", { text: "仅重试这张图" });
           retry.addEventListener("click", async () => {
             retry.disabled = true;
@@ -3498,18 +3896,75 @@ class ReadingCaptureCreationProjectView extends ItemView {
     if (!hasActiveTask) return;
     this.autoRefreshInFlight = true;
     try {
-      await this.reload();
+      const nextProjects = await this.plugin.listCreationProjects();
+      const currentSignature = this.creationTaskLifecycleSignature(this.projects);
+      const nextSignature = this.creationTaskLifecycleSignature(nextProjects);
+      this.projects = nextProjects;
+      if (!this.projects.some((project) => project.path === this.selectedPath)) {
+        this.selectedPath = this.projects[0] ? this.projects[0].path : "";
+      }
+      // Runner heartbeats are expected every few seconds.  Repainting the whole
+      // workbench for a heartbeat made the page visibly flash and reset focus.
+      // Only repaint when a task actually moves through its lifecycle.
+      if (currentSignature !== nextSignature) {
+        const scrollState = this.captureCreationScrollState();
+        await this.render();
+        this.restoreCreationScrollState(scrollState);
+      }
     } finally {
       this.autoRefreshInFlight = false;
     }
   }
 
-  async setProject(projectPath) {
-    this.selectedPath = normalizePath(projectPath || "");
-    await this.reload();
+  creationTaskLifecycleSignature(projects) {
+    return JSON.stringify((projects || []).map((project) => ({
+      path: project.path || "",
+      stage: project.workflowState && project.workflowState.currentStage || "",
+      tasks: (project.tasks || []).map((task) => ({
+        id: task.taskId || task.id || "",
+        kind: task.kind || "",
+        status: task.status || "",
+        skillId: task.skillId || "",
+        attempts: Number(task.attempts) || 0,
+        runId: task.runId || "",
+        error: task.error || "",
+        completedAt: task.completedAt || "",
+        failedAt: task.failedAt || "",
+        waitingReason: task.waitingReason || "",
+      })),
+    })));
   }
 
-  async reload() {
+  async setProject(projectPath) {
+    this.selectedPath = normalizePath(projectPath || "");
+    await this.reload({ preserveScroll: false });
+  }
+
+  getCreationScrollContainer() {
+    const host = this.containerEl && this.containerEl.children ? this.containerEl.children[1] : null;
+    if (host && typeof host.querySelector === "function") return host.querySelector(".reading-capture-creation-canvas") || host;
+    return host;
+  }
+
+  captureCreationScrollState() {
+    const container = this.getCreationScrollContainer();
+    return container ? { scrollTop: container.scrollTop || 0, scrollLeft: container.scrollLeft || 0 } : null;
+  }
+
+  restoreCreationScrollState(state) {
+    const container = this.getCreationScrollContainer();
+    if (!container || !state) return;
+    const restore = () => {
+      container.scrollTop = state.scrollTop || 0;
+      container.scrollLeft = state.scrollLeft || 0;
+    };
+    restore();
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(restore);
+    else setTimeout(restore, 0);
+  }
+
+  async reload({ preserveScroll = true } = {}) {
+    const scrollState = preserveScroll ? this.captureCreationScrollState() : null;
     this.isLoading = true;
     await this.render();
     try {
@@ -3520,6 +3975,7 @@ class ReadingCaptureCreationProjectView extends ItemView {
     } finally {
       this.isLoading = false;
       await this.render();
+      this.restoreCreationScrollState(scrollState);
     }
   }
 
@@ -3533,6 +3989,22 @@ class ReadingCaptureCreationProjectView extends ItemView {
 
   renderCreationTaskAlerts(container, selected) {
     return ReadingCaptureReaderView.prototype.renderCreationTaskAlerts.call(this, container, selected);
+  }
+
+  renderCreationTaskProgress(container, selected) {
+    return ReadingCaptureReaderView.prototype.renderCreationTaskProgress.call(this, container, selected);
+  }
+
+  creationTaskKindLabel(task) {
+    return ReadingCaptureReaderView.prototype.creationTaskKindLabel.call(this, task);
+  }
+
+  creationTaskTimeLabel(value) {
+    return ReadingCaptureReaderView.prototype.creationTaskTimeLabel.call(this, value);
+  }
+
+  creationTaskElapsedLabel(task) {
+    return ReadingCaptureReaderView.prototype.creationTaskElapsedLabel.call(this, task);
   }
 
   renderApprovedRelations(container, selected) {
@@ -4582,6 +5054,30 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     throw new Error("找不到本机 Node.js。请先安装 Node.js，或确认登录终端中可以运行 node。");
   }
 
+  localCodexExecutable() {
+    const candidates = [];
+    try {
+      const { execFileSync } = require("child_process");
+      const resolved = String(execFileSync("/bin/zsh", ["-lc", "command -v codex"], {
+        encoding: "utf8",
+        timeout: 2000,
+      }) || "").trim();
+      if (resolved.startsWith("/") && !/[\r\n]/u.test(resolved)) return resolved;
+    } catch (error) {
+      // Fall through to the official desktop-app CLI location below.
+    }
+    candidates.push("/Applications/ChatGPT.app/Contents/Resources/codex");
+    try {
+      const { existsSync, statSync } = require("fs");
+      for (const candidate of candidates) {
+        if (existsSync(candidate) && statSync(candidate).isFile()) return candidate;
+      }
+    } catch (error) {
+      // The actionable error below is shown by the settings toggle.
+    }
+    throw new Error("找不到本机 Codex CLI。请安装 ChatGPT 或 Codex CLI，并确认登录终端中可以运行 codex。");
+  }
+
   localSkillRunnerPath(vault = this.vaultBasePath()) {
     const pluginId = this.manifest && this.manifest.id ? this.manifest.id : "reading-capture";
     if (vault) return `${String(vault).replace(/\/+$/gu, "")}/.obsidian/plugins/${pluginId}/skill-runner.js`;
@@ -4654,6 +5150,11 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     const vault = this.vaultBasePath();
     if (!vault || typeof process === "undefined") throw new Error("无法定位本机 Vault 或插件运行目录");
     const owner = await this.ensureLocalSkillRunnerOwnership();
+    // Do not trust a persisted status record alone: an already-running Runner keeps
+    // the script and its `--codex` argument from the moment it was spawned. After
+    // a deployment, that process can otherwise survive with the old bare `codex`
+    // command even though the on-disk script and status metadata look current.
+    const codexExecutable = this.localCodexExecutable();
     const storedPid = typeof localStorage !== "undefined" ? Number(localStorage.getItem(this.localSkillRunnerPidKey())) : 0;
     const runnerPath = this.localSkillRunnerPath(vault);
     const scriptDigest = this.localSkillRunnerScriptDigest(runnerPath);
@@ -4661,10 +5162,12 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       const command = this.localSkillRunnerProcessCommand(storedPid);
       const expectedDevice = `--device-id ${owner.ownerDeviceId}`;
       const expectedEpoch = `--epoch ${owner.epoch}`;
+      const expectedCodex = `--codex ${codexExecutable}`;
       const previousStatus = this.localSkillRunnerStatus();
       const scriptMatches = !scriptDigest || previousStatus.scriptDigest === scriptDigest;
-      if (command.includes(expectedDevice) && command.includes(expectedEpoch) && scriptMatches) {
-        this.setLocalSkillRunnerStatus("running", { pid: storedPid, deviceId: owner.ownerDeviceId, epoch: owner.epoch, scriptDigest });
+      const codexMatches = command.includes(expectedCodex);
+      if (command.includes(expectedDevice) && command.includes(expectedEpoch) && scriptMatches && codexMatches) {
+        this.setLocalSkillRunnerStatus("running", { pid: storedPid, deviceId: owner.ownerDeviceId, epoch: owner.epoch, scriptDigest, codexExecutable });
         return;
       }
       try { process.kill(storedPid, "SIGTERM"); } catch (error) { /* Legacy process already exited. */ }
@@ -4686,7 +5189,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
         this.shellQuote(runnerPath),
         "--vault", this.shellQuote(vault),
         "--creation-root", this.shellQuote(this.creationProjectRoot()),
-        "--codex", this.shellQuote("codex"),
+        "--codex", this.shellQuote(codexExecutable),
         "--interval", this.shellQuote("5000"),
         "--device-id", this.shellQuote(owner.ownerDeviceId),
         "--epoch", this.shellQuote(String(owner.epoch)),
@@ -4699,7 +5202,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       }) || "").trim());
       if (!Number.isFinite(pid) || pid <= 0) throw new Error("系统没有返回 Skill Runner 的进程编号");
       if (typeof localStorage !== "undefined") localStorage.setItem(this.localSkillRunnerPidKey(), String(pid));
-      this.setLocalSkillRunnerStatus("running", { pid, logPath, deviceId: owner.ownerDeviceId, epoch: owner.epoch, scriptDigest });
+      this.setLocalSkillRunnerStatus("running", { pid, logPath, deviceId: owner.ownerDeviceId, epoch: owner.epoch, scriptDigest, codexExecutable });
     } finally {
       this.localSkillRunnerStarting = false;
     }
@@ -4907,37 +5410,53 @@ module.exports = class ReadingCapturePlugin extends Plugin {
   }
 
   async addCreationSupportingSource(projectPath, sourcePath) {
+    return this.addCreationSupportingSources(projectPath, [sourcePath]);
+  }
+
+  async addCreationSupportingSources(projectPath, sourcePaths) {
     const normalizedProjectPath = normalizePath(projectPath || "");
-    const normalizedSourcePath = normalizePath(sourcePath || "");
     if (!normalizedProjectPath.endsWith("/project.md") || !(await this.pathExists(normalizedProjectPath))) throw new Error("找不到创作项目");
-    const sourceFile = this.app.vault.getAbstractFileByPath(normalizedSourcePath);
-    if (!this.isFile(sourceFile) || !this.isLibraryCandidate(sourceFile) || this.isExcludedLibraryPath(normalizedSourcePath)) throw new Error("所选文件不是可读取的 Markdown 或 PDF 来源");
     const directory = normalizedProjectPath.slice(0, -"/project.md".length);
     let state = await this.loadCreationWorkflowState(directory);
-    if ((state.source.supportingFiles || []).some((item) => (typeof item === "string" ? item : item.path) === normalizedSourcePath)) return state;
-    const safeName = String(sourceFile.name || "supporting.md").replace(/[\\/:*?"<>|]/g, "_");
-    const projectCopyRelative = `sources/supporting/${String((state.source.supportingFiles || []).length + 1).padStart(2, "0")}_${safeName}`;
-    const projectCopy = `${directory}/${projectCopyRelative}`;
-    await this.ensureFolderForPath(projectCopy);
-    const extension = extname(sourceFile.name).toLowerCase();
+    const existingPaths = new Set((state.source.supportingFiles || []).map((item) => normalizePath(typeof item === "string" ? item : item.path)));
+    const uniquePaths = [...new Set((Array.isArray(sourcePaths) ? sourcePaths : [sourcePaths])
+      .map((path) => normalizePath(path || ""))
+      .filter(Boolean))]
+      .filter((path) => !existingPaths.has(path));
+    if (!uniquePaths.length) return state;
+    const sourceEntries = uniquePaths.map((path) => ({ path, file: this.app.vault.getAbstractFileByPath(path) }));
+    for (const entry of sourceEntries) {
+      if (!this.isFile(entry.file) || !this.isLibraryCandidate(entry.file) || this.isExcludedLibraryPath(entry.path)) throw new Error("所选文件不是可读取的 Markdown 或 PDF 来源");
+    }
     const adapter = this.app.vault.adapter;
-    if (extension === ".pdf" && typeof adapter.readBinary === "function" && typeof adapter.writeBinary === "function") {
-      await adapter.writeBinary(projectCopy, await adapter.readBinary(normalizedSourcePath));
-    } else {
-      await this.writeText(projectCopy, await this.readText(normalizedSourcePath));
+    const supportingFiles = [...(state.source.supportingFiles || [])];
+    for (const entry of sourceEntries) {
+      const safeName = String(entry.file.name || "supporting.md").replace(/[\\/:*?"<>|]/g, "_");
+      const projectCopyRelative = `sources/supporting/${String(supportingFiles.length + 1).padStart(2, "0")}_${safeName}`;
+      const projectCopy = `${directory}/${projectCopyRelative}`;
+      await this.ensureFolderForPath(projectCopy);
+      const extension = extname(entry.file.name).toLowerCase();
+      if (extension === ".pdf" && typeof adapter.readBinary === "function" && typeof adapter.writeBinary === "function") {
+        await adapter.writeBinary(projectCopy, await adapter.readBinary(entry.path));
+      } else {
+        await this.writeText(projectCopy, await this.readText(entry.path));
+      }
+      supportingFiles.push({ path: entry.path, projectCopy: projectCopyRelative, readVersion: `mtime:${entry.file.stat && entry.file.stat.mtime ? entry.file.stat.mtime : 0}` });
     }
     state = {
       ...state,
       source: {
         ...state.source,
-        supportingFiles: [...(state.source.supportingFiles || []), { path: normalizedSourcePath, projectCopy: projectCopyRelative, readVersion: `mtime:${sourceFile.stat && sourceFile.stat.mtime ? sourceFile.stat.mtime : 0}` }],
+        supportingFiles,
       },
     };
     await this.saveCreationWorkflowState(directory, state);
     const existingMaterial = (await this.pathExists(`${directory}/planning/user-material.md`))
       ? (await this.readText(`${directory}/planning/user-material.md`)).replace(/^# 用户补充材料\s*/u, "").trim()
       : "";
-    await this.saveCreationDiagnosisInput(normalizedProjectPath, "material", `${existingMaterial}${existingMaterial ? "\n\n" : ""}- 本地材料：${normalizedSourcePath}\n  - 项目副本：${projectCopyRelative}`);
+    const added = supportingFiles.slice(-sourceEntries.length);
+    const materialLines = added.map((item) => `- 本地材料：${item.path}\n  - 项目副本：${item.projectCopy}`).join("\n");
+    await this.saveCreationDiagnosisInput(normalizedProjectPath, "material", `${existingMaterial}${existingMaterial ? "\n\n" : ""}${materialLines}`);
     return state;
   }
 
@@ -5113,7 +5632,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     return this.queueCreationStageTask(projectPath, "diagnosis.materials");
   }
 
-  async acceptCreationTask(task) {
+  async acceptCreationTask(task, options = {}) {
     if (!task || !task.taskPath || task.status !== "awaiting_approval") throw new Error("当前任务不在等待确认状态");
     const normalizedProjectPath = normalizePath(task.projectPath || "");
     if (!normalizedProjectPath.endsWith("/project.md") || !(await this.pathExists(normalizedProjectPath))) throw new Error("找不到创作项目");
@@ -5123,7 +5642,8 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       const match = Object.entries(task.outputHashes || {}).find(([outputPath]) => outputPath.includes(fragment));
       return match ? match[1] : fallback;
     };
-    if (task.qualityThreshold && (!task.qualityPassed || Number(task.qualityScore) < Number(task.qualityThreshold))) {
+    const qualityOverride = Boolean(options.allowQualityOverride && task.kind === "wechat.qa" && task.qualityThreshold);
+    if (task.qualityThreshold && !qualityOverride && (!task.qualityPassed || Number(task.qualityScore) < Number(task.qualityThreshold))) {
       throw new Error(`当前质量分 ${Number(task.qualityScore) || 0}，未达到 ${task.qualityThreshold} 分门槛`);
     }
     let workflowState = await this.loadCreationWorkflowState(directory);
@@ -5192,6 +5712,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       projectId: task.projectId,
       gate: task.kind,
       decision: "accepted",
+      ...(qualityOverride ? { qualityOverride: true, qualityScore: Number(task.qualityScore) || 0 } : {}),
       artifactVersion: outputVersion,
       artifactVersionIds: artifactVersions.map((record) => record.artifactVersionId),
       createdAt: this.now(),
@@ -5210,7 +5731,25 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     if (task.kind === "wechat.plan") await this.queueCreationStageTask(normalizedProjectPath, "wechat.draft");
     if (task.kind === "xhs.plan") await this.queueXhsCardTasks(normalizedProjectPath);
     if (task.kind === "wechat.draft") await this.queueCreationStageTask(normalizedProjectPath, "wechat.qa");
-    if (task.kind === "wechat.qa") await this.queueWechatVisualTasks(normalizedProjectPath);
+    if (task.kind === "wechat.qa") {
+      try {
+        await this.queueWechatVisualTasks(normalizedProjectPath);
+      } catch (error) {
+        const current = await this.loadCreationWorkflowState(directory);
+        await this.saveCreationWorkflowState(directory, {
+          ...current,
+          deliverables: {
+            ...current.deliverables,
+            wechat: {
+              ...current.deliverables.wechat,
+              taskState: "visual_queue_failed",
+              visualQueueError: String(error && error.message || error || "创建逐图任务失败"),
+            },
+          },
+        });
+        throw error;
+      }
+    }
     if (task.kind === "xhs.package") await this.queueCreationStageTask(normalizedProjectPath, "xhs.copy-qa");
     return { task: updatedTask, workflowState };
   }
@@ -5360,6 +5899,8 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     const draftPath = `${directory}/deliverables/wechat/wechat-001/drafts/v1.md`;
     const draftText = (await this.pathExists(draftPath)) ? await this.readText(draftPath) : "";
     const groupId = `wechat-visual-${crypto.createHash("sha256").update(`${articleVersion}\0${planText}`).digest("hex").slice(0, 16)}`;
+    await this.ensureFolder(`${directory}/deliverables/wechat/wechat-001/visuals/requests`);
+    await this.ensureFolder(`${directory}/deliverables/wechat/wechat-001/visuals/results`);
     const tasks = [];
     for (const item of items) {
       const requestRelative = `deliverables/wechat/wechat-001/visuals/requests/${item.id}.json`;
@@ -5394,6 +5935,31 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       visualGroupId: groupId,
     }));
     return tasks;
+  }
+
+  async retryWechatVisualTasks(projectPath) {
+    const normalizedProjectPath = normalizePath(projectPath || "");
+    if (!this.isTopLevelCreationProjectPath(normalizedProjectPath) || !(await this.pathExists(normalizedProjectPath))) throw new Error("找不到创作项目");
+    const existing = (await this.listCreationRunnerTasks()).filter((task) => task.projectPath === normalizedProjectPath && task.kind === "wechat.visual-item" && ["pending", "running", "awaiting_approval", "completed"].includes(task.status));
+    if (existing.length) return existing;
+    const directory = normalizedProjectPath.slice(0, -"/project.md".length);
+    try {
+      return await this.queueWechatVisualTasks(normalizedProjectPath);
+    } catch (error) {
+      const current = await this.loadCreationWorkflowState(directory);
+      await this.saveCreationWorkflowState(directory, {
+        ...current,
+        deliverables: {
+          ...current.deliverables,
+          wechat: {
+            ...current.deliverables.wechat,
+            taskState: "visual_queue_failed",
+            visualQueueError: String(error && error.message || error || "创建逐图任务失败"),
+          },
+        },
+      });
+      throw error;
+    }
   }
 
   normalizeXhsCardPages(proposal) {
@@ -5770,11 +6336,118 @@ module.exports = class ReadingCapturePlugin extends Plugin {
   }
 
   async retryCreationTask(task) {
-    if (!task || !task.taskPath || !["failed", "waiting_user", "partial", "stale"].includes(task.status)) throw new Error("当前任务不能重试");
+    if (!task || !task.taskPath || !["failed", "waiting_user", "partial", "stale", "cancelled"].includes(task.status)) throw new Error("当前任务不能重试");
     const updated = { ...task, status: "pending", updatedAt: this.now(), error: "", waitingReason: null, nextAttemptAt: null };
     delete updated.taskPath;
     await this.writeText(task.taskPath, `${JSON.stringify(updated, null, 2)}\n`);
     return updated;
+  }
+
+  visualSkillLabel(skillId) {
+    return ({
+      "liangkeban-xiaoxiaoke-illustrations": "两颗半小小克配图",
+      "baoyu-infographic": "宝玉 Infographic",
+    })[String(skillId || "")] || String(skillId || "未指定 Skill");
+  }
+
+  async editCreationVisualTask(task, changes = {}) {
+    if (!task || !task.taskPath || task.kind !== "wechat.visual-item") throw new Error("只能调整公众号逐图任务");
+    if (["pending", "running"].includes(task.status)) throw new Error("图片正在生成，请等待本轮任务结束后再调整");
+    const skillId = String(changes.skillId || task.skillId || "").trim();
+    const allowedSkills = ["liangkeban-xiaoxiaoke-illustrations", "baoyu-infographic"];
+    if (!allowedSkills.includes(skillId)) throw new Error("当前阶段不允许调用这个 Skill");
+    const requestPath = (task.inputs || []).find((value) => /\/visuals\/requests\/[^/]+\.json$/u.test(value));
+    if (!requestPath || !(await this.pathExists(requestPath))) throw new Error("找不到这张图的生成请求记录");
+    let request;
+    try { request = JSON.parse(await this.readText(requestPath)); } catch (error) { throw new Error("配图请求记录无法解析"); }
+    const prompt = String(changes.prompt == null ? request.prompt || request.purpose || request.label || "" : changes.prompt).trim();
+    if (!prompt) throw new Error("请输入配图生成提示词");
+    const revision = Number(request.revision || 1) + 1;
+    const directory = normalizePath(task.projectDirectory || String(task.projectPath || "").replace(/\/project\.md$/u, ""));
+    const archived = [];
+    for (const output of task.outputs || []) {
+      if (!(await this.pathExists(output))) continue;
+      const relative = output.startsWith(`${directory}/`) ? output.slice(directory.length + 1) : "";
+      if (!relative) continue;
+      const fileName = relative.split("/").pop();
+      const archivePath = `${directory}/deliverables/wechat/wechat-001/visuals/versions/${String(task.childKey || "image").replace(/[^a-z0-9_-]+/gi, "-")}/r${revision}-${fileName}`;
+      await this.copyCreationSnapshotFile(output, archivePath);
+      archived.push(archivePath);
+    }
+    const nextRequest = {
+      ...request,
+      skillId,
+      prompt,
+      revision,
+      previousTaskId: task.taskId,
+      previousOutputPaths: archived,
+      updatedAt: this.now(),
+    };
+    await this.writeText(requestPath, `${JSON.stringify(nextRequest, null, 2)}\n`);
+    const superseded = { ...task, status: "superseded", updatedAt: this.now(), supersededReason: "用户调整了配图 Skill 或生成提示词" };
+    delete superseded.taskPath;
+    await this.writeText(task.taskPath, `${JSON.stringify(superseded, null, 2)}\n`);
+    const next = await this.queueCreationStageTask(task.projectPath, "wechat.visual-item", {
+      force: true,
+      skillId,
+      childKey: task.childKey,
+      childLabel: task.childLabel,
+      dependencyAnchor: task.dependencyAnchor,
+      groupId: task.groupId,
+      requiredChildCount: task.requiredChildCount,
+      inputOverride: (task.inputs || []).map((value) => value.startsWith(`${directory}/`) ? value.slice(directory.length + 1) : value),
+      outputOverride: (task.outputs || []).map((value) => value.startsWith(`${directory}/`) ? value.slice(directory.length + 1) : value),
+    });
+    const state = await this.loadCreationWorkflowState(directory);
+    await this.saveCreationWorkflowState(directory, {
+      ...state,
+      currentStage: "visual",
+      deliverables: {
+        ...state.deliverables,
+        wechat: { ...state.deliverables.wechat, stage: "visual", taskState: "visual_children_queued" },
+      },
+    });
+    return next;
+  }
+
+  openVisualTaskEditor(task, onSaved) {
+    const modal = new VisualTaskEditorModal(this.app, this, task, onSaved);
+    modal.open();
+  }
+
+  buildCreationVisualPrompt(request = {}, task = {}, skillId = "liangkeban-xiaoxiaoke-illustrations") {
+    const subject = String(request.label || task.childLabel || "当前配图主题").trim();
+    const purpose = String(request.purpose || "解释正文中的一个关键判断").trim();
+    const sourceAnchor = String(request.sourceAnchor || request.insertionAnchor || "对应正文段落").trim();
+    const sourceExcerpt = String(request.sourceExcerpt || "").replace(/\s+/gu, " ").trim().slice(0, 360);
+    const context = sourceExcerpt ? `\n正文依据（只用于理解，不要把整段照抄到图上）：${sourceExcerpt}` : "";
+    const isLoopGraph = /loop/iu.test(subject) && /graph/iu.test(subject);
+
+    if (skillId === "baoyu-infographic") {
+      const layout = isLoopGraph ? "structural-breakdown（结构剖面）" : "structural-breakdown（围绕一个核心关系拆解）";
+      const composition = isLoopGraph
+        ? "画面中央是一组由 4–5 个节点连接而成的 Graph；放大其中一个节点，露出节点内部的 Loop 小循环。外围节点只用‘路由、并行、交接、恢复’四个短标签，内部循环只用‘计划、行动、观察、校验’四个短标签。用一条清楚但不夸张的连接关系表达：Graph 负责节点之间的组织，Loop 负责节点内的收敛。"
+        : `以“${subject}”为中心，用一个主结构与 3–5 个必要组成部分解释“${purpose}”。元素之间只保留能支撑正文判断的关系，不要把正文改造成完整流程图。`;
+      return `为微信公众号正文生成 1 张可独立理解的 16:9 横向中文技术信息图，1600×900。\n\n任务定位：\n主题：${subject}\n这张图只要帮助读者理解：${purpose}\n放置位置：${sourceAnchor}${context}\n\n信息结构：\n采用 ${layout}，不是通用海报，也不是产品界面。${composition}\n\n视觉与文字：\n使用 technical-schematic 技术示意风格：干净浅色或白色背景，深墨色线条与文字，有限的一种强调色用于关键关系；清晰的层级、留白和对齐。中文必须简短、准确、可读，控制在 6–8 个以内的短标签；不使用长段解释，不虚构数据、案例或结论。\n\n构图要求：\n主结构占画面约 55%，四周保留足够呼吸空间；先让读者一眼看到核心关系，再读到局部标注。画面只表达一个判断，不要塞入多个并列结论。\n\n明确禁止：\n不要 3D 装饰、渐变光效、玻璃拟态、真实 App 截图、无关 Logo、品牌标识、夸张科技网格、密集方框、PPT 模板感或无法阅读的小字。不要把“${subject}”做成只有标题的空泛概念图。`;
+    }
+
+    const composition = isLoopGraph
+      ? "在干净白纸上画一个不规则的 4–5 节点手绘网络，节点之间以细线自然相连；其中一个节点被放大成小小克正在转动的微型工作台，工作台里是一圈‘计划 → 行动 → 观察 → 校验’的轻微循环。小小克要用身体压住校准刻度、认真让小循环稳定运转；网络外层只暗示路由、并行、交接与恢复。通过“节点里的小循环嵌在更大网络中”的画面，而不是两张对立图，表达两者是组合关系。"
+      : `围绕“${subject}”发明一个只属于这段正文的怪诞工程隐喻。让小小克承担“${purpose}”中的关键动作：它必须在压住、校准、称量、拉线、分流、接住或沉淀某个核心对象，而不是站在一旁。画面只保留 3–4 个能说明关系的物件。`;
+    const labels = isLoopGraph ? "节点内 Loop / 路由 / 并行 / 交接 / 恢复 / 校验" : "只保留 3–6 个与主题直接相关的短中文批注；不要写大标题";
+    return `生成 1 张独立的 16:9 横版微信公众号中文正文配图，1600×900。\n\nVisual DNA：\n纯白背景；以黑色或近黑色的轻微抖动手绘线稿为主；至少保留 35% 留白。只用两克伴酒红（接近 #B5122B）做少量信号弧、校准刻度和关键判断点；若必须区分主路径，才极少量使用橙色；默认不使用蓝色。整体像一张克制、怪诞、清爽的产品草图，不是海报或信息图。\n\n小小克 IP（必须出现且承担核心动作）：\n一个纯黑或近黑的不规则、有质量感的小生物，白色圆点眼、细腿、表情冷静；像黑豆、墨滴或被压扁的软块，绝不是猫、标准砝码、印章、贴纸或可爱吉祥物。\n\n主题与正文判断：\n主题：${subject}\n要让读者理解：${purpose}\n放置位置：${sourceAnchor}${context}\n\n具体构图：\n${composition}\n\n画面标注：\n${labels}。全部采用少量中文手写感标注，每个 2–8 个字，最多 5–8 处；不要在左上角写类型标题。\n\n构图与质量约束：\n主体占画面约 40%–60%，让小小克与核心结构共同成为视觉中心；一张图只讲一个关系，读者不看正文也能大致理解。不要复刻旧图，不要用复杂架构图、正式流程图、PPT 信息图、商业矢量插画、儿童卡通、渐变、阴影、纸张纹理、密集文字、真实 UI、无关 Logo 或未经证实的事实。画面应有轻微幽默感，但不幼稚，中文在手机端必须清晰可读。`;
+  }
+
+  async retryCreationTasksForSkill(projectPath, skillId) {
+    const normalizedProjectPath = normalizePath(projectPath || "");
+    const normalizedSkillId = String(skillId || "").trim();
+    if (!normalizedProjectPath.endsWith("/project.md") || !normalizedSkillId) throw new Error("缺少项目或 Skill 信息");
+    const tasks = await this.listCreationRunnerTasks();
+    const retried = [];
+    for (const task of tasks.filter((item) => item.projectPath === normalizedProjectPath && item.skillId === normalizedSkillId && ["waiting_user", "failed", "partial", "stale"].includes(item.status))) {
+      retried.push(await this.retryCreationTask(task));
+    }
+    return retried;
   }
 
   async markCreationVisualTasksStale(projectPath, platform, reason, taskRecords = null, contentChange = null) {
@@ -6027,7 +6700,12 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       await this.saveCreationWorkflowState(directory, state);
       if (artifact === "wechatDraft") await this.markCreationVisualTasksStale(normalizedProjectPath, "wechat", "公众号正文进入新一轮 AI 修订，旧配图依赖待重新核对", tasks);
     }
-    return this.queueCreationStageTask(normalizedProjectPath, definition.taskKind, { force: true, extraInputs: [requestRelative] });
+    const extraInputs = [requestRelative];
+    if (artifact === "wechatDraft") {
+      const qaRelative = "deliverables/wechat/wechat-001/qa.md";
+      if (await this.pathExists(`${directory}/${qaRelative}`)) extraInputs.push(qaRelative);
+    }
+    return this.queueCreationStageTask(normalizedProjectPath, definition.taskKind, { force: true, extraInputs });
   }
 
   async saveCreationPlanDecision(projectPath, platform, decision) {
@@ -6173,7 +6851,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     if (!deliverable) throw new Error("找不到要验收的交付物");
     let version = deliverable.cardVersion || deliverable.articleVersion || this.now();
     if (platform === "wechat") {
-      const tasks = (await this.listCreationRunnerTasks()).filter((task) => task.projectPath === normalizedProjectPath && task.kind === "wechat.visual-item" && (!deliverable.visualGroupId || task.groupId === deliverable.visualGroupId));
+      const tasks = (await this.listCreationRunnerTasks()).filter((task) => task.projectPath === normalizedProjectPath && task.kind === "wechat.visual-item" && !["superseded", "cancelled"].includes(task.status) && (!deliverable.visualGroupId || task.groupId === deliverable.visualGroupId));
       if (!tasks.length) throw new Error("当前公众号项目没有可验收的逐图任务");
       const incomplete = tasks.filter((task) => task.status !== "completed");
       if (incomplete.length) throw new Error(`仍有 ${incomplete.length} 个配图任务未完成，不能进入定稿`);
@@ -6512,6 +7190,13 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     return this.queueCreationStageTask(normalizedProjectPath, "diagnosis.materials");
   }
 
+  async saveCreationResearchGuidance(projectPath, content) {
+    const normalizedProjectPath = normalizePath(projectPath || "");
+    if (!normalizedProjectPath.endsWith("/project.md") || !(await this.pathExists(normalizedProjectPath))) throw new Error("找不到创作项目");
+    const directory = normalizedProjectPath.slice(0, -"/project.md".length);
+    await this.writeText(`${directory}/planning/research-request.md`, `# 联网研究指导\n\n${String(content || "").trim()}\n`);
+  }
+
   async chooseCreationResearchPath(projectPath, decision) {
     const normalizedProjectPath = normalizePath(projectPath || "");
     if (!normalizedProjectPath.endsWith("/project.md") || !(await this.pathExists(normalizedProjectPath))) throw new Error("找不到创作项目");
@@ -6552,6 +7237,32 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     markdown = this.replaceFrontmatterValue(markdown, "status", "research-configuration");
     await this.writeText(normalizedProjectPath, this.touchFrontmatter(markdown));
     return updated;
+  }
+
+  async restoreCreationContentReview(projectPath) {
+    const normalizedProjectPath = normalizePath(projectPath || "");
+    if (!normalizedProjectPath.endsWith("/project.md") || !(await this.pathExists(normalizedProjectPath))) throw new Error("找不到创作项目");
+    const directory = normalizedProjectPath.slice(0, -"/project.md".length);
+    const state = await this.loadCreationWorkflowState(directory);
+    const tasks = (await this.listCreationRunnerTasks()).filter((task) => task.projectPath === normalizedProjectPath);
+    const researchTask = tasks.find((task) => task.kind === "research.evidence" && task.status === "completed");
+    const briefTask = tasks.find((task) => task.kind === "brief.master" && task.status === "completed");
+    const planTask = tasks.find((task) => task.kind === "wechat.plan" && task.status === "completed");
+    const draftTask = tasks.find((task) => task.kind === "wechat.draft" && task.status === "completed");
+    const qaTask = tasks.find((task) => task.kind === "wechat.qa" && task.status === "superseded" && /补充证据|新研究结果/u.test(String(task.error || "")));
+    if (!researchTask || !briefTask || !planTask || !draftTask || !qaTask || !(await this.pathExists(`${directory}/deliverables/wechat/wechat-001/qa.md`))) {
+      throw new Error("找不到可恢复的正文与质量报告；请先重新完成研究或正文生成。");
+    }
+    const researchVersion = Object.values(researchTask.outputHashes || {}).find(Boolean) || researchTask.completedAt;
+    const restored = creationWorkflow.restoreContentReviewAfterResearchReturn(state, researchVersion);
+    await this.saveCreationWorkflowState(directory, restored);
+    const restoredQa = { ...qaTask, status: "awaiting_approval", error: "已恢复到当前正文审核；本次研究内容未变更。", updatedAt: this.now(), restoredAfterResearchReturn: true };
+    delete restoredQa.taskPath;
+    await this.writeText(qaTask.taskPath, `${JSON.stringify(restoredQa, null, 2)}\n`);
+    let markdown = await this.readText(normalizedProjectPath);
+    markdown = this.replaceFrontmatterValue(markdown, "status", "content-review");
+    await this.writeText(normalizedProjectPath, this.touchFrontmatter(markdown));
+    return restored;
   }
 
   isCompletedCreationDiagnosis(content) {
@@ -7704,12 +8415,30 @@ module.exports = class ReadingCapturePlugin extends Plugin {
         relationship: String(item.relationship || item.publishedRelationship || "").trim(),
         firstAction: String(item.firstAction || item.nextAction || "").trim(),
         reason: String(item.reason || "").trim(),
+        growth: this.normalizeTopicMinerGrowth(item.growth),
         sources: sourcePaths,
         sourceLabels,
         sourcePath: sourcePaths[0] || "",
         sourceTitle: sourceLabels[0] || sourcePaths[0] || "",
       };
     });
+  }
+
+  normalizeTopicMinerGrowth(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const platformFit = Array.isArray(value.platformFit)
+    ? value.platformFit.map((item) => String(item || "").trim()).filter(Boolean)
+    : String(value.platformFit || "").trim();
+  const growth = {
+    contentRole: String(value.contentRole || "").trim(),
+    targetAction: String(value.targetAction || "").trim(),
+    platformFit,
+    seriesRelation: String(value.seriesRelation || "").trim(),
+    accountPromise: String(value.accountPromise || "").trim(),
+    growthHypothesis: String(value.growthHypothesis || "").trim(),
+  };
+  const hasValue = growth.contentRole || growth.targetAction || growth.platformFit.length || growth.seriesRelation || growth.accountPromise || growth.growthHypothesis;
+  return hasValue ? growth : null;
   }
 
   async getTopicMinerReportFiles() {
