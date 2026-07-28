@@ -8,6 +8,22 @@ When the user asks about future Reading Capture plugin optimization, improvement
 
 For major UI changes, prepare a design proposal or mockup first and wait for confirmation before changing code.
 
+This is the single current Roadmap. The dated `plugin-optimization-plan-2026-07-04.md` is retained only as historical context and must not be treated as a second source of truth.
+
+## Design And Verification Gate
+
+For every significant UI change:
+
+1. Confirm the mockup before changing code.
+2. Map each visible field to a real data source.
+3. Map fixed/scrollable regions, primary click targets, and secondary actions.
+4. Implement the approved structure without silently simplifying it.
+5. Run tests and build checks.
+6. Load the plugin in Obsidian, capture the real UI, and compare it with the approved mockup.
+7. Test empty, single-record, multi-record, missing-data, and varied-folder-structure cases.
+
+A successful build is not visual acceptance.
+
 ## Current State
 
 Already completed:

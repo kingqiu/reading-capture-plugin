@@ -1,0 +1,193 @@
+<svg width="1920" height="1080" viewBox="0 0 1920 1080" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1920" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FCFF"/>
+      <stop offset="0.54" stop-color="#EEF8FF"/>
+      <stop offset="1" stop-color="#E7F5FF"/>
+    </linearGradient>
+    <linearGradient id="titleBox" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#EAF8FF"/>
+      <stop offset="1" stop-color="#D4EEFF"/>
+    </linearGradient>
+    <linearGradient id="blueCard" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#E9F8FF"/>
+      <stop offset="1" stop-color="#CDEBFF"/>
+    </linearGradient>
+    <linearGradient id="blueDeep" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#3D9CE0"/>
+      <stop offset="1" stop-color="#0F4F8E"/>
+    </linearGradient>
+    <linearGradient id="center" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="0.45" stop-color="#DFF6FF"/>
+      <stop offset="1" stop-color="#B9E5FF"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#0B5F9F" flood-opacity="0.18"/>
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#0B5F9F" flood-opacity="0.12"/>
+    </filter>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10Z" fill="#1688C8"/>
+    </marker>
+    <marker id="arrowWhite" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0L10 5L0 10Z" fill="#FFFFFF"/>
+    </marker>
+    <style>
+      .ui { font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+      .title { fill:#06203A; font-size:42px; font-weight:900; letter-spacing:.5px; }
+      .subtitle { fill:#143B5B; font-size:22px; font-weight:700; }
+      .sectionTitle { fill:#FFFFFF; font-size:25px; font-weight:900; letter-spacing:.3px; }
+      .cardTitle { fill:#073154; font-size:24px; font-weight:900; }
+      .cardSub { fill:#174767; font-size:17px; font-weight:650; }
+      .small { fill:#255A78; font-size:15px; font-weight:650; }
+      .centerTitle { fill:#06203A; font-size:34px; font-weight:950; }
+      .centerSub { fill:#164462; font-size:18px; font-weight:750; }
+      .layer { fill:#083456; font-size:20px; font-weight:850; }
+      .loopLabel { fill:#0A5D94; font-size:18px; font-weight:900; letter-spacing:.8px; }
+    </style>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+
+  <!-- Subtle technology background -->
+  <g opacity="0.38">
+    <circle cx="156" cy="82" r="11" fill="#D7F0FF" stroke="#77BDEB" stroke-width="2"/>
+    <rect x="139" y="126" width="36" height="36" fill="#DFF3FF" stroke="#A6D7F4" stroke-width="2"/>
+    <path d="M1608 78L1690 34L1738 138L1664 190L1608 78Z" stroke="#94CEF0"/>
+    <path d="M1608 78L1664 190M1690 34L1664 190M1738 138L1608 78" stroke="#94CEF0"/>
+    <circle cx="1608" cy="78" r="5" fill="#62B8E8"/>
+    <circle cx="1690" cy="34" r="5" fill="#62B8E8"/>
+    <circle cx="1738" cy="138" r="5" fill="#62B8E8"/>
+    <circle cx="1664" cy="190" r="12" fill="#E5F7FF" stroke="#58B8EA" stroke-width="4"/>
+    <path d="M74 880C166 828 250 840 330 920" stroke="#AADBF3"/>
+    <circle cx="74" cy="880" r="10" fill="#E5F7FF" stroke="#58B8EA" stroke-width="3"/>
+    <circle cx="330" cy="920" r="10" fill="#E5F7FF" stroke="#58B8EA" stroke-width="3"/>
+    <path d="M64 766H112M54 786H132M74 806H124" stroke="#60B9E9" stroke-width="5" stroke-linecap="round"/>
+    <path d="M1768 740H1812M1784 760H1830M1768 780H1804" stroke="#60B9E9" stroke-width="5" stroke-linecap="round"/>
+  </g>
+
+  <!-- Title -->
+  <g class="ui" filter="url(#shadow)">
+    <rect x="420" y="44" width="1080" height="98" rx="20" fill="url(#titleBox)" stroke="#328FD0" stroke-width="3"/>
+    <text x="960" y="88" text-anchor="middle" class="title">AI 内容创作知识闭环架构</text>
+    <text x="960" y="122" text-anchor="middle" class="subtitle">Obsidian as Long-term Memory · Codex as Creative Engine</text>
+  </g>
+
+  <!-- Loop rail -->
+  <g opacity="0.95">
+    <path d="M455 540C455 310 655 176 960 176C1265 176 1465 310 1465 540C1465 770 1265 904 960 904C655 904 455 770 455 540Z"
+      stroke="#2EA4DF" stroke-width="8" stroke-linecap="round" stroke-dasharray="2 26" opacity="0.28"/>
+    <path d="M510 348C606 234 770 182 960 182C1156 182 1322 238 1416 360" stroke="#1688C8" stroke-width="4" marker-end="url(#arrow)"/>
+    <path d="M1458 470C1482 612 1420 746 1292 824" stroke="#1688C8" stroke-width="4" marker-end="url(#arrow)"/>
+    <path d="M1110 894C892 948 642 884 524 718" stroke="#1688C8" stroke-width="4" marker-end="url(#arrow)"/>
+    <path d="M462 622C428 520 444 430 510 348" stroke="#1688C8" stroke-width="4" marker-end="url(#arrow)"/>
+  </g>
+
+  <g class="ui">
+    <text x="568" y="236" class="loopLabel">01 CAPTURE</text>
+    <text x="1310" y="282" class="loopLabel">02 ENRICH</text>
+    <text x="1344" y="790" class="loopLabel">03 DISTILL</text>
+    <text x="624" y="896" class="loopLabel">04 PUBLISH & FEEDBACK</text>
+  </g>
+
+  <!-- Center Obsidian -->
+  <g class="ui" filter="url(#shadow)">
+    <rect x="690" y="300" width="540" height="470" rx="34" fill="url(#center)" stroke="#1A8BC8" stroke-width="3"/>
+    <circle cx="960" cy="396" r="74" fill="#FFFFFF" opacity="0.72"/>
+    <circle cx="960" cy="396" r="92" fill="#9FDCFF" opacity="0.22" filter="url(#soft)"/>
+    <text x="960" y="384" text-anchor="middle" class="centerTitle">Obsidian</text>
+    <text x="960" y="418" text-anchor="middle" class="centerSub">长期知识与素材中枢</text>
+    <text x="960" y="444" text-anchor="middle" class="centerSub">Long-term AI Memory Hub</text>
+
+    <rect x="760" y="510" width="400" height="56" rx="14" fill="#FFFFFF" stroke="#8CCCEB"/>
+    <text x="960" y="546" text-anchor="middle" class="layer">原始资料</text>
+    <rect x="760" y="586" width="400" height="56" rx="14" fill="#FFFFFF" stroke="#8CCCEB"/>
+    <text x="960" y="622" text-anchor="middle" class="layer">知见录 / 阅读标注</text>
+    <rect x="760" y="662" width="400" height="56" rx="14" fill="#FFFFFF" stroke="#8CCCEB"/>
+    <text x="960" y="698" text-anchor="middle" class="layer">知识沉淀</text>
+  </g>
+
+  <!-- Left inputs -->
+  <g class="ui" filter="url(#shadow)">
+    <rect x="118" y="246" width="318" height="90" rx="18" fill="url(#blueCard)" stroke="#73BFEA" stroke-width="2"/>
+    <text x="277" y="286" text-anchor="middle" class="cardTitle">OpenClaw / 龙虾</text>
+    <text x="277" y="314" text-anchor="middle" class="cardSub">移动端随手收藏 / 灵感捕捉</text>
+
+    <rect x="118" y="382" width="318" height="90" rx="18" fill="url(#blueCard)" stroke="#73BFEA" stroke-width="2"/>
+    <text x="277" y="422" text-anchor="middle" class="cardTitle">Hermes</text>
+    <text x="277" y="450" text-anchor="middle" class="cardSub">移动端资料汇总</text>
+
+    <rect x="118" y="518" width="318" height="90" rx="18" fill="url(#blueCard)" stroke="#73BFEA" stroke-width="2"/>
+    <text x="277" y="558" text-anchor="middle" class="cardTitle">Web Clipper</text>
+    <text x="277" y="586" text-anchor="middle" class="cardSub">PC Browser 网页文章采集</text>
+
+    <rect x="118" y="654" width="318" height="90" rx="18" fill="#FFFFFF" stroke="#A7D8F2" stroke-width="2" stroke-dasharray="9 8"/>
+    <text x="277" y="694" text-anchor="middle" class="cardTitle">未来入口</text>
+    <text x="277" y="722" text-anchor="middle" class="cardSub">视频 / 音频 / 文档</text>
+  </g>
+
+  <g stroke="#1688C8" stroke-width="3" marker-end="url(#arrow)">
+    <path d="M436 291C540 304 606 344 690 412"/>
+    <path d="M436 427C544 438 612 462 690 514"/>
+    <path d="M436 563C544 560 612 576 690 612"/>
+    <path d="M436 699C548 686 612 672 690 682"/>
+  </g>
+
+  <!-- Human and AI enrichment -->
+  <g class="ui" filter="url(#shadow)">
+    <rect x="756" y="172" width="408" height="82" rx="18" fill="#FFFFFF" stroke="#79C5EB" stroke-width="2"/>
+    <text x="960" y="207" text-anchor="middle" class="cardTitle">People / 我</text>
+    <text x="960" y="235" text-anchor="middle" class="cardSub">心得、笔记、判断、补充</text>
+
+    <rect x="756" y="826" width="408" height="82" rx="18" fill="#FFFFFF" stroke="#79C5EB" stroke-width="2"/>
+    <text x="960" y="861" text-anchor="middle" class="cardTitle">AI Agents</text>
+    <text x="960" y="889" text-anchor="middle" class="cardSub">OpenClaw 等：补充、改写、结构化、扩展</text>
+  </g>
+  <path d="M960 254V300" stroke="#1688C8" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M960 826V770" stroke="#1688C8" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <!-- Codex -->
+  <g class="ui" filter="url(#shadow)">
+    <rect x="1322" y="438" width="300" height="204" rx="30" fill="url(#blueDeep)" stroke="#0C4D83" stroke-width="2"/>
+    <text x="1472" y="516" text-anchor="middle" fill="#FFFFFF" font-size="38" font-weight="950">Codex</text>
+    <text x="1472" y="556" text-anchor="middle" fill="#E9F8FF" font-size="21" font-weight="800">提炼 / 二创</text>
+    <text x="1472" y="586" text-anchor="middle" fill="#E9F8FF" font-size="21" font-weight="800">智能内容生成</text>
+  </g>
+  <path d="M1230 540H1322" stroke="#0B5F9F" stroke-width="5" marker-end="url(#arrow)"/>
+  <path d="M1322 590H1230" stroke="#0B5F9F" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="1276" y="522" text-anchor="middle" class="ui" fill="#0A5D94" font-size="17" font-weight="900">提炼 ↔ 二创</text>
+
+  <!-- Outputs -->
+  <g class="ui" filter="url(#shadow)">
+    <rect x="1688" y="258" width="206" height="104" rx="20" fill="#FFFFFF" stroke="#79C5EB" stroke-width="2"/>
+    <text x="1791" y="304" text-anchor="middle" class="cardTitle">长文章</text>
+    <text x="1791" y="334" text-anchor="middle" class="cardSub">公众号 / 播客文章</text>
+
+    <rect x="1688" y="488" width="206" height="104" rx="20" fill="#FFFFFF" stroke="#79C5EB" stroke-width="2"/>
+    <text x="1791" y="534" text-anchor="middle" class="cardTitle">图文内容</text>
+    <text x="1791" y="564" text-anchor="middle" class="cardSub">小红书卡片 + 文案</text>
+
+    <rect x="1688" y="718" width="206" height="104" rx="20" fill="#FFFFFF" stroke="#79C5EB" stroke-width="2"/>
+    <text x="1791" y="764" text-anchor="middle" class="cardTitle">视频内容</text>
+    <text x="1791" y="794" text-anchor="middle" class="cardSub">视频号 / 抖音</text>
+  </g>
+
+  <g stroke="#1688C8" stroke-width="4" marker-end="url(#arrow)">
+    <path d="M1622 482C1656 430 1664 346 1688 310"/>
+    <path d="M1622 540H1688"/>
+    <path d="M1622 598C1656 650 1664 734 1688 770"/>
+  </g>
+
+  <!-- Feedback loop from outputs to Obsidian -->
+  <path d="M1791 822C1730 970 1366 1018 960 1018C560 1018 278 936 278 744" stroke="#1FA0DD" stroke-width="4" stroke-dasharray="12 10" marker-end="url(#arrow)"/>
+  <text x="960" y="1000" text-anchor="middle" class="ui" fill="#0A5D94" font-size="19" font-weight="900">发布反馈 / 新灵感 / 选题回流 → Obsidian</text>
+
+  <!-- Bottom caption aligned with center -->
+  <g class="ui">
+    <rect x="720" y="962" width="480" height="44" rx="22" fill="#FFFFFF" stroke="#9DD5F2"/>
+    <text x="960" y="991" text-anchor="middle" fill="#174767" font-size="18" font-weight="900">Capture → Enrich → Distill → Publish → Feedback</text>
+  </g>
+</svg>

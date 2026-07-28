@@ -268,7 +268,8 @@ Common commands:
 
 - Reading Capture works inside your Obsidian vault.
 - The plugin does not send your notes or articles to an online service.
-- AI topic mining is not built into this plugin and is not required. `创作灵感` only uses ideas you save manually while reading. If you use external AI workflows later, they can read the structured Markdown records.
+- AI topic mining is not built into this plugin and is not required. `创作灵感` works on its own with ideas you save manually while reading.
+- If your vault contains local Topic Miner reports, `创作灵感` can also show AI topic candidates. Feedback choices such as `待定 / 想写 / 暂存 / 不要 / 已写` and your extra notes are written only to the local file `Learning/reading-notes/topic-miner/feedback.jsonl`, so Topic Miner can read them on the next run.
 - Jumping back to the exact original position works best when the quoted text still exists in the article.
 - If you move article files after capturing records, you may need to rebuild the index or update paths.
 

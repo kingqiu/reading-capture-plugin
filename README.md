@@ -8,6 +8,23 @@ Reading Capture 是一个 Obsidian 插件，适合经常保存文章、做深度
 
 当前版本：`0.4.4`
 
+当前开发分支：`personal/topic-miner`
+
+## 本分支近期更新（2026-07-26 至 2026-07-28）
+
+这一轮重点把“阅读灵感 → 创作项目 → 平台内容 → 发布包”的流程补成了可检查、可恢复的工作台，而不是让用户在看不到内容的情况下连续点击按钮。
+
+- 新增并完善 `创作项目` 工作台入口：可从知见录和创作灵感进入；项目、当前平台和八个阶段都有明确状态。
+- 支持两条创作路径：从创作灵感开始完整策划，或从已保存的文章、笔记、PDF 直接改编为微信公众号文章或小红书图文。
+- 小红书方案支持三套模板与配色的样章对比，可直接查看实际图片、继续生成新的样章批次，并在确认后生成整套卡片与发布文案。
+- 配图任务支持逐张查看、单图重试、替换 Skill、重写提示词，以及用自然语言要求 Agent 修改某一页；已成功的页面不会被失败页面或重试任务覆盖。
+- 小红书卡片视觉审核与发布文案质检现为两个清晰阶段：视觉通过后留在第 7 步展示全部卡片和文案预览，文案质检不会再错误跳回第 6 步或显示机器清单。
+- 内容审核改为优先展示可读缩略图和完整文案区域；不再把卡片清单、哈希和路径作为人工审核主界面。
+- Runner 队列增加了更明确的运行、等待、失败和重试反馈；重新入队后，项目页面会即时显示状态，而不是只出现短暂提示。
+- 统一创作项目、项目选择器、弹窗和发布复盘弹窗的视觉样式，补齐窄屏、长标题、下拉选项和按钮可见性问题。
+
+这部分仍是面向个人工作流的开发分支功能。使用前请先确认创作项目根目录、发布目录与本机 Skill Runner 配置；生成内容、图片和发布快照都会保留在本地 Obsidian 仓库中，供后续继续编辑和复盘。
+
 ## 这个插件能做什么
 
 - 在 `知见录` 里集中浏览你保存过的文章。
@@ -65,6 +82,10 @@ Reading Capture 是一个 Obsidian 插件，适合经常保存文章、做深度
         └── reading-capture/
             ├── main.js
             ├── reading-core.js
+            ├── creation-workflow.js
+            ├── skill-registry.js
+            ├── skill-runner.js
+            ├── skill-manager.js
             ├── manifest.json
             └── styles.css
 ```
@@ -102,7 +123,7 @@ Reading Capture 是一个 Obsidian 插件，适合经常保存文章、做深度
 你的 Obsidian 仓库/.obsidian/plugins/reading-capture/
 ```
 
-这个目录里应该直接看到 `main.js`、`manifest.json`、`styles.css` 和 `reading-core.js`。
+这个目录里应该直接看到 `main.js`、`manifest.json`、`styles.css`、`reading-core.js`，以及 `creation-workflow.js`、`skill-registry.js`、`skill-runner.js`、`skill-manager.js` 等配套文件。
 
 如果你看到的是下面这种结构，就说明多套了一层文件夹：
 
@@ -267,6 +288,7 @@ Reading Capture: 加入事实待核查
 
 - `Reading Capture: 打开知见录`
 - `Reading Capture: 打开创作灵感`
+- `Reading Capture: 打开创作项目`
 - `Reading Capture: 打开阅读器视图`
 - `Reading Capture: 标注选中文本并记录想法`
 - `Reading Capture: 快速高亮选中文本`
@@ -282,7 +304,8 @@ Reading Capture: 加入事实待核查
 
 - Reading Capture 主要在你的 Obsidian 仓库内部工作。
 - 插件本身不会把你的文章或笔记发送到在线服务。
-- 这个插件本身不内置 AI 选题功能，也不需要额外安装 Topic Miner 之类的自动化工具。“创作灵感”只来自你在阅读时手动保存的记录。如果你后续有自己的 AI 自动化流程，也可以读取这些结构化的 Markdown 阅读记录。
+- 这个插件本身不内置 AI 模型，也不需要额外安装 Topic Miner 之类的自动化工具。“创作灵感”可以独立展示你在阅读时手动保存的记录。
+- 如果你的库里有 Topic Miner 生成的本地报告，`创作灵感` 会额外显示 AI 选题候选；你在插件里选择 `待定 / 想写 / 暂存 / 不要 / 已写` 或填写补充备注时，只会写入本地的 `Learning/reading-notes/topic-miner/feedback.jsonl`，方便 Topic Miner 下次运行时读取。
 - “回到原文位置”依赖原文中还能找到当初标注的文字。如果原文被大幅修改，可能只能打开原文，不能精确定位。
 - 如果你移动了文章文件，可能需要运行 `重建阅读索引`，或者手动调整相关路径。
 

@@ -1,5 +1,7 @@
 # Reading Capture Plugin Optimization Plan - 2026-07-04
 
+> Historical snapshot only. The active source of truth is `docs/plugin-optimization-plan.md`.
+
 ## Context
 
 This plan captures the next plugin-focused optimization work after the 2026-07-03 session.
