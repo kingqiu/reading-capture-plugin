@@ -15,6 +15,7 @@ async function testRunnerDryRunClaimsAndValidatesTask() {
     fs.mkdirSync(queueDirectory, { recursive: true });
     fs.writeFileSync(path.join(projectDirectory, "project.md"), "# Project\n");
     fs.writeFileSync(path.join(projectDirectory, "planning/context.md"), "# Context\n");
+    fs.writeFileSync(path.join(projectDirectory, "planning/context.md"), "# Context\n");
     fs.writeFileSync(path.join(projectDirectory, "planning/research.md"), "# Research\n");
     fs.writeFileSync(path.join(projectDirectory, "planning/sources.md"), "# Sources\n");
     fs.writeFileSync(path.join(projectDirectory, "planning/diagnosis.md"), "# Diagnosis\n");
@@ -179,6 +180,24 @@ function testRunnerBuildsStageSpecificPrompts() {
   const qaPrompt = runner.buildPrompt(qaTask, projectDirectory);
   assert.match(qaPrompt, /配图尚未生成不得扣分/);
   assert.match(qaPrompt, /视觉验收阶段/);
+
+  const xhsSamplesTask = makeTask({
+    kind: "xhs.samples",
+    skillId: "keke-social-card-skill",
+    managedSkillEntry: "/workspace/.managed-skills/keke-social-card-skill/SKILL.md",
+    inputs: [
+      "Reading Capture/creation-projects/project-1/project.md",
+      "Reading Capture/creation-projects/project-1/deliverables/xiaohongshu/xiaohongshu-001/plan.md",
+      "Reading Capture/creation-projects/project-1/deliverables/xiaohongshu/xiaohongshu-001/samples/sample-round-1/plan-decision.json",
+    ].map(absolute),
+    outputs: ["Reading Capture/creation-projects/project-1/deliverables/xiaohongshu/xiaohongshu-001/samples/sample-round-1/sample-manifest.md"].map(absolute),
+  });
+  const samplesPrompt = runner.buildPrompt(xhsSamplesTask, projectDirectory);
+  assert.match(samplesPrompt, /render-social-deck\.mjs/);
+  assert.match(samplesPrompt, /由 Runner 在任务完成后执行/);
+  assert.match(samplesPrompt, /镜像\/翻转\/旋转/);
+  assert.match(samplesPrompt, /Graphite Mint/);
+  assert.match(samplesPrompt, /不可辨识为两套不同候选/);
 }
 
 function testRunnerExtractsConservativeQualityScore() {
@@ -202,6 +221,40 @@ async function testRunnerRejectsInvalidStructuredProductionPlans() {
       () => runner.validateOutputs({ kind: "xhs.plan", outputs: [{ relative: "proposals.json", absolute: proposalsPath }] }, {}),
       /proposal page is missing content/u,
     );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function testRunnerRequiresAuditableXhsSampleRenderContract() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "reading-capture-runner-sample-contract-"));
+  try {
+    const roundDirectory = path.join(root, "samples", "sample-round-1");
+    const decisionPath = path.join(roundDirectory, "plan-decision.json");
+    const manifestPath = path.join(roundDirectory, "sample-manifest.md");
+    fs.mkdirSync(roundDirectory, { recursive: true });
+    fs.writeFileSync(decisionPath, `${JSON.stringify({ sampleProposals: ["peacock", "graphite-mint"] }, null, 2)}\n`);
+    fs.writeFileSync(manifestPath, `# Sample manifest\n\n${"x".repeat(240)}\n`);
+    const task = {
+      kind: "xhs.samples",
+      inputs: [{ relative: "plan-decision.json", absolute: decisionPath }],
+      outputs: [{ relative: "sample-manifest.md", absolute: manifestPath }],
+      outputDirectories: [{ relative: "samples/sample-round-1", absolute: roundDirectory }],
+    };
+    await assert.rejects(
+      () => runner.validateOutputs(task, {}),
+      /render and visual audit/i,
+    );
+
+    for (const proposalId of ["peacock", "graphite-mint"]) {
+      const images = path.join(roundDirectory, proposalId, "images");
+      fs.mkdirSync(images, { recursive: true });
+      fs.writeFileSync(path.join(roundDirectory, proposalId, "index.html"), "<main>normal direction</main>");
+      fs.writeFileSync(path.join(images, `${proposalId}-cover.png`), Buffer.from("fake"));
+      fs.writeFileSync(path.join(images, `${proposalId}-key-page.png`), Buffer.from("fake"));
+    }
+    fs.writeFileSync(manifestPath, `# Sample manifest\n\n## 渲染与视觉验收\n\n- 标准渲染器：render-social-deck.mjs\n- 方向：正常（未镜像、未旋转）\n- Peacock 与 Graphite Mint 以背景、强调和版面重心区分。\n\n${"x".repeat(240)}\n`);
+    await runner.validateOutputs(task, {});
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -257,6 +310,33 @@ async function testRunnerPromotesOnlyDeclaredOutputsFromIsolatedWorkspace() {
     const receipt = fs.readFileSync(path.join(projectDirectory, "runs/task-isolated_attempt-1/receipt.md"), "utf8");
     assert.match(receipt, /reading-capture-run-receipt/);
     assert.match(receipt, /"status":"awaiting_approval"/);
+  } finally {
+    fs.rmSync(vault, { recursive: true, force: true });
+  }
+}
+
+async function testRunnerDoesNotMislabelProjectFileErrorsAsMissingCodex() {
+  const vault = fs.mkdtempSync(path.join(os.tmpdir(), "reading-capture-runner-missing-input-"));
+  try {
+    const projectRelative = "Reading Capture/creation-projects/project-1";
+    const projectDirectory = path.join(vault, projectRelative);
+    const queueDirectory = path.join(vault, "Reading Capture/creation-projects/_runner/queue");
+    fs.mkdirSync(path.join(projectDirectory, "planning"), { recursive: true });
+    fs.mkdirSync(queueDirectory, { recursive: true });
+    fs.writeFileSync(path.join(projectDirectory, "project.md"), "# Project\n");
+    const taskPath = path.join(queueDirectory, "task-missing-input.json");
+    fs.writeFileSync(taskPath, `${JSON.stringify(makeTask({
+      taskId: "task-missing-input",
+      attempts: 2,
+    }), null, 2)}\n`);
+    const fakeCodex = path.join(vault, "fake-codex-with-missing-output.sh");
+    fs.writeFileSync(fakeCodex, "#!/bin/sh\nexit 0\n");
+    fs.chmodSync(fakeCodex, 0o755);
+
+    const result = await runner.runOnce({ vault, creationRoot: "Reading Capture/creation-projects", codex: fakeCodex, dryRun: false, once: true });
+
+    assert.notStrictEqual(result.waitingReason, "codex_unavailable");
+    assert.doesNotMatch(result.error, /找不到 Codex CLI/u);
   } finally {
     fs.rmSync(vault, { recursive: true, force: true });
   }
@@ -788,8 +868,10 @@ testRunnerDryRunClaimsAndValidatesTask()
   .then(testRunnerBuildsStageSpecificPrompts)
   .then(testRunnerExtractsConservativeQualityScore)
   .then(testRunnerRejectsInvalidStructuredProductionPlans)
+  .then(testRunnerRequiresAuditableXhsSampleRenderContract)
   .then(testRunnerRedactsVaultHomeEmailAndSecrets)
   .then(testRunnerPromotesOnlyDeclaredOutputsFromIsolatedWorkspace)
+  .then(testRunnerDoesNotMislabelProjectFileErrorsAsMissingCodex)
   .then(testRunnerDoesNotPromoteOutputsAfterTaskBecomesStale)
   .then(testRunnerRejectsInvalidCardImageBeforePromotion)
   .then(testXhsQualityGateAutomaticallyIteratesBeforeHumanReview)

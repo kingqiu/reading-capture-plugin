@@ -103,14 +103,20 @@ const TASK_REGISTRY = Object.freeze({
   "xhs.samples": {
     skills: ["keke-social-card-skill"],
     network: false,
-    instruction: ["严格按 plan-decision.json 中选择的两个或三个候选方案，为每套生成同一封面任务和同一关键内容页样张，并记录控制变量、文件和差异；不得生成整套卡片。"],
+    instruction: [
+      "严格按 plan-decision.json 中选择的两个或三个候选方案，为每套生成同一封面任务和同一关键内容页样张，并记录控制变量、文件和差异；不得生成整套卡片。",
+      "样张必须由受控 Keke Skill 的标准浏览器截图脚本导出。不得以 canvas、图片模型、预览截图、镜像/翻转/旋转后处理替代；不得使用 CSS transform: scaleX(-1)、rotate(180deg) 或任何会改变文字正常阅读方向的处理。",
+      "每个候选方案在样张目录中只保留两张最终 PNG：封面与关键页；临时渲染目录不得作为交付图片保留，避免界面混入重复版本。",
+      "每套候选必须按“模板结构 + 颜色角色 + 版面重心”同时区分，不得只改一个接近的十六进制色值。Peacock 使用暖白纸面与孔雀青主强调；IKB 使用暖白纸面与 Klein Blue 主强调；Graphite Mint 使用冷浅灰纸面、石墨主结构块和浅薄荷强调，不得落成与 Peacock 相近的暖白底绿色方案。",
+      "在 sample-manifest.md 新增“渲染与视觉验收”章节：逐一列出导出脚本、每张 PNG 的正常方向检查、每个方案的主背景/主强调/版面重心，以及为什么三套方案不可辨识为两套不同候选。任何一项不通过都不得声称样张可供选择。",
+    ],
   },
   "xhs.card-page": {
     skills: ["keke-social-card-skill"],
     network: false,
     instruction: [
       "只生成请求文件指定的一张小红书卡片，不得修改或重新生成其他页面。",
-      "严格继承已确认模板、配色、页码、页面任务、来源锚点和视觉证据。",
+      "严格继承已确认模板、配色、页码、页面任务、来源锚点和视觉证据。若请求文件含 userRevisionInstruction，将其视为本轮最新且必须执行的用户修改要求；只调整该页，不得改动其他页面或已确认的模板与配色。",
       "输出指定 PNG 与对应 JSON 回执；失败时保留诊断，不得用占位页冒充成功。",
     ],
   },
@@ -456,6 +462,9 @@ function buildPrompt(task, projectDirectory) {
   const relativeInputs = (task.inputs || []).map((item) => path.relative(projectDirectory, item.absolute)).join("\n- ");
   const relativeOutputs = (task.outputs || []).map((item) => path.relative(projectDirectory, item.absolute)).join("\n- ");
   const relativeOutputDirectories = (task.outputDirectories || []).map((item) => path.relative(projectDirectory, item.absolute)).join("\n- ");
+  const sampleRenderer = task.kind === "xhs.samples" && task.managedSkillEntry
+    ? path.join(path.dirname(task.managedSkillEntry), "scripts", "render-social-deck.mjs")
+    : "";
   return [
     ...(task.managedSkillEntry
       ? [`受控 Skill 入口：${task.managedSkillEntry}`, "开始前完整读取该 SKILL.md 及其直接引用的必要文件；不要改用全局同名 Skill。"]
@@ -475,6 +484,10 @@ function buildPrompt(task, projectDirectory) {
     "",
     "输出要求：",
     ...contract.instruction,
+    ...(sampleRenderer ? [
+      `标准样张导出命令：node \"${sampleRenderer}\" \"<每个候选方案的 index.html 或目录>\"。该命令由 Runner 在任务完成后执行，不要在受限 Agent 子任务内自行截图。`,
+      "本阶段只需要为每个候选写好 index.html 和样张清单；Runner 会把标准导出的两个 PNG 放入该候选的 images/ 目录，并移除临时 output/ 目录。",
+    ] : []),
     "完成后只简短报告允许写入的输出文件已更新。",
   ].join("\n");
 }
@@ -486,9 +499,73 @@ async function runProcess(command, args, options) {
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
     child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      // ENOENT can also come from a task input or an isolated workspace operation.
+      // Mark only process-launch failures so the caller can report the right recovery.
+      error.spawnCommand = command;
+      reject(error);
+    });
     child.on("close", (code, signal) => resolve({ code, signal, stdout, stderr }));
   });
+}
+
+async function readXhsSampleProposalIds(task) {
+  const decision = (task.inputs || []).find((input) => /plan-decision\.json$/iu.test(String(input && input.relative || "")));
+  if (!decision) throw new Error("Xiaohongshu samples are missing their decision input");
+  let parsedDecision;
+  try {
+    parsedDecision = JSON.parse(await fsp.readFile(decision.absolute, "utf8"));
+  } catch (error) {
+    throw new Error("Xiaohongshu sample decision is not valid JSON");
+  }
+  const proposalIds = Array.isArray(parsedDecision && parsedDecision.sampleProposals)
+    ? parsedDecision.sampleProposals.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
+  if (proposalIds.length < 2 || proposalIds.length > 3 || proposalIds.some((id) => !/^[a-z0-9][a-z0-9_-]*$/iu.test(id))) {
+    throw new Error("Xiaohongshu sample decision must name two or three safe proposal ids");
+  }
+  return proposalIds;
+}
+
+async function renderXhsSamplesWithRunner(task, managedSkillWorkspace, environment) {
+  if (task.kind !== "xhs.samples") return;
+  if (!managedSkillWorkspace) throw new Error("Xiaohongshu sample renderer is unavailable without the managed Skill workspace");
+  const round = (task.outputDirectories || [])[0];
+  if (!round) throw new Error("Xiaohongshu samples are missing their output directory");
+  const renderer = path.join(managedSkillWorkspace, "scripts", "render-social-deck.mjs");
+  try {
+    await fsp.access(renderer);
+  } catch (error) {
+    throw new Error("Managed Keke Social Card renderer is missing");
+  }
+  const proposalIds = await readXhsSampleProposalIds(task);
+  const receipt = [];
+  for (const proposalId of proposalIds) {
+    const proposalDirectory = path.join(round.absolute, proposalId);
+    const result = await runProcess(process.execPath, [renderer, proposalDirectory], { cwd: proposalDirectory, env: environment });
+    if (result.code !== 0) {
+      const detail = String(result.stderr || result.stdout || "").trim();
+      throw new Error(`Standard Xiaohongshu sample renderer failed for ${proposalId}${detail ? `: ${detail}` : ""}`);
+    }
+    const transientImages = path.join(proposalDirectory, "output", "images");
+    const finalImages = path.join(proposalDirectory, "images");
+    const imageNames = (await fsp.readdir(transientImages, { withFileTypes: true }))
+      .filter((entry) => entry.isFile() && /\.png$/iu.test(entry.name))
+      .map((entry) => entry.name)
+      .sort();
+    if (imageNames.length !== 2) throw new Error(`Standard Xiaohongshu sample renderer produced ${imageNames.length} PNGs for ${proposalId}; expected 2`);
+    await fsp.rm(finalImages, { recursive: true, force: true });
+    await fsp.mkdir(finalImages, { recursive: true });
+    for (const imageName of imageNames) await fsp.copyFile(path.join(transientImages, imageName), path.join(finalImages, imageName));
+    await fsp.rm(path.join(proposalDirectory, "output"), { recursive: true, force: true });
+    receipt.push({ proposalId, files: imageNames });
+  }
+  const manifest = (task.outputs || []).find((output) => /sample-manifest\.md$/iu.test(String(output && output.relative || "")));
+  if (manifest) {
+    const lines = ["", "### Runner 渲染回执", "", `- 标准导出脚本：${path.basename(renderer)}`, "- 导出执行方：Skill Runner（不在受限 Agent 子任务内截图）"];
+    for (const item of receipt) lines.push(`- ${item.proposalId}：${item.files.join("、")}；方向待人工逐图复核`);
+    await fsp.appendFile(manifest.absolute, `${lines.join("\n")}\n`, "utf8");
+  }
 }
 
 async function validateOutputs(task, beforeHashes) {
@@ -558,7 +635,50 @@ async function validateOutputs(task, beforeHashes) {
     if (!hash || (!mayRemainUnchanged && hash === beforeHashes[output.relative])) throw new Error(`Output was not updated: ${output.relative}`);
     hashes[output.relative] = hash;
   }
+  if (task.kind === "xhs.samples") await validateXhsSampleRenderContract(task);
   return hashes;
+}
+
+async function validateXhsSampleRenderContract(task) {
+  const manifest = (task.outputs || []).find((output) => /sample-manifest\.md$/iu.test(String(output && output.relative || "")));
+  const round = (task.outputDirectories || [])[0];
+  if (!manifest || !round) throw new Error("Xiaohongshu samples are missing their render contract paths");
+
+  const manifestText = await fsp.readFile(manifest.absolute, "utf8");
+  if (!/渲染与视觉验收/u.test(manifestText)
+    || !/render-social-deck\.mjs/u.test(manifestText)
+    || !/(?:正常方向|方向[：:].*(?:正常|未镜像)|正常（未镜像)/u.test(manifestText)
+    || !/(?:不可辨识为两套不同候选|背景.*强调.*版面|版面.*背景.*强调)/u.test(manifestText)) {
+    throw new Error("Xiaohongshu samples are missing an auditable render and visual audit");
+  }
+
+  const proposalIds = await readXhsSampleProposalIds(task);
+
+  for (const proposalId of proposalIds) {
+    const proposalDirectory = path.join(round.absolute, proposalId);
+    const sourcePath = path.join(proposalDirectory, "index.html");
+    const imagesDirectory = path.join(proposalDirectory, "images");
+    const transientDirectory = path.join(proposalDirectory, "output");
+    let source;
+    let imageNames;
+    try {
+      source = await fsp.readFile(sourcePath, "utf8");
+      imageNames = await fsp.readdir(imagesDirectory);
+    } catch (error) {
+      throw new Error(`Xiaohongshu sample ${proposalId} is missing its HTML source or final images`);
+    }
+    if (/scaleX\s*\(\s*-1\s*\)|rotate\s*\(\s*180deg\s*\)|transform\s*:\s*[^;]*(?:flip|mirror)/iu.test(source)) {
+      throw new Error(`Xiaohongshu sample ${proposalId} contains a forbidden orientation transform`);
+    }
+    const pngNames = imageNames.filter((name) => /\.png$/iu.test(name));
+    if (pngNames.length !== 2) throw new Error(`Xiaohongshu sample ${proposalId} must contain exactly two final PNGs`);
+    try {
+      await fsp.access(transientDirectory);
+      throw new Error(`Xiaohongshu sample ${proposalId} still contains a transient render directory`);
+    } catch (error) {
+      if (error && error.code !== "ENOENT") throw error;
+    }
+  }
 }
 
 function extractQualityScore(content) {
@@ -748,8 +868,9 @@ async function executeTask(taskPath, task, options) {
     const lastMessagePath = path.join(runDirectory, "last-message.txt");
     const leaseHeartbeat = startTaskLeaseHeartbeat(taskPath, claimed, vaultRoot, options);
     let result;
+    let processEnvironment;
     try {
-      const processEnvironment = addManagedRuntimeEnvironment(
+      processEnvironment = addManagedRuntimeEnvironment(
         buildSkillExecutionEnvironment(task.skillRequirement, process.env),
         managedSkillWorkspace,
         task.skillRequirement,
@@ -772,6 +893,15 @@ async function executeTask(taskPath, task, options) {
         failure.waitingReason = /skill/iu.test(detail) ? "missing_skill" : "credentials_or_permission";
       }
       throw failure;
+    }
+    if (task.kind === "xhs.samples") {
+      try {
+        await renderXhsSamplesWithRunner(executableTask, managedSkillWorkspace, processEnvironment);
+      } catch (error) {
+        error.retryable = false;
+        error.waitingReason = "invalid_output_contract";
+        throw error;
+      }
     }
     let outputHashes;
     try {
@@ -840,7 +970,7 @@ async function executeTask(taskPath, task, options) {
     await appendJsonl(eventsPath, { event: "outputs-validated", at: completedAt, outputHashes });
     return waiting;
   } catch (error) {
-    if (error && error.code === "ENOENT") {
+    if (error && error.code === "ENOENT" && error.spawnCommand === options.codex) {
       error.retryable = false;
       error.waitingReason = "codex_unavailable";
       error.message = `找不到 Codex CLI：${options.codex}。请安装或重新启用 Codex CLI 后重试。`;

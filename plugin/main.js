@@ -49,6 +49,13 @@ function formatCreationProposalField(value, preferredKeys, fallback) {
     .map((key) => value[key])
     .filter((item) => ["string", "number"].includes(typeof item) && String(item).trim())
     .map((item) => String(item).trim());
+  if (value.colors && typeof value.colors === "object") {
+    ["accent", "primary", "secondary", "surface", "paper", "ink"]
+      .map((key) => value.colors[key])
+      .filter((item) => ["string", "number"].includes(typeof item) && String(item).trim())
+      .map((item) => String(item).trim())
+      .forEach((item) => values.push(item));
+  }
   return [...new Set(values)].join(" · ") || fallback;
 }
 
@@ -425,12 +432,12 @@ class VisualTaskEditorModal extends Modal {
     contentEl.createEl("h2", { text: `调整配图：${this.task.childLabel || this.task.childKey || "当前任务"}` });
     contentEl.createEl("p", { text: "更换 Skill 或修改提示词都会保留当前版本，并创建一条新的待生成任务；新图生成并验收前，不能进入最终定稿。" });
     const requestPath = (this.task.inputs || []).find((value) => /\/visuals\/requests\/[^/]+\.json$/u.test(value));
-    if (requestPath && await this.plugin.pathExists(requestPath)) {
-      try { this.request = JSON.parse(await this.plugin.readText(requestPath)); } catch (error) { this.request = {}; }
+    if (requestPath) {
+      try { this.request = JSON.parse(await this.plugin.readFreshText(requestPath)); } catch (error) { this.request = {}; }
     }
     const skillLabel = contentEl.createEl("label", { text: "配图 Skill" });
     const skill = skillLabel.createEl("select");
-    for (const [value, label] of [["liangkeban-xiaoxiaoke-illustrations", "两颗半小小克配图"], ["baoyu-infographic", "宝玉 Infographic"]]) {
+    for (const [value, label] of [["liangkeban-xiaoxiaoke-illustrations", "两克伴小小克配图"], ["baoyu-infographic", "宝玉 Infographic"]]) {
       skill.createEl("option", { attr: { value }, text: label });
     }
     skill.value = this.request.skillId || this.task.skillId || "liangkeban-xiaoxiaoke-illustrations";
@@ -457,6 +464,62 @@ class VisualTaskEditorModal extends Modal {
       } catch (error) {
         hint.textContent = `保存失败：${error && error.message ? error.message : String(error)}`;
         save.disabled = false;
+      }
+    });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+class XhsCardTaskEditorModal extends Modal {
+  constructor(app, plugin, task, onSaved) {
+    super(app);
+    this.plugin = plugin;
+    this.task = task;
+    this.onSaved = onSaved;
+    this.request = {};
+  }
+
+  async onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    this.modalEl.addClass("reading-capture-modal-shell");
+    contentEl.addClass("reading-capture-modal", "reading-capture-visual-task-editor-modal", "reading-capture-xhs-card-editor-modal");
+    contentEl.createEl("div", { cls: "reading-capture-creation-kicker", text: "CARD REVISION" });
+    contentEl.createEl("h2", { text: `修改卡片：${this.task.childLabel || this.task.childKey || "当前页面"}` });
+    const requestPath = (this.task.inputs || []).find((value) => /\/requests\/page-[^/]+\.json$/u.test(value));
+    if (requestPath) {
+      try { this.request = JSON.parse(await this.plugin.readFreshText(requestPath)); } catch (error) { this.request = {}; }
+    }
+    const templateName = formatCreationProposalField(this.request.template, ["name", "label", "visualSystem", "subTemplate", "template", "id"], "模板");
+    const paletteName = formatCreationProposalField(this.request.palette, ["name", "label", "theme", "primary", "secondary", "surface", "accent", "text", "id"], "配色");
+    const context = contentEl.createDiv({ cls: "reading-capture-xhs-card-revision-context" });
+    context.createEl("strong", { text: "Agent" });
+    context.createEl("p", { text: `本页会保留已确认的 ${templateName} 与 ${paletteName}。请告诉我只想怎样改这张图；我会创建新版本，并保留当前版本供你比较。` });
+    const requestLabel = contentEl.createEl("label", { text: "你希望怎样调整？" });
+    const instruction = requestLabel.createEl("textarea", { attr: { rows: "7", placeholder: "例如：保留整体结构，把标题缩短；中间关系改成一条更清楚的回流路径；留白增加，删除右下角装饰。" } });
+    const hint = contentEl.createEl("p", { cls: "reading-capture-hint", text: "发送后只会重新生成这一页；原图将归档到 images/versions，不会影响其他已确认卡片。" });
+    const buttons = contentEl.createDiv({ cls: "reading-capture-button-row" });
+    const send = buttons.createEl("button", { cls: "mod-cta", text: "发送修改要求并重新生成此页" });
+    buttons.createEl("button", { text: "取消" }).addEventListener("click", () => this.close());
+    send.addEventListener("click", async () => {
+      const userInstruction = String(instruction.value || "").trim();
+      if (!userInstruction) {
+        hint.textContent = "请先用自然语言说明这张卡片要怎样调整。";
+        instruction.focus();
+        return;
+      }
+      send.disabled = true;
+      try {
+        await this.plugin.editXhsCardTask(this.task, userInstruction);
+        hint.textContent = "已保存修改要求，新的单页任务已排队。";
+        this.close();
+        if (this.onSaved) await this.onSaved();
+      } catch (error) {
+        hint.textContent = `保存失败：${error && error.message ? error.message : String(error)}`;
+        send.disabled = false;
       }
     });
   }
@@ -923,13 +986,22 @@ class ReadingCaptureReaderView extends ItemView {
   renderCreationTaskAlerts(canvas, selected) {
     const inlineRecoveryKinds = new Set(["wechat.visual-item", "xhs.card-page"]);
     const taskKey = (task) => `${task.kind || ""}:${task.skillId || ""}:${task.childKey || ""}:${task.groupId || ""}`;
+    const taskCreatedAt = (task) => Date.parse(String(task && (task.createdAt || task.updatedAt) || "")) || 0;
     const activeTaskKeys = new Set((selected.tasks || [])
       .filter((task) => ["pending", "running", "awaiting_approval"].includes(task.status))
       .map(taskKey));
+    const hasReplacement = (task) => task.status === "cancelled" && (selected.tasks || []).some((candidate) => (
+      candidate !== task
+      && candidate.kind === task.kind
+      && candidate.status !== "cancelled"
+      && candidate.status !== "stale"
+      && taskCreatedAt(candidate) > taskCreatedAt(task)
+    ));
     const actionable = (selected.tasks || []).filter((task) => (
       ["failed", "waiting_user", "partial", "cancelled"].includes(task.status)
       && !inlineRecoveryKinds.has(task.kind)
       && (task.status !== "cancelled" || !activeTaskKeys.has(taskKey(task)))
+      && !hasReplacement(task)
     ));
     if (!actionable.length) return;
     const recoveryByReason = {
@@ -1885,7 +1957,13 @@ class ReadingCaptureReaderView extends ItemView {
     const proposals = screen.createDiv({ cls: "reading-capture-creation-xhs-proposals" });
     const proposalCards = [];
     const generatedProposals = Array.isArray(selected.xhsProposals) ? selected.xhsProposals.slice(0, 3) : [];
-    let selectedProposal = generatedProposals[0] ? String(generatedProposals[0].id || generatedProposals[0].name || "proposal-1") : "";
+    const savedSelectedProposal = String(selected.xhsPlanDecision && selected.xhsPlanDecision.selectedProposal || "");
+    const savedProposalStillExists = generatedProposals.some((proposal, index) => (
+      String(proposal && (proposal.id || proposal.name) || `proposal-${index + 1}`) === savedSelectedProposal
+    ));
+    let selectedProposal = savedProposalStillExists
+      ? savedSelectedProposal
+      : generatedProposals[0] ? String(generatedProposals[0].id || generatedProposals[0].name || "proposal-1") : "";
     if (!generatedProposals.length) {
       const waiting = proposals.createDiv({ cls: "reading-capture-creation-empty-copy" });
       waiting.createEl("strong", { text: "三套视觉方案尚未生成" });
@@ -1897,13 +1975,14 @@ class ReadingCaptureReaderView extends ItemView {
       const template = formatCreationProposalField(proposal.template, ["visualSystem", "subTemplate", "template", "ratio"], "模板待补充");
       const palette = formatCreationProposalField(proposal.palette, ["theme", "primary", "secondary", "surface", "accent", "text"], "配色待补充");
       const tradeoff = String(proposal.tradeoff || proposal.pageCountReason || "请查看完整方案中的适用条件与取舍");
-      const card = proposals.createDiv({ cls: `reading-capture-creation-xhs-proposal ${index === 0 ? "is-selected" : ""}` });
+      const isCurrentProposal = id === selectedProposal;
+      const card = proposals.createDiv({ cls: `reading-capture-creation-xhs-proposal ${isCurrentProposal ? "is-selected" : ""}` });
       card.createEl("strong", { text: name });
       card.createEl("h4", { text: template });
       card.createEl("p", { text: palette });
       if (proposal.pageCount) card.createEl("small", { text: `${proposal.pageCount} 页 · ${proposal.pageCountReason || "页数随内容结构确定"}` });
       card.createEl("small", { text: tradeoff });
-      const choose = card.createEl("button", { text: index === 0 ? "当前候选" : "选择并查看完整分页" });
+      const choose = card.createEl("button", { text: isCurrentProposal ? "当前候选" : "选择并查看完整分页" });
       choose.addEventListener("click", () => {
         selectedProposal = id;
         proposalCards.forEach(({ card: item, button }) => {
@@ -1951,23 +2030,95 @@ class ReadingCaptureReaderView extends ItemView {
     comparison.createEl("h3", { text: "样张比较（可选）" });
     comparison.createEl("p", { text: "可让两到三套方案使用同一封面任务与同一关键内容页，控制变量后再选择。" });
     const sampleChoices = comparison.createDiv({ cls: "reading-capture-creation-sample-choices" });
+    const savedSampleProposalIds = Array.isArray(selected.xhsPlanDecision && selected.xhsPlanDecision.sampleProposals)
+      ? new Set(selected.xhsPlanDecision.sampleProposals.map((value) => String(value || "")).filter(Boolean))
+      : null;
     const sampleInputs = generatedProposals.map((proposal, index) => {
       const name = String(proposal.name || `方案 ${String.fromCharCode(65 + index)}`);
       const label = sampleChoices.createEl("label", { text: name });
       const input = label.createEl("input", { attr: { type: "checkbox" } });
       input.value = String(proposal.id || proposal.name || `proposal-${index + 1}`);
-      input.checked = index < 2;
+      input.checked = savedSampleProposalIds ? savedSampleProposalIds.has(input.value) : index < 2;
       return input;
     });
     const sampleTask = (selected.tasks || []).find((item) => item.kind === "xhs.samples" && ["pending", "running", "awaiting_approval"].includes(item.status));
     if (sampleTask && sampleTask.status === "awaiting_approval") {
-      comparison.createEl("button", { text: "查看样张与差异记录" }).addEventListener("click", () => this.plugin.openCreationProjectFile(`${selected.directory}/deliverables/xiaohongshu/xiaohongshu-001/sample-manifest.md`));
-      comparison.createEl("button", { text: "保留本轮样张，继续选择最终方案" }).addEventListener("click", async () => {
+      const defaultSamplesDirectory = `${selected.directory}/deliverables/xiaohongshu/xiaohongshu-001/samples`;
+      const samplesDirectory = (sampleTask.outputDirectories || []).find((directory) => normalizePath(String(directory || "")).includes("/samples")) || defaultSamplesDirectory;
+      const samplesPrefix = `${normalizePath(samplesDirectory).replace(/\/+$/u, "")}/`;
+      const allSampleFiles = (selected.xhsSampleFiles || []).filter((file) => normalizePath(String(file && file.path || "")).startsWith(samplesPrefix));
+      const sampleManifestPath = (sampleTask.outputs || []).find((output) => String(output || "").endsWith("/sample-manifest.md")) || `${defaultSamplesDirectory}/sample-manifest.md`;
+      const visualKey = (file) => String(file && file.name || "")
+        .replace(/\.[^.]+$/u, "")
+        .replace(/^\d+[-_\s]*/u, "")
+        .toLowerCase();
+      const rasterKeys = new Set(allSampleFiles
+        .filter((file) => !/\.svg$/iu.test(String(file && file.name || "")))
+        .map(visualKey));
+      // Keep the rendered PNG/WebP when the same cover or key page also has an editable SVG source.
+      const sampleFiles = allSampleFiles
+        .filter((file) => !/\.svg$/iu.test(String(file && file.name || "")) || !rasterKeys.has(visualKey(file)))
+        .slice(0, 12);
+      const samplePreview = comparison.createDiv({ cls: "reading-capture-creation-sample-preview" });
+      samplePreview.createEl("h4", { text: "已生成样张 · 直接比较视觉效果" });
+      samplePreview.createEl("p", { text: sampleFiles.length
+        ? `已生成 ${sampleFiles.length} 张样张。点击图片可在新标签放大查看；样张与差异记录只保留文字说明。`
+        : "样张任务已完成，但尚未在 samples/ 中发现图片文件。可先打开差异记录核对生成路径。" });
+      if (sampleFiles.length) {
+        const gallery = samplePreview.createDiv({ cls: "reading-capture-creation-sample-gallery" });
+        const vault = this.app && this.app.vault || this.plugin.app && this.plugin.app.vault;
+        for (const file of sampleFiles) {
+          const item = gallery.createDiv({ cls: "reading-capture-creation-sample-item" });
+          const relativePath = normalizePath(String(file.path || "")).startsWith(samplesPrefix)
+            ? normalizePath(String(file.path || "")).slice(samplesPrefix.length)
+            : String(file.path || "");
+          const proposalLabel = relativePath.includes("/") ? relativePath.split("/").slice(0, -1).join("/") : "样张";
+          const imageFile = vault && vault.getAbstractFileByPath ? vault.getAbstractFileByPath(file.path) : null;
+          if (imageFile && vault && typeof vault.getResourcePath === "function") {
+            const image = item.createEl("img", { attr: { src: vault.getResourcePath(imageFile), alt: file.name || "小红书样张" } });
+            image.addEventListener("click", () => this.plugin.openCreationProjectFile(file.path));
+          } else {
+            item.createDiv({ cls: "reading-capture-creation-sample-placeholder", text: "样张预览" });
+          }
+          item.createEl("strong", { text: String(file.name || "样张图片") });
+          item.createEl("small", { text: proposalLabel });
+          item.createEl("button", { text: "打开原图" }).addEventListener("click", () => this.plugin.openCreationProjectFile(file.path));
+        }
+      }
+      const sampleActions = comparison.createDiv({ cls: "reading-capture-creation-sample-actions" });
+      sampleActions.createEl("button", { text: "打开样张与差异记录（文字）" }).addEventListener("click", () => this.plugin.openCreationProjectFile(sampleManifestPath));
+      sampleActions.createEl("button", { text: "打开样张目录" }).addEventListener("click", () => this.plugin.openCreationProjectDirectory(samplesDirectory));
+      const rerunSamples = sampleActions.createEl("button", { text: "按当前选择生成新一轮样张比较" });
+      rerunSamples.addEventListener("click", async () => {
+        const proposals = sampleInputs.map((input) => input.checked ? input.value : "").filter(Boolean);
+        if (proposals.length < 2) {
+          new Notice("请至少选择两个方案进行控制变量比较。");
+          return;
+        }
+        rerunSamples.disabled = true;
+        try {
+          await this.plugin.saveCreationPlanDecision(selected.path, "xiaohongshu", { selectedProposal, sampleProposals: proposals });
+          await this.plugin.queueXhsSampleRound(selected.path);
+          new Notice("已保留本轮样张，并创建新的样张比较任务。");
+          await this.reload();
+        } catch (error) {
+          rerunSamples.disabled = false;
+          new Notice(`创建新一轮样张失败：${String(error && error.message || error)}`);
+        }
+      });
+      sampleActions.createEl("button", { text: "保留本轮样张，继续选择最终方案" }).addEventListener("click", async () => {
         await this.plugin.acceptCreationTask(sampleTask);
         await this.reload();
       });
     } else {
-      const sampleButton = comparison.createEl("button", { text: sampleTask ? this.plugin.creationTaskStatusLabel(sampleTask.status) : "生成所选方案的封面与关键页样张" });
+      if (sampleTask) {
+        const progress = comparison.createDiv({ cls: "reading-capture-creation-sample-progress" });
+        progress.createEl("strong", { text: sampleTask.status === "running" ? "样张正在后台生成" : "样张比较已进入后台队列" });
+        progress.createEl("p", { text: sampleTask.status === "running"
+          ? "本轮方案已提交给 Keke Social Card Skill。生成可能需要几分钟；完成后页面会自动刷新，并在这里直接显示图片。"
+          : "本轮方案已保存，正在等待本机 Skill Runner 接手。你可以继续查看或编辑其它内容。" });
+      }
+      const sampleButton = comparison.createEl("button", { text: sampleTask ? "样张生成中（后台执行）" : "生成所选方案的封面与关键页样张" });
       sampleButton.disabled = !!sampleTask || generatedProposals.length < 2;
       sampleButton.addEventListener("click", async () => {
         const proposals = sampleInputs.map((input) => input.checked ? input.value : "").filter(Boolean);
@@ -1976,24 +2127,64 @@ class ReadingCaptureReaderView extends ItemView {
           return;
         }
         sampleButton.disabled = true;
-        await this.plugin.saveCreationPlanDecision(selected.path, "xiaohongshu", { selectedProposal, sampleProposals: proposals });
-        await this.plugin.queueCreationStageTask(selected.path, "xhs.samples");
-        await this.reload();
+        try {
+          await this.plugin.saveCreationPlanDecision(selected.path, "xiaohongshu", { selectedProposal, sampleProposals: proposals });
+          await this.plugin.queueXhsSampleRound(selected.path);
+          new Notice("样张比较已开始在后台生成；完成后此处会自动显示图片预览。");
+          await this.reload();
+        } catch (error) {
+          sampleButton.disabled = false;
+          new Notice(`创建样张比较失败：${String(error && error.message || error)}`);
+        }
       });
     }
-    const task = (selected.tasks || []).find((item) => item.kind === "xhs.plan" && item.status === "awaiting_approval");
+    const pendingPlanTask = (selected.tasks || []).find((item) => item.kind === "xhs.plan" && item.status === "awaiting_approval");
+    const completedPlanTask = (selected.tasks || []).find((item) => item.kind === "xhs.plan" && item.status === "completed");
+    const planVersion = String(
+      (selected.xhsPlanDecision && selected.xhsPlanDecision.planVersion)
+      || (xhsDeliverable && xhsDeliverable.planVersion)
+      || Object.values((pendingPlanTask || completedPlanTask || {}).outputHashes || {}).find(Boolean)
+      || "",
+    );
+    const currentCardGroupId = xhsDeliverable && xhsDeliverable.cardGroupId;
+    const existingCardTasks = (selected.tasks || []).filter((item) => (
+      item.kind === "xhs.card-page"
+      && (!currentCardGroupId || item.groupId === currentCardGroupId)
+      && !["cancelled", "superseded", "stale"].includes(item.status)
+    ));
     const gate = screen.createDiv({ cls: "reading-capture-creation-gate" });
     gate.createEl("h4", { text: "确认模板、配色和完整分页计划" });
     gate.createEl("p", { text: "确认后才会生成整套卡片与第一版发布文案。" });
+    const gateStatus = gate.createEl("small", { cls: "reading-capture-creation-gate-status" });
+    const blockedReason = hasManualChanges
+      ? "你修改了分页内容，请先保存为用户分页版本，再生成整套卡片。"
+      : !selectedProposal
+        ? "请先选择一个最终方案。"
+        : !planVersion
+          ? "三套方案尚未产生可用版本，请等待方案任务完成。"
+          : existingCardTasks.length
+            ? `已存在 ${existingCardTasks.length} 个本轮卡片任务；请到下一步查看生成进度。`
+            : pendingPlanTask
+              ? "确认后会锁定当前方案，并启动整套卡片与发布文案生成。"
+              : "已使用已完成的方案版本；确认后会直接启动整套卡片与发布文案生成。";
+    gateStatus.setText ? gateStatus.setText(blockedReason) : gateStatus.textContent = blockedReason;
     const confirm = gate.createEl("button", { cls: "mod-cta", text: "确认小红书方案，生成完整初版" });
-    confirm.disabled = !task || hasManualChanges || !selectedProposal;
+    confirm.disabled = hasManualChanges || !selectedProposal || !planVersion || existingCardTasks.length > 0;
     confirm.addEventListener("click", async () => {
-      if (!task) return;
       confirm.disabled = true;
-      await this.plugin.saveCreationPlanDecision(selected.path, "xiaohongshu", { selectedProposal, planVersion: Object.values(task.outputHashes || {}).find(Boolean) || "current" });
-      await this.plugin.acceptCreationTask(task);
-      this.displayedStage = "";
-      await this.reload();
+      try {
+        await this.plugin.saveCreationPlanDecision(selected.path, "xiaohongshu", { selectedProposal, planVersion });
+        if (pendingPlanTask) await this.plugin.acceptCreationTask(pendingPlanTask);
+        else await this.plugin.queueXhsCardTasks(selected.path);
+        new Notice(`已锁定当前方案，正在生成整套小红书卡片与第一版发布文案。`);
+        this.displayedStage = "";
+        await this.reload();
+      } catch (error) {
+        confirm.disabled = false;
+        const message = `启动小红书整套生成失败：${String(error && error.message || error)}`;
+        gateStatus.setText ? gateStatus.setText(message) : gateStatus.textContent = message;
+        new Notice(message);
+      }
     });
   }
 
@@ -2184,9 +2375,13 @@ class ReadingCaptureReaderView extends ItemView {
     const cardTasks = (selected.tasks || []).filter((item) => item.kind === "xhs.card-page" && (!cardGroupId || item.groupId === cardGroupId));
     const summary = screen.createDiv({ cls: "reading-capture-creation-xhs-review" });
     const cards = summary.createDiv();
-    cards.createEl("h3", { text: "卡片组与视觉规则" });
-    cards.createEl("p", { text: selected.xhsCardsManifest || "卡片清单尚未生成。" });
-    cards.createEl("strong", { text: `视觉分：${packageTask ? packageTask.qualityScore || 0 : selected.workflowState.deliverables.xiaohongshu.visualQaVersion ? "已通过" : "等待"}` });
+    if (packageTask || copyQaTask) {
+      this.renderXhsCardReviewGallery(cards, selected, cardTasks);
+    } else {
+      cards.createEl("h3", { text: "卡片组与视觉规则" });
+      cards.createEl("p", { text: selected.xhsCardsManifest || "卡片清单尚未生成。" });
+      cards.createEl("strong", { text: `视觉分：${selected.workflowState.deliverables.xiaohongshu.visualQaVersion ? "已通过" : "等待"}` });
+    }
     if (!packageTask && !copyQaTask && activePackageTask) {
       const execution = screen.createDiv({ cls: "reading-capture-creation-gate" });
       execution.createEl("h4", { text: "正在基于已确认页面执行整套质检" });
@@ -2203,11 +2398,20 @@ class ReadingCaptureReaderView extends ItemView {
         const rowCopy = row.createDiv();
         rowCopy.createEl("strong", { text: child.childLabel || child.childKey || "卡片页" });
         rowCopy.createEl("small", { text: `${this.plugin.creationTaskStatusLabel(child.status)} · ${child.skillId}` });
+        if (child.status === "pending" || child.status === "running") {
+          rowCopy.createEl("p", {
+            cls: "reading-capture-creation-inline-progress",
+            text: child.status === "running"
+              ? "正在由本机 Runner 处理这一页；状态会自动刷新。"
+              : "已进入 Runner 队列，正在等待本机接手；状态会自动刷新。",
+          });
+        }
         if (child.error) rowCopy.createEl("p", { text: child.error });
         const actions = row.createDiv();
         const outputPath = Array.isArray(child.outputs) ? child.outputs.find((value) => /\.(png|jpe?g|webp)$/iu.test(value)) : "";
         if (outputPath && ["awaiting_approval", "completed"].includes(child.status)) {
           actions.createEl("button", { text: "打开此页" }).addEventListener("click", () => this.plugin.openCreationProjectFile(outputPath));
+          actions.createEl("button", { text: "修改此页" }).addEventListener("click", () => this.plugin.openXhsCardTaskEditor(child, async () => this.reload()));
         }
         if (outputPath && child.runId && ["failed", "partial", "stale"].includes(child.status)) {
           const relative = outputPath.startsWith(`${selected.directory}/`) ? outputPath.slice(selected.directory.length + 1) : outputPath;
@@ -2217,8 +2421,22 @@ class ReadingCaptureReaderView extends ItemView {
           const retry = actions.createEl("button", { text: "仅重试此页" });
           retry.addEventListener("click", async () => {
             retry.disabled = true;
-            await this.plugin.retryCreationTask(child);
-            await this.reload();
+            retry.textContent = "正在重新入队…";
+            try {
+              await this.plugin.retryCreationTask(child);
+              this.markRunnerTaskQueued(child);
+              new Notice(`${child.childLabel || "此页"} 已重新进入队列；Runner 将只检查并处理这一页。`);
+              const scrollState = this.captureCreationScrollState();
+              await this.render();
+              this.restoreCreationScrollState(scrollState);
+            } catch (error) {
+              retry.disabled = false;
+              retry.textContent = "仅重试此页";
+              const detail = error && error.message ? error.message : String(error);
+              new Notice(`无法重试此页：${detail}`);
+              const failure = rowCopy.createEl("p", { cls: "reading-capture-error", text: `重新入队失败：${detail}` });
+              failure.setAttr("role", "alert");
+            }
           });
         }
       });
@@ -2316,6 +2534,46 @@ class ReadingCaptureReaderView extends ItemView {
         await this.reload();
       });
     }
+  }
+
+  renderXhsCardReviewGallery(container, selected, cardTasks) {
+    container.addClass("reading-capture-creation-xhs-card-review");
+    container.createEl("h3", { text: "逐页卡片审核" });
+    const imageFiles = (selected.xhsImageFiles || []).filter((file) => /\.(png|jpe?g|webp)$/iu.test(String(file.path || file.name || "")));
+    const pendingCount = cardTasks.filter((task) => ["pending", "running", "waiting_user", "failed", "partial", "stale"].includes(task.status)).length;
+    container.createEl("p", {
+      cls: "reading-capture-creation-xhs-card-review-summary",
+      text: imageFiles.length
+        ? `已生成 ${imageFiles.length} 张卡片${pendingCount ? ` · 另有 ${pendingCount} 页仍需处理` : " · 点击缩略图查看大图；每页都可单独修改"}`
+        : "卡片图片尚未载入；请等待逐页任务生成完成后再审核。",
+    });
+    if (!imageFiles.length) return;
+    const gallery = container.createDiv({ cls: "reading-capture-creation-xhs-card-gallery" });
+    const vault = (this.app && this.app.vault) || (this.plugin && this.plugin.app && this.plugin.app.vault);
+    imageFiles.forEach((file, index) => {
+      const matchingTask = cardTasks.find((task) => Array.isArray(task.outputs) && task.outputs.includes(file.path));
+      const tile = gallery.createDiv({ cls: "reading-capture-creation-xhs-card-tile" });
+      const preview = tile.createEl("button", {
+        cls: "reading-capture-creation-xhs-card-thumbnail",
+        attr: { "aria-label": `查看第 ${index + 1} 页卡片大图` },
+      });
+      const vaultFile = vault && vault.getAbstractFileByPath ? vault.getAbstractFileByPath(file.path) || file : file;
+      const resourcePath = vault && vault.getResourcePath ? vault.getResourcePath(vaultFile) : "";
+      if (resourcePath) {
+        preview.createEl("img", { attr: { src: resourcePath, alt: matchingTask ? matchingTask.childLabel || file.name : file.name } });
+      } else {
+        preview.createEl("span", { text: "缩略图暂不可用" });
+      }
+      preview.addEventListener("click", () => this.plugin.openCreationProjectFile(file.path));
+      const meta = tile.createDiv({ cls: "reading-capture-creation-xhs-card-meta" });
+      meta.createEl("strong", { text: matchingTask ? matchingTask.childLabel || `第 ${index + 1} 页` : `第 ${index + 1} 页` });
+      meta.createEl("small", { text: matchingTask && matchingTask.status === "completed" ? "已确认" : matchingTask ? this.plugin.creationTaskStatusLabel(matchingTask.status) : "已生成" });
+      const actions = tile.createDiv({ cls: "reading-capture-creation-xhs-card-actions" });
+      actions.createEl("button", { text: "查看大图" }).addEventListener("click", () => this.plugin.openCreationProjectFile(file.path));
+      if (matchingTask && ["awaiting_approval", "completed"].includes(matchingTask.status)) {
+        actions.createEl("button", { text: "修改此页" }).addEventListener("click", () => this.plugin.openXhsCardTaskEditor(matchingTask, async () => this.reload()));
+      }
+    });
   }
 
   renderApprovedVisual(canvas, selected) {
@@ -2467,9 +2725,17 @@ class ReadingCaptureReaderView extends ItemView {
     head.createEl("span", { cls: "reading-capture-creation-state is-ready", text: isXhs ? "小红书发布候选包 · 全部通过" : "全部检查通过" });
     const target = isXhs ? this.plugin.settings.xiaohongshuPublishingRoot : this.plugin.settings.wechatPublishingRoot;
     const sourceDirectory = `${selected.directory}/deliverables/${isXhs ? "xiaohongshu/xiaohongshu-001" : "wechat/wechat-001"}`;
+    const finalArticlePath = isXhs
+      ? `${sourceDirectory}/caption.md`
+      : `${sourceDirectory}/drafts/v1.md`;
+    const finalVisualDirectory = isXhs ? `${sourceDirectory}/images` : `${sourceDirectory}/visuals`;
     const finalImages = isXhs ? (selected.xhsImageFiles || []) : (selected.wechatVisualFiles || []);
-    const xhsCardVersionLabel = this.plugin.creationArtifactVersionLabel(selected.workflowState.deliverables.xiaohongshu.cardVersion, "卡片");
-    const xhsCaptionVersionLabel = this.plugin.creationArtifactVersionLabel(selected.workflowState.deliverables.xiaohongshu.captionVersion, "文案");
+    // Projects created by earlier versions can contain only the active deliverable.
+    // Stage 08 must still render when the inactive platform state does not exist.
+    const deliverables = selected.workflowState.deliverables || {};
+    const xhsDeliverable = deliverables.xiaohongshu || {};
+    const xhsCardVersionLabel = this.plugin.creationArtifactVersionLabel(xhsDeliverable.cardVersion, "卡片");
+    const xhsCaptionVersionLabel = this.plugin.creationArtifactVersionLabel(xhsDeliverable.captionVersion, "文案");
     const metrics = screen.createDiv({ cls: "reading-capture-creation-summary-metrics" });
     const metricValues = isXhs
       ? [[finalImages.length, "最终卡片 PNG"], [1, "最终发布文案"], [2, "来源与素材记录"], [0, "阻塞问题"]]
@@ -2502,6 +2768,35 @@ class ReadingCaptureReaderView extends ItemView {
       row.createEl("span", { text: name });
       row.createEl("span", { cls: "is-pass", text: state });
     }
+    const candidateCard = packageGrid.createDiv({ cls: "reading-capture-creation-final-card reading-capture-creation-current-package" });
+    candidateCard.createEl("h3", { text: "当前可检查的定稿" });
+    candidateCard.createEl("p", { text: "当前文件仍保留在创作项目中。创建发布快照前，你可以直接打开文章和配图检查最终效果。" });
+    candidateCard.createEl("div", { cls: "reading-capture-creation-path", text: finalArticlePath });
+    const previewText = String((isXhs ? selected.xhsCaption : selected.wechatDraft) || "")
+      .replace(/^---[\s\S]*?---\s*/u, "")
+      .replace(/^#{1,6}\s+/mu, "")
+      .replace(/\s+/gu, " ")
+      .trim();
+    candidateCard.createEl("h4", { text: "定稿预览" });
+    candidateCard.createEl("p", {
+      cls: "reading-capture-creation-final-preview-copy",
+      text: previewText ? `${previewText.slice(0, 220)}${previewText.length > 220 ? "…" : ""}` : "可通过下方按钮打开当前定稿全文与最终配图。",
+    });
+    const previewFiles = finalImages.slice(0, isXhs ? 3 : 1);
+    const vault = this.app && this.app.vault || this.plugin.app && this.plugin.app.vault;
+    if (previewFiles.length && vault && typeof vault.getResourcePath === "function") {
+      const previews = candidateCard.createDiv({ cls: "reading-capture-creation-final-image-previews" });
+      for (const imageFile of previewFiles) {
+        const vaultFile = vault.getAbstractFileByPath(imageFile.path);
+        if (!vaultFile) continue;
+        const image = previews.createEl("img", { attr: { src: vault.getResourcePath(vaultFile), alt: imageFile.name || "最终配图" } });
+        image.addClass(isXhs ? "is-xhs" : "is-wechat");
+      }
+    }
+    const candidateActions = candidateCard.createDiv({ cls: "reading-capture-creation-final-actions" });
+    candidateActions.createEl("button", { text: isXhs ? "查看最终发布文案" : "查看最终文章" }).addEventListener("click", () => this.plugin.openCreationProjectFile(finalArticlePath));
+    candidateActions.createEl("button", { text: "查看最终配图" }).addEventListener("click", () => this.plugin.openCreationProjectDirectory(finalVisualDirectory));
+    candidateActions.createEl("button", { text: "打开当前发布包目录" }).addEventListener("click", () => this.plugin.openCreationProjectDirectory(sourceDirectory));
     const checksCard = packageGrid.createDiv({ cls: "reading-capture-creation-final-card" });
     checksCard.createEl("h3", { text: isXhs ? "导出前最后确认" : "最终人工检查" });
     const checkLabels = isXhs
@@ -2521,11 +2816,11 @@ class ReadingCaptureReaderView extends ItemView {
     const exportCard = screen.createDiv({ cls: "reading-capture-creation-export-card" });
     const exportCopy = exportCard.createDiv();
     exportCopy.createEl("h3", { text: directoryName });
-    exportCopy.createEl("p", { text: isXhs ? "目标：小红书独立发布目录。公众号交付物和目录不会受到影响。" : "目标：微信公众号发布目录。若同名目录已存在，系统会创建版本后缀，不会覆盖。" });
+    exportCopy.createEl("p", { text: isXhs ? "尚未创建发布快照。完成检查后，当前已确认的卡片与文案会复制到小红书独立发布目录。" : "尚未创建发布快照。完成检查后，当前已确认的文章与配图会复制到微信公众号发布目录；若同名目录已存在，系统会创建版本后缀。" });
     exportCopy.createEl("div", { cls: "reading-capture-creation-path", text: `${target}/${directoryName}/` });
     if (isXhs) exportCopy.createEl("div", { cls: "reading-capture-creation-branch-note", text: `当前交付物：小红书 · ${xhsCardVersionLabel} · ${xhsCaptionVersionLabel}` });
     const exportActions = exportCard.createDiv({ cls: "reading-capture-creation-export-actions" });
-    exportActions.createEl("button", { text: isXhs ? "预览小红书发布包" : "预览发布包" }).addEventListener("click", () => this.plugin.openCreationProjectDirectory(sourceDirectory));
+    exportActions.createEl("button", { text: "打开当前发布包目录" }).addEventListener("click", () => this.plugin.openCreationProjectDirectory(sourceDirectory));
     const latestSnapshot = selected.latestPublication && selected.latestPublication.platform === platform ? selected.latestPublication : null;
     if (latestSnapshot && latestSnapshot.targetDirectory) {
       const exported = screen.createDiv({ cls: "reading-capture-creation-export-result" });
@@ -3864,6 +4159,7 @@ class ReadingCaptureCreationProjectView extends ItemView {
     this.isRelatedInspirationPickerOpen = false;
     this.autoRefreshTimer = null;
     this.autoRefreshInFlight = false;
+    this.runnerRefreshUntil = 0;
   }
 
   getViewType() {
@@ -3893,7 +4189,8 @@ class ReadingCaptureCreationProjectView extends ItemView {
   async refreshFromRunnerIfNeeded() {
     if (this.isLoading || this.autoRefreshInFlight) return;
     const hasActiveTask = this.projects.some((project) => (project.tasks || []).some((task) => ["pending", "running"].includes(task.status)));
-    if (!hasActiveTask) return;
+    const shouldPollQueuedTask = Date.now() < this.runnerRefreshUntil;
+    if (!hasActiveTask && !shouldPollQueuedTask) return;
     this.autoRefreshInFlight = true;
     try {
       const nextProjects = await this.plugin.listCreationProjects();
@@ -3933,6 +4230,20 @@ class ReadingCaptureCreationProjectView extends ItemView {
         waitingReason: task.waitingReason || "",
       })),
     })));
+  }
+
+  markRunnerTaskQueued(task) {
+    if (!task) return;
+    task.status = "pending";
+    task.error = "";
+    task.waitingReason = null;
+    task.nextAttemptAt = null;
+    task.updatedAt = this.plugin && typeof this.plugin.now === "function"
+      ? this.plugin.now()
+      : new Date().toISOString();
+    // Vault 同步和 Runner 接手之间会有极短的空档。即使第一次轮询还读到
+    // 旧状态，也要继续刷新，直到真正的运行结果回写到项目中。
+    this.runnerRefreshUntil = Math.max(this.runnerRefreshUntil || 0, Date.now() + 90 * 1000);
   }
 
   async setProject(projectPath) {
@@ -4057,6 +4368,10 @@ class ReadingCaptureCreationProjectView extends ItemView {
 
   renderApprovedXhsDraft(container, selected) {
     return ReadingCaptureReaderView.prototype.renderApprovedXhsDraft.call(this, container, selected);
+  }
+
+  renderXhsCardReviewGallery(container, selected, cardTasks) {
+    return ReadingCaptureReaderView.prototype.renderXhsCardReviewGallery.call(this, container, selected, cardTasks);
   }
 
   renderApprovedVisual(container, selected) {
@@ -6007,6 +6322,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     const tasks = [];
     for (const page of pages) {
       const requestRelative = `${rootRelative}/requests/${page.id}.json`;
+      await this.ensureFolderForPath(`${directory}/${requestRelative}`);
       await this.writeText(`${directory}/${requestRelative}`, `${JSON.stringify({
         schemaVersion: 1,
         groupId,
@@ -6166,6 +6482,53 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       await this.saveCreationWorkflowState(directory, creationWorkflow.authorizeResearch(state, { skills }));
     }
     return Object.assign({ taskPath }, task);
+  }
+
+  async queueXhsSampleRound(projectPath) {
+    const normalizedProjectPath = normalizePath(projectPath || "");
+    if (!this.isTopLevelCreationProjectPath(normalizedProjectPath) || !(await this.pathExists(normalizedProjectPath))) throw new Error("找不到创作项目");
+    const directory = normalizedProjectPath.slice(0, -"/project.md".length);
+    const rootRelative = "deliverables/xiaohongshu/xiaohongshu-001";
+    const decisionRelative = `${rootRelative}/plan-decision.json`;
+    const decisionPath = `${directory}/${decisionRelative}`;
+    if (!(await this.pathExists(decisionPath))) throw new Error("请先保存当前小红书方案，再生成样张比较");
+
+    // A new visual discussion must never overwrite an approved or reviewable
+    // round. Keep the old task and its files as history, then point the runner
+    // to an immutable copy of the currently selected proposals.
+    const activeSamples = (await this.listCreationRunnerTasks()).filter((task) => (
+      task.projectPath === normalizedProjectPath
+      && task.kind === "xhs.samples"
+      && ["pending", "running", "awaiting_approval"].includes(task.status)
+    ));
+    const roundId = `sample-round-${this.creationProjectId()}`;
+    const roundRelative = `${rootRelative}/samples/${roundId}`;
+    const roundDecisionRelative = `${roundRelative}/plan-decision.json`;
+    await this.ensureFolder(`${directory}/${roundRelative}`);
+    await this.writeText(`${directory}/${roundDecisionRelative}`, await this.readText(decisionPath));
+    try {
+      for (const task of activeSamples) {
+        const superseded = { ...task, status: "superseded", updatedAt: this.now(), error: "用户请求生成新一轮样张比较；旧样张与差异记录已保留" };
+        delete superseded.taskPath;
+        await this.writeText(task.taskPath, `${JSON.stringify(superseded, null, 2)}\n`);
+      }
+      return await this.queueCreationStageTask(normalizedProjectPath, "xhs.samples", {
+        force: true,
+        groupId: roundId,
+        inputOverride: ["project.md", `${rootRelative}/plan.md`, roundDecisionRelative],
+        outputOverride: [`${roundRelative}/sample-manifest.md`],
+        outputDirectoriesOverride: [roundRelative],
+      });
+    } catch (error) {
+      // Never leave a prior reviewable round stranded if the replacement queue
+      // cannot be created (for example while a synced folder is unavailable).
+      for (const task of activeSamples) {
+        const restored = { ...task };
+        delete restored.taskPath;
+        await this.writeText(task.taskPath, `${JSON.stringify(restored, null, 2)}\n`);
+      }
+      throw error;
+    }
   }
 
   async updateCreationProjectSkillLock(directory, requirement) {
@@ -6345,7 +6708,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
 
   visualSkillLabel(skillId) {
     return ({
-      "liangkeban-xiaoxiaoke-illustrations": "两颗半小小克配图",
+      "liangkeban-xiaoxiaoke-illustrations": "两克伴小小克配图",
       "baoyu-infographic": "宝玉 Infographic",
     })[String(skillId || "")] || String(skillId || "未指定 Skill");
   }
@@ -6410,8 +6773,69 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     return next;
   }
 
+  async editXhsCardTask(task, userRevisionInstruction) {
+    if (!task || !task.taskPath || task.kind !== "xhs.card-page") throw new Error("只能调整小红书逐页卡片任务");
+    if (["pending", "running"].includes(task.status)) throw new Error("图片正在生成，请等待本轮任务结束后再调整");
+    const instruction = String(userRevisionInstruction || "").trim();
+    if (!instruction) throw new Error("请输入这张卡片的修改要求");
+    const requestPath = (task.inputs || []).find((value) => /\/requests\/page-[^/]+\.json$/u.test(value));
+    if (!requestPath) throw new Error("找不到这张卡片的生成请求记录");
+    let request;
+    try { request = JSON.parse(await this.readFreshText(requestPath)); } catch (error) { throw new Error("卡片请求记录无法解析"); }
+    const directory = normalizePath(task.projectDirectory || String(task.projectPath || "").replace(/\/project\.md$/u, ""));
+    const revision = Number(request.revision || 1) + 1;
+    const archived = [];
+    for (const output of task.outputs || []) {
+      if (!(await this.pathExists(output))) continue;
+      const relative = output.startsWith(`${directory}/`) ? output.slice(directory.length + 1) : "";
+      if (!relative) continue;
+      const fileName = relative.split("/").pop();
+      const archivePath = `${directory}/deliverables/xiaohongshu/xiaohongshu-001/images/versions/${String(task.childKey || "page").replace(/[^a-z0-9_-]+/gi, "-")}/r${revision}-${fileName}`;
+      await this.copyCreationSnapshotFile(output, archivePath);
+      archived.push(archivePath);
+    }
+    await this.writeText(requestPath, `${JSON.stringify({
+      ...request,
+      revision,
+      userRevisionInstruction: instruction,
+      previousTaskId: task.taskId,
+      previousOutputPaths: archived,
+      updatedAt: this.now(),
+    }, null, 2)}\n`);
+    const superseded = { ...task, status: "superseded", updatedAt: this.now(), supersededReason: "用户提交了本页卡片的自然语言修改要求" };
+    delete superseded.taskPath;
+    await this.writeText(task.taskPath, `${JSON.stringify(superseded, null, 2)}\n`);
+    const next = await this.queueCreationStageTask(task.projectPath, "xhs.card-page", {
+      force: true,
+      skillId: "keke-social-card-skill",
+      childKey: task.childKey,
+      childLabel: task.childLabel,
+      dependencyAnchor: task.dependencyAnchor,
+      groupId: task.groupId,
+      requiredChildCount: task.requiredChildCount,
+      inputOverride: (task.inputs || []).map((value) => value.startsWith(`${directory}/`) ? value.slice(directory.length + 1) : value),
+      outputOverride: (task.outputs || []).map((value) => value.startsWith(`${directory}/`) ? value.slice(directory.length + 1) : value),
+      outputDirectoriesOverride: (task.outputDirectories || []).map((value) => value.startsWith(`${directory}/`) ? value.slice(directory.length + 1) : value),
+    });
+    const state = await this.loadCreationWorkflowState(directory);
+    await this.saveCreationWorkflowState(directory, {
+      ...state,
+      currentStage: "draft",
+      deliverables: {
+        ...state.deliverables,
+        xiaohongshu: { ...state.deliverables.xiaohongshu, stage: "draft", taskState: "card_children_queued" },
+      },
+    });
+    return next;
+  }
+
   openVisualTaskEditor(task, onSaved) {
     const modal = new VisualTaskEditorModal(this.app, this, task, onSaved);
+    modal.open();
+  }
+
+  openXhsCardTaskEditor(task, onSaved) {
+    const modal = new XhsCardTaskEditorModal(this.app, this, task, onSaved);
     modal.open();
   }
 
@@ -6421,20 +6845,30 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     const sourceAnchor = String(request.sourceAnchor || request.insertionAnchor || "对应正文段落").trim();
     const sourceExcerpt = String(request.sourceExcerpt || "").replace(/\s+/gu, " ").trim().slice(0, 360);
     const context = sourceExcerpt ? `\n正文依据（只用于理解，不要把整段照抄到图上）：${sourceExcerpt}` : "";
-    const isLoopGraph = /loop/iu.test(subject) && /graph/iu.test(subject);
+    const taskMeaning = `${subject} ${purpose}`;
+    const isLoopGraph = /loop/iu.test(taskMeaning) && /graph/iu.test(taskMeaning);
+    const isLoopGraphDecision = isLoopGraph && /(还是|何时|该.*(?:继续|上)|继续.*(?:还是|上)|决策|选择|升级|分流)/u.test(taskMeaning);
 
     if (skillId === "baoyu-infographic") {
-      const layout = isLoopGraph ? "structural-breakdown（结构剖面）" : "structural-breakdown（围绕一个核心关系拆解）";
-      const composition = isLoopGraph
+      const layout = isLoopGraphDecision
+        ? "binary-comparison（有条件的二分决策）"
+        : isLoopGraph ? "structural-breakdown（结构剖面）" : "structural-breakdown（围绕一个核心关系拆解）";
+      const composition = isLoopGraphDecision
+        ? "画面以一个清晰的分流判断台为中心：左侧是轻量 Loop 工作台，右侧是由多个协作节点组成的 Graph 工作台。中间只放一个带刻度的选择杆，不画中心大圆盘或外围环形网络。用 3 个短判断条件区分两条路径，例如‘单一任务 / 局部闭环 / 低协作’对应 Loop，‘多节点 / 并行协作 / 需要恢复’对应 Graph；底部结论是‘先问协作复杂度，再决定是否上 Graph’。"
+        : isLoopGraph
         ? "画面中央是一组由 4–5 个节点连接而成的 Graph；放大其中一个节点，露出节点内部的 Loop 小循环。外围节点只用‘路由、并行、交接、恢复’四个短标签，内部循环只用‘计划、行动、观察、校验’四个短标签。用一条清楚但不夸张的连接关系表达：Graph 负责节点之间的组织，Loop 负责节点内的收敛。"
         : `以“${subject}”为中心，用一个主结构与 3–5 个必要组成部分解释“${purpose}”。元素之间只保留能支撑正文判断的关系，不要把正文改造成完整流程图。`;
       return `为微信公众号正文生成 1 张可独立理解的 16:9 横向中文技术信息图，1600×900。\n\n任务定位：\n主题：${subject}\n这张图只要帮助读者理解：${purpose}\n放置位置：${sourceAnchor}${context}\n\n信息结构：\n采用 ${layout}，不是通用海报，也不是产品界面。${composition}\n\n视觉与文字：\n使用 technical-schematic 技术示意风格：干净浅色或白色背景，深墨色线条与文字，有限的一种强调色用于关键关系；清晰的层级、留白和对齐。中文必须简短、准确、可读，控制在 6–8 个以内的短标签；不使用长段解释，不虚构数据、案例或结论。\n\n构图要求：\n主结构占画面约 55%，四周保留足够呼吸空间；先让读者一眼看到核心关系，再读到局部标注。画面只表达一个判断，不要塞入多个并列结论。\n\n明确禁止：\n不要 3D 装饰、渐变光效、玻璃拟态、真实 App 截图、无关 Logo、品牌标识、夸张科技网格、密集方框、PPT 模板感或无法阅读的小字。不要把“${subject}”做成只有标题的空泛概念图。`;
     }
 
-    const composition = isLoopGraph
+    const composition = isLoopGraphDecision
+      ? "在纯白纸上画一张不对称的工程选择台：小小克站在中间，双手压住一根向左右分流的选择杆。左侧是一张很小的单人 Loop 工作台，只有一条环形轨道和一块‘局部闭环’刻度牌；右侧是三块大小不同、由细线交接的工作台，分别暗示‘并行、交接、恢复’。让小小克正在把酒红色的校准砝码从左侧移向右侧，表达不是谁取代谁，而是任务复杂度达到阈值时才从 Loop 升级到 Graph。整张图采用左右分流的舞台构图，绝不使用中心圆盘、环绕节点或“节点内 Loop”的嵌套构图。"
+      : isLoopGraph
       ? "在干净白纸上画一个不规则的 4–5 节点手绘网络，节点之间以细线自然相连；其中一个节点被放大成小小克正在转动的微型工作台，工作台里是一圈‘计划 → 行动 → 观察 → 校验’的轻微循环。小小克要用身体压住校准刻度、认真让小循环稳定运转；网络外层只暗示路由、并行、交接与恢复。通过“节点里的小循环嵌在更大网络中”的画面，而不是两张对立图，表达两者是组合关系。"
       : `围绕“${subject}”发明一个只属于这段正文的怪诞工程隐喻。让小小克承担“${purpose}”中的关键动作：它必须在压住、校准、称量、拉线、分流、接住或沉淀某个核心对象，而不是站在一旁。画面只保留 3–4 个能说明关系的物件。`;
-    const labels = isLoopGraph ? "节点内 Loop / 路由 / 并行 / 交接 / 恢复 / 校验" : "只保留 3–6 个与主题直接相关的短中文批注；不要写大标题";
+    const labels = isLoopGraphDecision
+      ? "Loop / Graph / 局部闭环 / 并行协作 / 交接恢复 / 复杂度阈值"
+      : isLoopGraph ? "节点内 Loop / 路由 / 并行 / 交接 / 恢复 / 校验" : "只保留 3–6 个与主题直接相关的短中文批注；不要写大标题";
     return `生成 1 张独立的 16:9 横版微信公众号中文正文配图，1600×900。\n\nVisual DNA：\n纯白背景；以黑色或近黑色的轻微抖动手绘线稿为主；至少保留 35% 留白。只用两克伴酒红（接近 #B5122B）做少量信号弧、校准刻度和关键判断点；若必须区分主路径，才极少量使用橙色；默认不使用蓝色。整体像一张克制、怪诞、清爽的产品草图，不是海报或信息图。\n\n小小克 IP（必须出现且承担核心动作）：\n一个纯黑或近黑的不规则、有质量感的小生物，白色圆点眼、细腿、表情冷静；像黑豆、墨滴或被压扁的软块，绝不是猫、标准砝码、印章、贴纸或可爱吉祥物。\n\n主题与正文判断：\n主题：${subject}\n要让读者理解：${purpose}\n放置位置：${sourceAnchor}${context}\n\n具体构图：\n${composition}\n\n画面标注：\n${labels}。全部采用少量中文手写感标注，每个 2–8 个字，最多 5–8 处；不要在左上角写类型标题。\n\n构图与质量约束：\n主体占画面约 40%–60%，让小小克与核心结构共同成为视觉中心；一张图只讲一个关系，读者不看正文也能大致理解。不要复刻旧图，不要用复杂架构图、正式流程图、PPT 信息图、商业矢量插画、儿童卡通、渐变、阴影、纸张纹理、密集文字、真实 UI、无关 Logo 或未经证实的事实。画面应有轻微幽默感，但不幼稚，中文在手机端必须清晰可读。`;
   }
 
@@ -7353,6 +7787,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
           }
         }
         let xhsProposals = [];
+        let xhsPlanDecision = {};
         const xhsProposalsPath = `${directory}/deliverables/xiaohongshu/xiaohongshu-001/proposals.json`;
         if (await this.pathExists(xhsProposalsPath)) {
           try {
@@ -7360,6 +7795,15 @@ module.exports = class ReadingCapturePlugin extends Plugin {
             if (parsed && parsed.schemaVersion === 1 && Array.isArray(parsed.proposals)) xhsProposals = parsed.proposals.slice(0, 3);
           } catch (error) {
             await this.writeDiagnosticEvent("error", "creation-xhs-proposals-read", { path: xhsProposalsPath, error: this.errorToDiagnostic(error) });
+          }
+        }
+        const xhsPlanDecisionPath = `${directory}/deliverables/xiaohongshu/xiaohongshu-001/plan-decision.json`;
+        if (await this.pathExists(xhsPlanDecisionPath)) {
+          try {
+            const parsed = JSON.parse(await this.readText(xhsPlanDecisionPath));
+            if (parsed && typeof parsed === "object") xhsPlanDecision = parsed;
+          } catch (error) {
+            await this.writeDiagnosticEvent("error", "creation-xhs-plan-decision-read", { path: xhsPlanDecisionPath, error: this.errorToDiagnostic(error) });
           }
         }
         projects.push({
@@ -7382,6 +7826,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
           wechatIllustrationPlan: (await this.pathExists(`${directory}/deliverables/wechat/wechat-001/illustration-plan.md`)) ? await this.readText(`${directory}/deliverables/wechat/wechat-001/illustration-plan.md`) : "",
           xhsPlan: (await this.pathExists(`${directory}/deliverables/xiaohongshu/xiaohongshu-001/plan.md`)) ? await this.readText(`${directory}/deliverables/xiaohongshu/xiaohongshu-001/plan.md`) : "",
           xhsProposals,
+          xhsPlanDecision,
           wechatDraft: (await this.pathExists(`${directory}/deliverables/wechat/wechat-001/drafts/v1.md`)) ? await this.readText(`${directory}/deliverables/wechat/wechat-001/drafts/v1.md`) : "",
           wechatVisualManifest: (await this.pathExists(`${directory}/deliverables/wechat/wechat-001/visuals/manifest.md`)) ? await this.readText(`${directory}/deliverables/wechat/wechat-001/visuals/manifest.md`) : "",
           wechatVisualFiles: this.getVaultFiles()
@@ -7392,6 +7837,9 @@ module.exports = class ReadingCapturePlugin extends Plugin {
           xhsImageFiles: this.getVaultFiles()
             .filter((item) => normalizePath(item.path || "").startsWith(`${directory}/deliverables/xiaohongshu/xiaohongshu-001/images/`) && /\.(?:png|jpe?g|webp|svg)$/i.test(item.name || ""))
             .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), undefined, { numeric: true, sensitivity: "base" })),
+          xhsSampleFiles: this.getVaultFiles()
+            .filter((item) => normalizePath(item.path || "").startsWith(`${directory}/deliverables/xiaohongshu/xiaohongshu-001/samples/`) && /\.(?:png|jpe?g|webp|svg)$/i.test(item.name || ""))
+            .sort((left, right) => String(left.path || "").localeCompare(String(right.path || ""), undefined, { numeric: true, sensitivity: "base" })),
           tasks: projectTasks,
           latestTask: projectTasks[0] || null,
           latestPublication,
