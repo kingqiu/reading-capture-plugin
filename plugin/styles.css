@@ -776,6 +776,56 @@
   line-height: 1.72;
 }
 
+/* 第 7 步只处理“视觉已通过后的文案质检”，与第 6 步的内容草稿审核明确分开。 */
+.reading-capture-creation-xhs-visual-review {
+  display: grid;
+  gap: 16px;
+}
+
+.reading-capture-creation-xhs-copy-qa-progress {
+  padding: 14px 16px;
+  border: 1px solid rgba(80, 149, 225, 0.65);
+  border-left: 4px solid #63a2ff;
+  border-radius: 8px;
+  background: rgba(24, 64, 110, 0.18);
+}
+
+.reading-capture-creation-xhs-copy-qa-progress.is-error {
+  border-color: rgba(229, 159, 82, 0.72);
+  border-left-color: var(--rc-workbench-warn);
+  background: rgba(111, 67, 16, 0.17);
+}
+
+.reading-capture-creation-xhs-copy-qa-progress h3 {
+  margin: 0 0 5px;
+  color: var(--text-normal);
+  font-size: 16px;
+}
+
+.reading-capture-creation-xhs-copy-qa-progress p {
+  margin: 0;
+  color: var(--rc-workbench-faint);
+  line-height: 1.55;
+}
+
+.reading-capture-creation-xhs-caption-preview {
+  padding: 15px;
+  border: 1px solid var(--rc-workbench-line);
+  border-radius: 9px;
+  background: rgba(8, 19, 10, 0.58);
+}
+
+.reading-capture-creation-xhs-caption-preview h3 {
+  margin: 0 0 9px;
+}
+
+.reading-capture-creation-xhs-caption-preview textarea {
+  min-height: 340px;
+  resize: vertical;
+  font-size: 14px;
+  line-height: 1.72;
+}
+
 .reading-capture-creation-diagnosis-actions,
 .reading-capture-creation-research-routes,
 .reading-capture-creation-xhs-proposals {

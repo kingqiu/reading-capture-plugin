@@ -3392,7 +3392,8 @@ async function testXhsTaskChainUsesApprovedPlanAndIndependentDualQa() {
     [`${project.directory}/deliverables/xiaohongshu/xiaohongshu-001/visual-qa.md`]: "visual-qa-v1",
   };
   packageEntry[1].content = `${JSON.stringify(packageTask, null, 2)}\n`;
-  await plugin.acceptCreationTask({ ...packageTask, taskPath: packageEntry[0] });
+  const packageAccepted = await plugin.acceptCreationTask({ ...packageTask, taskPath: packageEntry[0] });
+  assert.strictEqual(packageAccepted.workflowState.currentStage, "visual", "accepting the visual package must keep the user in the visual stage while copy QA runs");
   const copyEntry = [...files.entries()].find(([, record]) => {
     try { return JSON.parse(record.content).kind === "xhs.copy-qa"; } catch (error) { return false; }
   });
@@ -3409,7 +3410,7 @@ async function testXhsTaskChainUsesApprovedPlanAndIndependentDualQa() {
   };
   copyEntry[1].content = `${JSON.stringify(copyTask, null, 2)}\n`;
   const accepted = await plugin.acceptCreationTask({ ...copyTask, taskPath: copyEntry[0] });
-  assert.strictEqual(accepted.workflowState.currentStage, "visual");
+  assert.strictEqual(accepted.workflowState.currentStage, "final");
   assert.strictEqual(accepted.workflowState.deliverables.xiaohongshu.cardVersion, "cards-v1");
   assert.strictEqual(accepted.workflowState.deliverables.xiaohongshu.visualQaVersion, "visual-qa-v1");
   assert.strictEqual(accepted.workflowState.deliverables.xiaohongshu.captionVersion, "caption-v2");
@@ -3769,6 +3770,7 @@ async function testCreationViewExposesPerItemVisualRecoveryWithoutDiscardingSucc
   const edit = allElements.find((element) => element.tag === "button" && element.text === "修改此页");
   await edit.listeners.click();
   assert.strictEqual(edited, "page-01");
+
 }
 
 async function testXhsContentReviewShowsCardThumbnailsInsteadOfManifestDump() {
@@ -3792,7 +3794,7 @@ async function testXhsContentReviewShowsCardThumbnailsInsteadOfManifestDump() {
   state.currentStage = "draft";
   state.deliverables.xiaohongshu.stage = "draft";
   state.deliverables.xiaohongshu.cardGroupId = "group-a";
-  plugin.listCreationProjects = async () => [{
+  const project = {
     path: `${root}/project.md`,
     directory: root,
     title: "XHS review",
@@ -3814,7 +3816,8 @@ async function testXhsContentReviewShowsCardThumbnailsInsteadOfManifestDump() {
       { kind: "xhs.package", groupId: "group-a", status: "awaiting_approval", qualityScore: 96, qualityPassed: true },
       { kind: "xhs.copy-qa", groupId: "group-a", status: "awaiting_approval", qualityScore: 97, qualityPassed: true },
     ],
-  }];
+  };
+  plugin.listCreationProjects = async () => [project];
   await plugin.onload();
   const view = registeredViews["reading-capture-creation-project"]({});
   view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
@@ -3828,6 +3831,22 @@ async function testXhsContentReviewShowsCardThumbnailsInsteadOfManifestDump() {
   const edit = fakeElementsByTag(screen, "button").find((element) => element.text === "修改此页");
   await edit.listeners.click();
   assert.strictEqual(edited, "page-01");
+
+  // The accepted visual package must advance to the visual stage while the
+  // copy QA is still running; raw manifests must never return as the review UI.
+  project.workflowState.currentStage = "visual";
+  project.workflowState.deliverables.xiaohongshu.stage = "visual";
+  project.tasks = project.tasks.map((task) => task.kind === "xhs.package"
+    ? { ...task, status: "completed" }
+    : task.kind === "xhs.copy-qa"
+      ? { ...task, status: "running" }
+      : task);
+  await view.reload();
+  const visualTexts = fakeElementTexts(view.containerEl.children[1]);
+  assert.ok(visualTexts.includes("视觉审核已通过 · 正在进行发布文案质检"));
+  assert.ok(visualTexts.includes("逐页卡片审核"));
+  assert.ok(!visualTexts.includes("这里是机器可读的长清单，不应该作为人工审核主界面。"));
+  assert.strictEqual(fakeElementsByClass(view.containerEl.children[1], "reading-capture-creation-xhs-card-tile").length, 2);
 }
 
 async function testWechatVisualViewSummarizesBlockedAndPendingWork() {

@@ -281,6 +281,39 @@ function approveVisuals(state, platform, versions = {}) {
   };
 }
 
+// 小红书的卡片视觉验收与发布文案质检不是同一个审批门：卡片通过后，
+// 文案质检仍可在后台运行，但用户应该停留在第 7 步查看已通过的视觉成品。
+function enterXhsVisualReview(state, versions = {}) {
+  if (!state || state.currentStage !== "draft" || !state.deliverables.xiaohongshu) {
+    throw new Error("xiaohongshu visual review requires the draft stage");
+  }
+  return {
+    ...state,
+    currentStage: "visual",
+    activeDeliverable: "xiaohongshu",
+    deliverables: {
+      ...state.deliverables,
+      xiaohongshu: advanceDeliverable(state.deliverables.xiaohongshu, "visual", versions),
+    },
+  };
+}
+
+// 文案质检接受后，卡片与文案都已经在第 7 步人工核对过，直接进入发布包。
+function finalizeXhsVisualReview(state, versions = {}) {
+  if (!state || state.currentStage !== "visual" || !state.deliverables.xiaohongshu) {
+    throw new Error("xiaohongshu finalization requires the visual stage");
+  }
+  return {
+    ...state,
+    currentStage: "final",
+    activeDeliverable: "xiaohongshu",
+    deliverables: {
+      ...state.deliverables,
+      xiaohongshu: advanceDeliverable(state.deliverables.xiaohongshu, "final", versions),
+    },
+  };
+}
+
 function selectRepurposeSource(state, source = {}) {
   if (!state || state.workflowMode !== "article_repurpose") throw new Error("source selection requires article_repurpose mode");
   if (!String(source.path || "").trim()) throw new Error("source path is required");
@@ -430,6 +463,8 @@ module.exports = {
   createWorkflowState,
   deriveStageStates,
   enterDiagnosis,
+  enterXhsVisualReview,
+  finalizeXhsVisualReview,
   invalidateDeliverableFrom,
   normalizeWorkflowState,
   recordDeliverableVersions,

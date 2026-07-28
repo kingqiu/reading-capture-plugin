@@ -2576,14 +2576,77 @@ class ReadingCaptureReaderView extends ItemView {
     });
   }
 
+  renderApprovedXhsVisualReview(screen, selected) {
+    const deliverable = selected.workflowState.deliverables.xiaohongshu || {};
+    const cardGroupId = deliverable.cardGroupId;
+    const cardTasks = (selected.tasks || []).filter((item) => item.kind === "xhs.card-page" && (!cardGroupId || item.groupId === cardGroupId));
+    const copyQaTask = (selected.tasks || [])
+      .filter((item) => item.kind === "xhs.copy-qa" && !["superseded", "cancelled"].includes(item.status))
+      .sort((left, right) => (Date.parse(right.updatedAt || right.createdAt || "") || 0) - (Date.parse(left.updatedAt || left.createdAt || "") || 0))[0];
+    const review = screen.createDiv({ cls: "reading-capture-creation-xhs-visual-review" });
+    const progress = review.createDiv({ cls: "reading-capture-creation-xhs-copy-qa-progress" });
+    const copyStatus = copyQaTask ? this.plugin.creationTaskStatusLabel(copyQaTask.status) : "等待任务进入队列";
+    if (copyQaTask && ["pending", "running", "waiting_user"].includes(copyQaTask.status)) {
+      progress.createEl("h3", { text: "视觉审核已通过 · 正在进行发布文案质检" });
+      progress.createEl("p", { text: `卡片视觉已锁定，不会重新生成。Writing Styles 正在检查发布文案；当前状态：${copyStatus}。` });
+    } else if (copyQaTask && copyQaTask.status === "awaiting_approval") {
+      progress.createEl("h3", { text: "视觉审核已通过 · 发布文案质检等待确认" });
+      progress.createEl("p", { text: `发布文案质检得分 ${copyQaTask.qualityScore || 0} 分。请先阅读下方文案和全部卡片，再决定是否进入定稿。` });
+    } else if (copyQaTask && ["failed", "partial", "stale"].includes(copyQaTask.status)) {
+      progress.addClass("is-error");
+      progress.createEl("h3", { text: "视觉审核已通过 · 发布文案质检未完成" });
+      progress.createEl("p", { text: copyQaTask.error || "文案质检没有得到可用结果；卡片仍保留，可只重试文案质检。" });
+      const retry = progress.createEl("button", { text: "仅重试发布文案质检" });
+      retry.addEventListener("click", async () => {
+        retry.disabled = true;
+        await this.plugin.retryCreationTask(copyQaTask);
+        await this.reload();
+      });
+    } else {
+      progress.createEl("h3", { text: "视觉审核已通过 · 等待发布文案质检" });
+      progress.createEl("p", { text: "卡片已保留在当前版本中；文案质检完成后会在这里显示结果，不会返回第 6 步。" });
+    }
+
+    this.renderXhsCardReviewGallery(review, selected, cardTasks);
+    const caption = review.createDiv({ cls: "reading-capture-creation-xhs-caption-preview" });
+    caption.createEl("h3", { text: "完整发布文案（预览）" });
+    const captionText = caption.createEl("textarea", { attr: { "aria-label": "小红书发布文案预览", readonly: "readonly" } });
+    captionText.value = selected.xhsCaption || "发布文案尚未写入；质检完成后将自动刷新。";
+    caption.createEl("p", { cls: "reading-capture-creation-autosave", text: "此处用于核对当前版本。若要修改文案，请在文案质检完成后使用“让 Agent 调整”创建新版本。" });
+
+    if (!copyQaTask || copyQaTask.status !== "awaiting_approval") return;
+    const gate = review.createDiv({ cls: "reading-capture-creation-gate" });
+    gate.createEl("h3", { text: "最后确认：发布文案与已通过的视觉成套发布" });
+    if (!copyQaTask.qualityPassed) {
+      gate.createEl("p", { text: `当前文案质量为 ${copyQaTask.qualityScore || 0} 分，未达到 95 分。请返回修改文案后重新运行质检。` });
+      return;
+    }
+    const checkLabel = gate.createEl("label", { text: "我已核对卡片、标题、正文、标签与视觉一致" });
+    const check = checkLabel.createEl("input", { attr: { type: "checkbox" } });
+    const accept = gate.createEl("button", { cls: "mod-cta", text: "确认发布文案，进入定稿与导出" });
+    accept.disabled = true;
+    check.addEventListener("change", () => { accept.disabled = !check.checked; });
+    accept.addEventListener("click", async () => {
+      accept.disabled = true;
+      await this.plugin.acceptCreationTask(copyQaTask);
+      this.displayedStage = "";
+      await this.reload();
+    });
+  }
+
   renderApprovedVisual(canvas, selected) {
     const isXhs = selected.workflowState.activeDeliverable === "xiaohongshu";
     const screen = canvas.createEl("article", { cls: `reading-capture-creation-screen is-active ${isXhs ? "is-xhs" : "is-wechat"}` });
     const head = screen.createDiv({ cls: "reading-capture-creation-screen-head" });
     const copy = head.createDiv();
     copy.createEl("div", { cls: "reading-capture-creation-kicker", text: "STAGE 07 / VISUAL ACCEPTANCE" });
-    copy.createEl("h2", { text: isXhs ? "小红书最终视觉与文案同步验收" : "验收已批准计划生成的公众号配图" });
-    copy.createEl("p", { text: isXhs ? "检查页序、最弱页、封面承诺、中文断行、页脚、品牌署名和文案一致性。" : "逐张查看插入位置、执行 Skill、来源准确性和文章上下文；失败图片可单独重试。" });
+    const xhsCopyQaActive = isXhs && (selected.tasks || []).some((item) => item.kind === "xhs.copy-qa" && ["pending", "running", "waiting_user"].includes(item.status));
+    copy.createEl("h2", { text: isXhs ? (xhsCopyQaActive ? "视觉已通过，正在质检发布文案" : "小红书视觉与发布文案验收") : "验收已批准计划生成的公众号配图" });
+    copy.createEl("p", { text: isXhs ? (xhsCopyQaActive ? "卡片视觉已锁定在本页展示；文案质检独立执行，完成后仍在这里确认，不会回到内容审核。" : "检查页序、最弱页、封面承诺、中文断行、页脚、品牌署名和文案一致性。") : "逐张查看插入位置、执行 Skill、来源准确性和文章上下文；失败图片可单独重试。" });
+    if (isXhs) {
+      this.renderApprovedXhsVisualReview(screen, selected);
+      return;
+    }
     const currentVisualGroup = selected.workflowState.deliverables.wechat && selected.workflowState.deliverables.wechat.visualGroupId;
     const visualTasks = (selected.tasks || []).filter((item) => item.kind === "wechat.visual-item" && !["superseded", "cancelled"].includes(item.status) && (!currentVisualGroup || item.groupId === currentVisualGroup));
     const task = (selected.tasks || []).find((item) => item.kind === "wechat.visual" && item.status === "awaiting_approval");
@@ -4374,6 +4437,10 @@ class ReadingCaptureCreationProjectView extends ItemView {
     return ReadingCaptureReaderView.prototype.renderXhsCardReviewGallery.call(this, container, selected, cardTasks);
   }
 
+  renderApprovedXhsVisualReview(container, selected) {
+    return ReadingCaptureReaderView.prototype.renderApprovedXhsVisualReview.call(this, container, selected);
+  }
+
   renderApprovedVisual(container, selected) {
     return ReadingCaptureReaderView.prototype.renderApprovedVisual.call(this, container, selected);
   }
@@ -6004,17 +6071,17 @@ module.exports = class ReadingCapturePlugin extends Plugin {
         taskState: "card_pages_review",
       });
     } else if (task.kind === "xhs.package") {
-      workflowState = creationWorkflow.recordDeliverableVersions(workflowState, "xiaohongshu", {
+      workflowState = creationWorkflow.enterXhsVisualReview(workflowState, {
         cardVersion: versionFor("cards-manifest.md"),
         captionVersion: versionFor("caption.md"),
         visualQaVersion: versionFor("visual-qa.md"),
         taskState: "copy_qa_queued",
       });
     } else if (task.kind === "xhs.copy-qa") {
-      workflowState = creationWorkflow.approveContent(workflowState, "xiaohongshu", {
+      workflowState = creationWorkflow.finalizeXhsVisualReview(workflowState, {
         captionVersion: versionFor("caption.md"),
         copyQaVersion: versionFor("copy-qa.md"),
-        taskState: "human_visual_review",
+        taskState: "ready_to_export",
       });
     } else {
       throw new Error(`当前任务不能通过这个验收入口：${task.kind}`);
@@ -7773,6 +7840,19 @@ module.exports = class ReadingCapturePlugin extends Plugin {
           }
         }
         if (recoveredRefs) await this.saveCreationWorkflowState(directory, workflowState);
+        // Early project states recorded accepted card packages without moving
+        // from draft to visual. Move those projects once, without restarting
+        // the active copy-QA task or touching any card files.
+        const acceptedXhsPackage = projectTasks.some((task) => task.kind === "xhs.package" && task.status === "completed");
+        const activeXhsCopyQa = projectTasks
+          .filter((task) => task.kind === "xhs.copy-qa" && !["superseded", "cancelled"].includes(task.status))
+          .sort((left, right) => (Date.parse(right.updatedAt || right.createdAt || "") || 0) - (Date.parse(left.updatedAt || left.createdAt || "") || 0))[0];
+        if (workflowState.activeDeliverable === "xiaohongshu" && workflowState.currentStage === "draft" && acceptedXhsPackage && activeXhsCopyQa) {
+          workflowState = creationWorkflow.enterXhsVisualReview(workflowState, {
+            taskState: activeXhsCopyQa.status === "awaiting_approval" ? "human_visual_review" : "copy_qa_queued",
+          });
+          await this.saveCreationWorkflowState(directory, workflowState);
+        }
         projectTasks.sort((left, right) => (Date.parse(right.updatedAt || right.createdAt || "") || 0) - (Date.parse(left.updatedAt || left.createdAt || "") || 0));
         let latestPublication = null;
         for (const publicationFile of [`${directory}/publication-records.jsonl`, `${directory}/publications.jsonl`]) {
