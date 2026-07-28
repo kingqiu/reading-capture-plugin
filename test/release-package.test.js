@@ -123,6 +123,29 @@ function testReaderUsesFixedWorkspaceWithIndependentScrollAreas() {
   assert.match(sidebarRule.groups.body, /overflow-y:\s*auto/);
 }
 
+function testReaderContentUsesAvailableMainPaneWidth() {
+  const styles = fs.readFileSync(path.join(root, "plugin/styles.css"), "utf8");
+  const stageRule = styles.match(/\.reading-capture-reader-stage\s*\{(?<body>[^}]+)\}/);
+  assert.ok(stageRule, "reader stage should have a dedicated layout rule");
+  assert.match(stageRule.groups.body, /width:\s*100%/);
+  assert.match(stageRule.groups.body, /max-width:\s*none/);
+
+  const collapsedStageRule = styles.match(/\.reading-capture-reader-stage\.is-sidebar-collapsed\s*\{(?<body>[^}]+)\}/);
+  assert.ok(collapsedStageRule, "collapsed reader stage should have a dedicated layout rule");
+  assert.match(collapsedStageRule.groups.body, /max-width:\s*none/);
+
+  const bodyRule = styles.match(/\.reading-capture-reader \.reading-capture-reader-body\.markdown-preview-view\s*\{(?<body>[^}]+)\}/);
+  assert.ok(bodyRule, "reader body should have a dedicated layout rule");
+  assert.match(bodyRule.groups.body, /width:\s*100%/);
+  assert.match(bodyRule.groups.body, /max-width:\s*none/);
+  assert.match(bodyRule.groups.body, /--file-line-width:\s*100%/);
+
+  const sizerRule = styles.match(/\.reading-capture-reader-body \.markdown-preview-sizer\s*\{(?<body>[^}]+)\}/);
+  assert.ok(sizerRule, "reader markdown sizer should have a dedicated layout rule");
+  assert.match(sizerRule.groups.body, /width:\s*100%/);
+  assert.match(sizerRule.groups.body, /max-width:\s*none/);
+}
+
 function testReaderMatchesApprovedTwoPaneDesignStructure() {
   const styles = fs.readFileSync(path.join(root, "plugin/styles.css"), "utf8");
   const main = fs.readFileSync(path.join(root, "plugin/main.js"), "utf8");
@@ -190,6 +213,7 @@ testPackagedMainIsBundled();
 testLibraryFiltersCanScroll();
 testReaderToolbarIsIntegratedWithWorkspace();
 testReaderUsesFixedWorkspaceWithIndependentScrollAreas();
+testReaderContentUsesAvailableMainPaneWidth();
 testReaderMatchesApprovedTwoPaneDesignStructure();
 testReaderAnnotationTypesUseSharedPalette();
 testDiagnosticReportCommandExists();

@@ -312,17 +312,17 @@
   flex: 1 1 auto;
   gap: 22px;
   grid-template-columns: minmax(0, 1fr) minmax(270px, 340px);
-  margin: 0 auto;
-  max-width: 1400px;
+  margin: 0 !important;
+  max-width: none !important;
   min-height: 0;
   overflow: hidden;
   padding: 10px 46px 82px;
-  width: 100%;
+  width: 100% !important;
 }
 
 .reading-capture-reader-stage.is-sidebar-collapsed {
   grid-template-columns: minmax(0, 1fr);
-  max-width: 1040px;
+  max-width: none;
 }
 
 .reading-capture-reader-article-panel {
@@ -354,6 +354,8 @@
 }
 
 .reading-capture-reader .reading-capture-reader-body.markdown-preview-view {
+  --file-line-width: 100%;
+  --line-width: 100%;
   background: transparent !important;
   color: #d1d6ce !important;
   font-family: "Songti SC", "Noto Serif SC", "Kaiti SC", ui-serif, Georgia, serif !important;
@@ -361,15 +363,24 @@
   line-height: 1.72 !important;
   box-sizing: border-box;
   height: 100%;
-  margin: 0 auto;
-  max-width: 920px;
+  margin: 0 !important;
+  max-width: none !important;
   min-height: 0;
   overflow-y: auto;
   padding: 28px 64px 56px;
   position: relative;
   user-select: text;
   -webkit-user-select: text;
+  width: 100% !important;
   z-index: 1;
+}
+
+/* Obsidian's renderer may wrap Markdown in this sizer and otherwise restore
+   the vault-wide --file-line-width cap inside the Reader. */
+.reading-capture-reader-body .markdown-preview-sizer {
+  margin: 0 !important;
+  max-width: none !important;
+  width: 100% !important;
 }
 
 .reading-capture-reader-body,

@@ -34,7 +34,7 @@ Browse saved articles, reading status, file versions, highlights, and creative i
 
 ### Reader And Capture
 
-Read in a quieter view and save highlights, thoughts, creative ideas, and fact-check items.
+Read in a quieter view and save highlights, thoughts, creative ideas, and fact-check items. The article body expands through the available reading pane before the annotation sidebar, so widening Obsidian also gives you a wider reading layout.
 
 ![Reader preview](docs/assets/screenshots/reader.svg)
 
