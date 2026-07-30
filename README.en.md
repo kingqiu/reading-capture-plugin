@@ -8,6 +8,8 @@ It gives you a focused reading space inside Obsidian, a library view for browsin
 
 Version: `0.4.4`
 
+> Cross-device update instructions, including a ready-to-use Agent brief: [docs/cross-device-plugin-update.md](docs/cross-device-plugin-update.md)
+
 ## What You Can Do
 
 - Browse saved articles in the `知见录` article library.

@@ -8,6 +8,8 @@ Reading Capture 是一个 Obsidian 插件，适合经常保存文章、做深度
 
 当前版本：`0.4.4`
 
+> 跨电脑更新插件（含可直接交给 Agent 的操作说明）：[docs/cross-device-plugin-update.md](docs/cross-device-plugin-update.md)
+
 当前开发分支：`personal/topic-miner`
 
 ## 本分支近期更新（2026-07-26 至 2026-07-28）
