@@ -34,6 +34,43 @@ const DEFAULT_SETTINGS = {
   articleLibraryExcludeRoots: ".obsidian",
 };
 
+class DeleteAnnotationModal extends Modal {
+  constructor(app, annotation, onConfirm) {
+    super(app);
+    this.annotation = annotation;
+    this.onConfirm = onConfirm;
+    this.busy = false;
+  }
+
+  onOpen() {
+    const content = this.contentEl;
+    content.empty();
+    content.createEl("h2", { text: "删除这条标注？" });
+    content.createEl("p", { text: "仅删除这一条摘录及其想法。原文、其他标注，以及重复保存的同一段内容都会保留。" });
+    content.createEl("blockquote", { text: (this.annotation.quote || this.annotation.note || this.annotation.mediaAlt || "图片标注").slice(0, 240) });
+    content.createEl("small", { text: `记录时间：${this.annotation.time || "未知"} · ${this.annotation.id}` });
+    const errorEl = content.createEl("p", { attr: { role: "alert" } });
+    const actions = content.createDiv({ cls: "reading-capture-button-row" });
+    const cancel = actions.createEl("button", { text: "取消" });
+    cancel.addEventListener("click", () => this.close());
+    const remove = actions.createEl("button", { text: "确认删除", cls: "mod-warning" });
+    remove.addEventListener("click", async () => {
+      if (this.busy) return;
+      this.busy = true;
+      remove.disabled = true;
+      try {
+        await this.onConfirm();
+        this.close();
+      } catch (error) {
+        errorEl.textContent = `删除失败：${error.message || error}`;
+        this.busy = false;
+        remove.disabled = false;
+      }
+    });
+    cancel.focus();
+  }
+}
+
 class TextInputModal extends Modal {
   constructor(app, title, placeholder, onSubmit, options = {}) {
     super(app);
@@ -525,16 +562,7 @@ class ReadingCaptureReaderView extends ItemView {
 
   highlightQuoteInElement(root, annotation) {
     const quote = annotation && annotation.quote ? annotation.quote : annotation;
-    const cleanQuote = this.plugin.markdownTextForMatch(quote).replace(/\s+/g, " ").trim();
-    if (!cleanQuote) return;
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    const textNodes = [];
-    let fullText = "";
-    while (walker.nextNode()) {
-      const node = walker.currentNode;
-      textNodes.push({ node, start: fullText.length, end: fullText.length + node.nodeValue.length });
-      fullText += node.nodeValue;
-    }
+    const { textNodes, fullText } = this.plugin.buildReaderTextIndex(root);
     const rawRange = this.plugin.findQuoteRawRange(fullText, quote);
     if (!rawRange) return;
 
@@ -596,9 +624,10 @@ class ReadingCaptureReaderView extends ItemView {
       const meta = top.createDiv({ cls: "reading-capture-sidebar-card-meta" });
       meta.createEl("span", { cls: `reading-capture-type-pill ${typeClass}`, text: this.plugin.annotationLabel(item) });
       meta.createEl("span", { cls: "reading-capture-sidebar-time", text: this.plugin.shortTime(item.time) });
-      const copy = top.createEl("button", {
+      const actions = top.createDiv({ cls: "reading-capture-sidebar-card-actions" });
+      const copy = actions.createEl("button", {
         cls: "reading-capture-sidebar-copy",
-        text: "...",
+        text: "复制引用",
         attr: { title: "复制引用", "aria-label": "复制引用" },
       });
       copy.addEventListener("click", async (event) => {
@@ -607,6 +636,23 @@ class ReadingCaptureReaderView extends ItemView {
         if (!text) return;
         await this.plugin.writeClipboardText(text);
         new Notice("已复制引用。");
+      });
+      const remove = actions.createEl("button", {
+        cls: "reading-capture-sidebar-delete",
+        text: "删除",
+        attr: { title: "删除这条标注", "aria-label": "删除这条标注" },
+      });
+      remove.addEventListener("click", (event) => {
+        event.stopPropagation();
+        new DeleteAnnotationModal(this.app, item, async () => {
+          await this.plugin.deleteAnnotationForSource(sourceFile, item.id);
+          if (this.pendingAnnotationId === item.id) this.pendingAnnotationId = "";
+          try {
+            await this.renderKeepingScroll();
+          } catch (error) {
+            new Notice("标注已删除，请重新打开文章刷新显示。");
+          }
+        }).open();
       });
       if (!item.located && (item.quote || item.mediaType)) {
         card.addClass("is-unlocated");
@@ -2019,6 +2065,35 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     return [...new Set(candidates.filter(Boolean))];
   }
 
+  buildReaderTextIndex(root) {
+    // Match Selection.toString() boundaries without separating inline text
+    // (e.g. a word split by emphasis or an existing highlight).
+    const blocks = new Set(["P", "DIV", "SECTION", "ARTICLE", "BLOCKQUOTE", "PRE",
+      "H1", "H2", "H3", "H4", "H5", "H6", "UL", "OL", "LI",
+      "TABLE", "THEAD", "TBODY", "TFOOT", "TR", "TH", "TD", "HR"]);
+    const textNodes = [];
+    let fullText = "";
+    const boundary = () => {
+      if (fullText && !/\s$/.test(fullText)) fullText += "\n";
+    };
+    const visit = (node) => {
+      if (node.nodeType === 3) {
+        const value = node.nodeValue || "";
+        textNodes.push({ node, start: fullText.length, end: fullText.length + value.length });
+        fullText += value;
+        return;
+      }
+      const tag = node.tagName;
+      if (tag === "SCRIPT" || tag === "STYLE") return;
+      const separated = blocks.has(tag) || tag === "BR";
+      if (separated) boundary();
+      for (const child of node.childNodes || []) visit(child);
+      if (separated) boundary();
+    };
+    visit(root);
+    return { fullText, textNodes };
+  }
+
   normalizeTextWithMap(text) {
     const normalized = [];
     const rawIndexes = [];
@@ -2045,15 +2120,20 @@ module.exports = class ReadingCapturePlugin extends Plugin {
   }
 
   findQuoteRawRange(fullText, quote) {
-    const cleanQuote = this.markdownTextForMatch(quote).replace(/\s+/g, " ").trim();
-    if (!cleanQuote) return null;
     const normalizedFull = this.normalizeTextWithMap(fullText);
-    const index = normalizedFull.text.indexOf(cleanQuote);
-    if (index === -1) return null;
-    const start = normalizedFull.rawIndexes[index];
-    const last = normalizedFull.rawIndexes[index + cleanQuote.length - 1];
-    if (typeof start !== "number" || typeof last !== "number") return null;
-    return { start, end: last + 1 };
+    // Reader selections are already plain text: preserve literal #, *, _, etc.
+    // Keep the Markdown fallback for older/editor-origin annotations.
+    const candidates = [String(quote || ""), this.markdownTextForMatch(quote)];
+    for (const candidate of candidates) {
+      const cleanQuote = candidate.replace(/\s+/g, " ").trim();
+      if (!cleanQuote) continue;
+      const index = normalizedFull.text.indexOf(cleanQuote);
+      if (index === -1) continue;
+      const start = normalizedFull.rawIndexes[index];
+      const last = normalizedFull.rawIndexes[index + cleanQuote.length - 1];
+      if (typeof start === "number" && typeof last === "number") return { start, end: last + 1 };
+    }
+    return null;
   }
 
   markdownTextForMatch(text) {
@@ -2833,6 +2913,34 @@ module.exports = class ReadingCapturePlugin extends Plugin {
   describeError(error) {
     if (error && error.message) return String(error.message).slice(0, 120);
     return String(error).slice(0, 120);
+  }
+
+  removeAnnotationFromMarkdown(markdown, annotationId) {
+    if (!/^ann_[A-Za-z0-9_-]+$/.test(annotationId || "")) throw new Error("标注 ID 无效。");
+    const headers = [...markdown.matchAll(/^### (ann_[^\s]+)[ \t]*\r?$/gm)];
+    const matches = headers.filter(header => header[1] === annotationId);
+    if (matches.length !== 1) throw new Error(matches.length ? "标注 ID 重复，为避免误删已停止。" : "这条标注已不存在，请重新打开文章。");
+    const start = matches[0].index;
+    const tail = markdown.slice(start + matches[0][0].length);
+    const next = /^## |^### ann_/m.exec(tail);
+    const end = next ? start + matches[0][0].length + next.index : markdown.length;
+    return markdown.slice(0, start) + markdown.slice(end);
+  }
+
+  async deleteAnnotationForSource(sourceFile, annotationId) {
+    if (!this.isFile(sourceFile)) throw new Error("未找到原文。");
+    const noteFile = await this.findReadingNoteForSource(sourceFile);
+    if (!noteFile) throw new Error("未找到阅读记录。");
+    // Process the latest note atomically so concurrent edits are preserved.
+    await this.app.vault.process(noteFile, markdown =>
+      this.touchFrontmatter(this.removeAnnotationFromMarkdown(markdown, annotationId)));
+    try {
+      await this.refreshIndexEntry(sourceFile, noteFile, "obsidian-plugin");
+    } catch (error) {
+      new Notice("标注已删除，但索引更新失败，请重建阅读索引。");
+      return;
+    }
+    new Notice("已删除这条标注。");
   }
 
   async captureForFile(file, { selectedText, note, type, heading, media = null }) {

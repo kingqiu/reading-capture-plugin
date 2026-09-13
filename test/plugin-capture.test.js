@@ -6,10 +6,14 @@ const core = require("../plugin/reading-core");
 
 const fixedNow = "2026-06-10T11:59:00+08:00";
 
-function loadPluginClass() {
+function loadPluginClass(extraGlobals = {}) {
   const code = fs.readFileSync(path.join(__dirname, "../plugin/main.js"), "utf8");
   class ItemView {}
-  class Modal {}
+  class Modal {
+    constructor() { this.contentEl = makeFakeElement(); }
+    open() { Modal.lastOpened = this; this.onOpen(); }
+    close() { this.closed = true; }
+  }
   class Plugin {
     async loadData() {
       return null;
@@ -63,8 +67,10 @@ function loadPluginClass() {
     JSON,
     Math,
     Array,
+    ...extraGlobals,
   };
-  vm.runInNewContext(code, sandbox, { filename: "main.js" });
+  vm.runInNewContext(code + "\nmodule.exports.ReaderView = ReadingCaptureReaderView; module.exports.DeleteModal = DeleteAnnotationModal;", sandbox, { filename: "main.js" });
+  sandbox.module.exports.ModalMock = Modal;
   return sandbox.module.exports;
 }
 
@@ -125,6 +131,9 @@ function makeFakeApp() {
     async modify(file, content) {
       files.get(file.path).content = content;
     },
+    async process(file, transform) {
+      files.get(file.path).content = transform(files.get(file.path).content);
+    },
     getMarkdownFiles() {
       return [...files.values()].map((entry) => entry.file).filter((file) => file.name.endsWith(".md"));
     },
@@ -162,6 +171,7 @@ function makeFakeElement(tag = "div") {
     dataset: {},
     listeners: {},
     disabled: false,
+    focus() { this.focused = true; },
     empty() {
       this.children = [];
       this.text = "";
@@ -1070,8 +1080,129 @@ async function testOpeningReadingNoteUsesRecordViewInsteadOfRawMarkdown() {
   assert.strictEqual(rawOpened, "");
 }
 
+function testStructuredSelectionLocation() {
+  const marks = [];
+  const Plugin = loadPluginClass({ document: {
+    createElement() { return { classList: { add() {} }, dataset: {} }; },
+    createRange() {
+      return {
+        setStart(node, offset) { this.node = node; this.start = offset; },
+        setEnd(node, offset) { assert.strictEqual(node, this.node); this.end = offset; },
+        surroundContents(mark) {
+          assert.ok(this.end > this.start);
+          marks.push({ text: this.node.nodeValue.slice(this.start, this.end), id: mark.dataset.annotationId });
+        },
+      };
+    },
+  } });
+  const plugin = new Plugin();
+  const text = value => ({ nodeType: 3, nodeValue: value });
+  const el = (tagName, ...children) => ({ nodeType: 1, tagName,
+    childNodes: children.map(child => typeof child === "string" ? text(child) : child) });
+  const rows = [
+    ["#", "原则", "一句话版"],
+    ["1", "Architect, not typist", "你不是打字员，你是架构师——写意图而非代码"],
+    ["2", "Maximize agent time", "最大化 Agent 时间，最小化你的介入"],
+  ];
+  const heading = "核心 10 原则（一句话版）：";
+  const table = el("TABLE", el("THEAD", el("TR", ...rows[0].map(c => el("TH", c)))),
+    el("TBODY", ...rows.slice(1).map(row => el("TR", ...row.map(c => el("TD", c))))));
+  const root = el("DIV", el("P", "前文"), el("P", el("STRONG", "核心 10 原则"), "（一句话版）："), table, el("P", "后文"));
+  const quote = heading + "\n\n" + rows.map(row => row.join("\t")).join("\n");
+  const index = plugin.buildReaderTextIndex(root);
+  for (const item of index.textNodes) {
+    assert.strictEqual(index.fullText.slice(item.start, item.end), item.node.nodeValue);
+  }
+  assert.ok(plugin.findQuoteRawRange(quote, quote), "Literal table # must survive matching");
+  assert.ok(plugin.findQuoteRawRange(index.fullText, quote), "Heading and table selection must locate");
+  assert.ok(plugin.findQuoteRawRange(index.fullText, rows[1].join("\t")), "Cross-cell selection must locate");
+  assert.strictEqual(plugin.findQuoteRawRange(index.fullText, "missing quote"), null);
+  const reader = Object.create(Plugin.ReaderView.prototype);
+  reader.plugin = plugin;
+  for (const id of ["saved-one", "saved-two"]) {
+    const annotation = { id, quote };
+    reader.highlightQuoteInElement(root, annotation);
+    assert.strictEqual(annotation.located, true);
+    const highlighted = marks.filter(mark => mark.id === id).map(mark => mark.text).join("");
+    assert.strictEqual(highlighted, heading + rows.flat().join(""), "All selected cells, and no surrounding text, must be marked");
+  }
+  const inline = plugin.buildReaderTextIndex(el("P", "arch", el("STRONG", "it"), el("MARK", "ect")));
+  assert.ok(plugin.findQuoteRawRange(inline.fullText, "architect"), "Inline tags must not split words");
+  const blocks = plugin.buildReaderTextIndex(el("DIV", el("P", "first", el("BR"), "line"), el("UL", el("LI", "second"), el("LI", "third"))));
+  assert.ok(plugin.findQuoteRawRange(blocks.fullText, "first\nline\nsecond\nthird"));
+  for (const literal of ["# heading", "*literal*", "snake_case_name", "> comparison"]) {
+    assert.ok(plugin.findQuoteRawRange(literal, literal));
+  }
+  assert.ok(plugin.findQuoteRawRange("bold text", "**bold** text"), "Editor Markdown fallback remains supported");
+}
+
+async function testSingleAnnotationDeletion() {
+  const P = loadPluginClass();
+  const plugin = new P();
+  const { app, sourceFile, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { readingRoot: "Learning/reading-notes", openNoteAfterCapture: false };
+  plugin.now = () => fixedNow;
+  const noteFile = await plugin.getOrCreateReadingNote(sourceFile);
+  const block = id => `### ${id}\n\n- quote_hash: same_hash\n- type: highlight\n\n> identical quote\n\n我的想法：\nmy thought\n\n`;
+  const original = `## 标注记录\n\n${block("ann_one")}${block("ann_two")}## 创作灵感\n\nkeep this section\n`;
+  files.get(noteFile.path).content = original;
+  const result = plugin.removeAnnotationFromMarkdown(original, "ann_one");
+  assert.strictEqual(result, original.replace(block("ann_one"), ""));
+  assert.throws(() => plugin.removeAnnotationFromMarkdown(original, "ann_missing"));
+  assert.throws(() => plugin.removeAnnotationFromMarkdown(original + block("ann_one"), "ann_one"));
+  const crlf = original.replace(/\n/g, "\r\n");
+  assert.strictEqual(plugin.removeAnnotationFromMarkdown(crlf, "ann_two"), crlf.replace(block("ann_two").replace(/\n/g, "\r\n"), ""));
+
+  let copied = "", navigated = 0, refreshed = 0, stopped = 0;
+  plugin.writeClipboardText = async value => { copied = value; };
+  const view = Object.create(P.ReaderView.prototype);
+  view.plugin = plugin; view.app = app;
+  view.activateAnnotation = () => { navigated += 1; };
+  view.renderKeepingScroll = async () => { refreshed += 1; };
+  const sidebar = makeFakeElement();
+  view.renderSidebar(sidebar, plugin.parseAnnotationsFromReadingNote(original), sourceFile);
+  const event = { stopPropagation() { stopped += 1; } };
+  await fakeElementsByClass(sidebar, "reading-capture-sidebar-copy")[0].listeners.click(event);
+  assert.strictEqual(copied, "identical quote");
+  const remove = fakeElementsByClass(sidebar, "reading-capture-sidebar-delete")[0];
+  remove.listeners.click(event);
+  assert.strictEqual(files.get(noteFile.path).content, original, "Opening confirmation must not delete");
+  let modal = P.ModalMock.lastOpened;
+  const buttons = modal.contentEl.children.at(-1).children;
+  assert.strictEqual(buttons[0].focused, true, "Cancel is the default focused action");
+  buttons[0].listeners.click();
+  assert.strictEqual(files.get(noteFile.path).content, original, "Cancel must preserve the note");
+  remove.listeners.click(event);
+  modal = P.ModalMock.lastOpened;
+  const confirm = modal.contentEl.children.at(-1).children[1];
+  await Promise.all([confirm.listeners.click(), confirm.listeners.click()]);
+  assert.strictEqual(refreshed, 1, "Double click must delete only once");
+  assert.strictEqual(navigated, 0);
+  assert.strictEqual(stopped, 3);
+  assert.strictEqual(copied, "identical quote", "Deletion must not change the clipboard");
+  assert.strictEqual(plugin.parseAnnotationsFromReadingNote(files.get(noteFile.path).content).length, 1);
+  assert.ok(files.get(noteFile.path).content.includes(block("ann_two")));
+  assert.strictEqual(files.get(sourceFile.path).content, "# Example\n\nSelected text");
+  const index = JSON.parse(files.get(plugin.indexPath()).content);
+  assert.strictEqual(index.sources[sourceFile.path].annotation_count, 1);
+  await assert.rejects(() => plugin.deleteAnnotationForSource(sourceFile, "ann_one"));
+  await plugin.deleteAnnotationForSource(sourceFile, "ann_two");
+  assert.ok(files.has(noteFile.path), "Deleting the last annotation must keep the note file");
+  assert.ok(files.get(noteFile.path).content.includes("keep this section"));
+  assert.strictEqual(JSON.parse(files.get(plugin.indexPath()).content).sources[sourceFile.path].annotation_count, 0);
+  const failing = new P.DeleteModal(app, { id: "ann_fail", note: "test" }, async () => { throw Error("write failed"); });
+  failing.open();
+  const retry = failing.contentEl.children.at(-1).children[1];
+  await retry.listeners.click();
+  assert.strictEqual(retry.disabled, false);
+  assert.ok(!failing.closed);
+}
+
+testStructuredSelectionLocation();
 testCaptureWritesAnnotationAndIndex()
   .then(testCaptureReusesExistingUnindexedFile)
+  .then(testSingleAnnotationDeletion)
   .then(testCaptureImageNote)
   .then(testRecordTargetAndHighlight)
   .then(testArticleLibraryGrouping)
