@@ -7,7 +7,7 @@ const pluginDir = path.join(root, "plugin");
 const distDir = path.join(root, "dist");
 const packageDir = path.join(distDir, "reading-capture");
 const zipPath = path.join(distDir, "reading-capture.zip");
-const runtimeFiles = ["main.js", "manifest.json", "styles.css", "reading-core.js", "creation-workflow.js", "skill-registry.js", "skill-runner.js", "skill-manager.js"];
+const runtimeFiles = ["THIRD-PARTY-NOTICES.md", "main.js", "manifest.json", "styles.css", "reading-core.js", "creation-workflow.js", "skill-registry.js", "skill-runner.js", "skill-manager.js"];
 const coreRequireLine = 'const core = require("./reading-core");';
 const creationWorkflowRequireLine = 'const creationWorkflow = require("./creation-workflow");';
 const skillRegistryRequireLine = 'const skillRegistry = require("./skill-registry");';
@@ -50,6 +50,12 @@ function buildBundledMain() {
   const core = fs.readFileSync(path.join(pluginDir, "reading-core.js"), "utf8");
   const creationWorkflow = fs.readFileSync(path.join(pluginDir, "creation-workflow.js"), "utf8");
   const skillRegistry = fs.readFileSync(path.join(pluginDir, "skill-registry.js"), "utf8");
+  const pdfExport = require("esbuild").buildSync({
+    entryPoints: [path.join(pluginDir, "pdf-export.js")], bundle: true, write: false,
+    platform: "node", format: "cjs", target: "es2020", minify: true,
+    external: ["obsidian", "electron", "@electron/remote"], legalComments: "inline",
+  }).outputFiles[0].text;
+  if (!main.includes('require("./pdf-export")')) throw new Error("Missing PDF export entry point");
   if (!main.includes(coreRequireLine)) throw new Error(`plugin/main.js must contain ${coreRequireLine}`);
   if (!main.includes(creationWorkflowRequireLine)) {
     throw new Error(`plugin/main.js must contain ${creationWorkflowRequireLine}`);
@@ -61,7 +67,8 @@ function buildBundledMain() {
   return main
     .replace(coreRequireLine, bundledCore)
     .replace(creationWorkflowRequireLine, bundledCreationWorkflow)
-    .replace(skillRegistryRequireLine, bundledSkillRegistry);
+    .replace(skillRegistryRequireLine, bundledSkillRegistry)
+    .replace('require("./pdf-export")', () => `(() => { const module = { exports: {} };\n${pdfExport}\nreturn module.exports; })()`);
 }
 
 function indent(text) {

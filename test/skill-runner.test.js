@@ -273,6 +273,33 @@ function testRunnerRedactsVaultHomeEmailAndSecrets() {
   assert.match(value, /<redacted-secret>/u);
 }
 
+async function testRunnerPreparesParentsForDeclaredOutputsInIsolatedWorkspace() {
+  const vault = fs.mkdtempSync(path.join(os.tmpdir(), "reading-capture-output-parent-"));
+  try {
+    const projectRelative = "Reading Capture/creation-projects/project-1";
+    const projectDirectory = path.join(vault, projectRelative);
+    const workspaceDirectory = path.join(projectDirectory, "runs/task-visual_attempt-1/workspace");
+    fs.mkdirSync(projectDirectory, { recursive: true });
+    const task = makeTask({
+      kind: "wechat.visual-item",
+      skillId: "baoyu-infographic",
+      inputs: [],
+      outputs: [`${projectRelative}/deliverables/wechat/wechat-001/visuals/wb-03-assistant-ui.png`],
+    });
+    const isolatedPaths = runner.stagedTaskPaths(task, projectDirectory, workspaceDirectory, vault);
+
+    await runner.prepareIsolatedWorkspace(isolatedPaths, workspaceDirectory);
+
+    assert.strictEqual(
+      fs.existsSync(path.dirname(isolatedPaths.outputs[0].absolute)),
+      true,
+      "a Skill must be able to write a newly declared image output into the isolated workspace",
+    );
+  } finally {
+    fs.rmSync(vault, { recursive: true, force: true });
+  }
+}
+
 async function testRunnerPromotesOnlyDeclaredOutputsFromIsolatedWorkspace() {
   const vault = fs.mkdtempSync(path.join(os.tmpdir(), "reading-capture-runner-isolation-"));
   try {
@@ -310,6 +337,48 @@ async function testRunnerPromotesOnlyDeclaredOutputsFromIsolatedWorkspace() {
     const receipt = fs.readFileSync(path.join(projectDirectory, "runs/task-isolated_attempt-1/receipt.md"), "utf8");
     assert.match(receipt, /reading-capture-run-receipt/);
     assert.match(receipt, /"status":"awaiting_approval"/);
+  } finally {
+    fs.rmSync(vault, { recursive: true, force: true });
+  }
+}
+
+async function testRunnerUsesUploadedScreenshotWithoutInvokingImageSkill() {
+  const vault = fs.mkdtempSync(path.join(os.tmpdir(), "reading-capture-runner-direct-screenshot-"));
+  try {
+    const projectRelative = "Reading Capture/creation-projects/project-1";
+    const projectDirectory = path.join(vault, projectRelative);
+    const queueDirectory = path.join(vault, "Reading Capture/creation-projects/_runner/queue");
+    const sourceRelative = `${projectRelative}/sources/visual-references/assistant.jpg`;
+    const imageRelative = `${projectRelative}/deliverables/wechat/wechat-001/visuals/wb-03-assistant-ui.jpg`;
+    const receiptRelative = `${projectRelative}/deliverables/wechat/wechat-001/visuals/results/WB-03.json`;
+    fs.mkdirSync(path.dirname(path.join(vault, sourceRelative)), { recursive: true });
+    fs.mkdirSync(queueDirectory, { recursive: true });
+    fs.writeFileSync(path.join(projectDirectory, "project.md"), "# Project\n");
+    const sourceBytes = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(2048, 0x20)]);
+    fs.writeFileSync(path.join(vault, sourceRelative), sourceBytes);
+    const taskPath = path.join(queueDirectory, "task-direct-screenshot.json");
+    fs.writeFileSync(taskPath, `${JSON.stringify(makeTask({
+      taskId: "task-direct-screenshot",
+      kind: "wechat.visual-item",
+      skillId: "baoyu-infographic",
+      sourceMode: "direct",
+      sourceScreenshotPath: sourceRelative,
+      inputs: [`${projectRelative}/project.md`, sourceRelative],
+      outputs: [imageRelative, receiptRelative],
+    }), null, 2)}\n`);
+    const fakeCodex = path.join(vault, "fake-codex-must-not-run.sh");
+    const invocationMarker = path.join(vault, "codex-was-called");
+    fs.writeFileSync(fakeCodex, `#!/bin/sh\ntouch ${JSON.stringify(invocationMarker)}\nexit 99\n`);
+    fs.chmodSync(fakeCodex, 0o755);
+
+    const result = await runner.runOnce({ vault, creationRoot: "Reading Capture/creation-projects", codex: fakeCodex, dryRun: false, once: true });
+
+    assert.strictEqual(result.status, "awaiting_approval");
+    assert.strictEqual(fs.existsSync(invocationMarker), false, "direct screenshot use must never invoke Codex or an image Skill");
+    assert.deepStrictEqual(fs.readFileSync(path.join(vault, imageRelative)), sourceBytes, "the original screenshot must be copied byte-for-byte");
+    const receipt = JSON.parse(fs.readFileSync(path.join(vault, receiptRelative), "utf8"));
+    assert.strictEqual(receipt.mode, "direct_source");
+    assert.match(receipt.detail, /未调用生图 Skill/u);
   } finally {
     fs.rmSync(vault, { recursive: true, force: true });
   }
@@ -423,6 +492,52 @@ async function testRunnerRejectsInvalidCardImageBeforePromotion() {
     assert.strictEqual(result.waitingReason, "invalid_output_contract");
     assert.match(result.error, /Image output is invalid/u);
     assert.strictEqual(fs.existsSync(path.join(vault, imageRelative)), false, "invalid image must remain outside the real project");
+  } finally {
+    fs.rmSync(vault, { recursive: true, force: true });
+  }
+}
+
+async function testRunnerSurfacesVisualSourceDiagnosticBeforeOutputValidation() {
+  const vault = fs.mkdtempSync(path.join(os.tmpdir(), "reading-capture-runner-visual-diagnostic-"));
+  try {
+    const projectRelative = "Reading Capture/creation-projects/project-1";
+    const projectDirectory = path.join(vault, projectRelative);
+    const queueDirectory = path.join(vault, "Reading Capture/creation-projects/_runner/queue");
+    const requestRelative = `${projectRelative}/deliverables/wechat/wechat-001/visuals/requests/WB-03.json`;
+    const imageRelative = `${projectRelative}/deliverables/wechat/wechat-001/visuals/wb-03-assistant-ui.png`;
+    const receiptRelative = `${projectRelative}/deliverables/wechat/wechat-001/visuals/results/WB-03.json`;
+    fs.mkdirSync(path.dirname(path.join(vault, requestRelative)), { recursive: true });
+    fs.mkdirSync(queueDirectory, { recursive: true });
+    fs.writeFileSync(path.join(projectDirectory, "project.md"), "# Project\n");
+    fs.writeFileSync(path.join(vault, requestRelative), `${JSON.stringify({ id: "WB-03", label: "助理真实界面注释图", prompt: "需要真实界面截图" })}\n`);
+    const taskPath = path.join(queueDirectory, "task-visual-source.json");
+    fs.writeFileSync(taskPath, `${JSON.stringify(makeTask({
+      taskId: "task-visual-source",
+      kind: "wechat.visual-item",
+      skillId: "baoyu-infographic",
+      inputs: [`${projectRelative}/project.md`, requestRelative],
+      outputs: [imageRelative, receiptRelative],
+    }), null, 2)}\n`);
+    const fakeCodex = path.join(vault, "fake-codex-visual-diagnostic.js");
+    fs.writeFileSync(fakeCodex, [
+      "#!/usr/bin/env node",
+      "const fs = require('fs');",
+      "const path = require('path');",
+      "const args = process.argv.slice(2);",
+      "const cwd = args[args.indexOf('--cd') + 1];",
+      "const receipt = path.join(cwd, 'deliverables/wechat/wechat-001/visuals/results/WB-03.json');",
+      "fs.mkdirSync(path.dirname(receipt), { recursive: true });",
+      "fs.writeFileSync(receipt, JSON.stringify({ schemaVersion: 1, status: 'failed', diagnostic: { code: 'MISSING_REQUIRED_SOURCE_SCREENSHOT', message: '未提供真实界面原始截图，请补充后重试。', missingInputs: ['真实界面截图'] } }, null, 2));",
+    ].join("\n"));
+    fs.chmodSync(fakeCodex, 0o755);
+
+    const result = await runner.runOnce({ vault, creationRoot: "Reading Capture/creation-projects", codex: fakeCodex, dryRun: false, once: true });
+
+    assert.strictEqual(result.status, "waiting_user");
+    assert.strictEqual(result.waitingReason, "missing_visual_source");
+    assert.match(result.error, /真实界面原始截图/u);
+    assert.doesNotMatch(result.error, /ENOENT|no such file/u);
+    assert.strictEqual(fs.existsSync(path.join(vault, imageRelative)), false, "a diagnostic receipt must not promote a missing image");
   } finally {
     fs.rmSync(vault, { recursive: true, force: true });
   }
@@ -870,10 +985,13 @@ testRunnerDryRunClaimsAndValidatesTask()
   .then(testRunnerRejectsInvalidStructuredProductionPlans)
   .then(testRunnerRequiresAuditableXhsSampleRenderContract)
   .then(testRunnerRedactsVaultHomeEmailAndSecrets)
+  .then(testRunnerPreparesParentsForDeclaredOutputsInIsolatedWorkspace)
   .then(testRunnerPromotesOnlyDeclaredOutputsFromIsolatedWorkspace)
+  .then(testRunnerUsesUploadedScreenshotWithoutInvokingImageSkill)
   .then(testRunnerDoesNotMislabelProjectFileErrorsAsMissingCodex)
   .then(testRunnerDoesNotPromoteOutputsAfterTaskBecomesStale)
   .then(testRunnerRejectsInvalidCardImageBeforePromotion)
+  .then(testRunnerSurfacesVisualSourceDiagnosticBeforeOutputValidation)
   .then(testXhsQualityGateAutomaticallyIteratesBeforeHumanReview)
   .then(testXhsQualityGateStopsAfterFiveIterations)
   .then(testRunnerFencesTasksByRegisteredDevice)

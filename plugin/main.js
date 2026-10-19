@@ -1,4 +1,4 @@
-const { ItemView, MarkdownRenderer, Menu, Modal, Notice, Plugin, PluginSettingTab, Setting, normalizePath } = require("obsidian");
+const { ItemView, MarkdownRenderer, Menu, Modal, Notice, Plugin, PluginSettingTab, Setting, normalizePath, setIcon } = require("obsidian");
 const crypto = require("crypto");
 const core = require("./reading-core");
 const creationWorkflow = require("./creation-workflow");
@@ -57,6 +57,32 @@ function formatCreationProposalField(value, preferredKeys, fallback) {
       .forEach((item) => values.push(item));
   }
   return [...new Set(values)].join(" · ") || fallback;
+}
+
+function hasCreationPublicationSnapshot(project) {
+  if (!project) return false;
+  if (project.hasPublicationSnapshot === true || project.isPublished === true) return true;
+  const state = project.workflowState || {};
+  const publication = project.latestPublication || null;
+  const activePlatform = state.activeDeliverable || project.platform;
+  return Boolean(
+    state.currentStage === "final"
+    && publication
+    && publication.platform === activePlatform
+    && publication.targetDirectory
+  );
+}
+
+function preferredCreationProject(projects) {
+  const list = Array.isArray(projects) ? projects : [];
+  return list.find((project) => !hasCreationPublicationSnapshot(project)) || list[0] || null;
+}
+
+function creationPublicationTimeLabel(project) {
+  const publication = project && project.latestPublication ? project.latestPublication : {};
+  const value = String(publication.publishedAt || publication.exportedAt || publication.createdAt || "").trim();
+  if (!value) return "已创建发布快照";
+  return `快照时间：${value.replace("T", " ").replace(/\+\d{2}:\d{2}$/u, "")}`;
 }
 
 const CREATION_STAGE_TASKS = Object.freeze({
@@ -183,6 +209,86 @@ function normalizeReaderLineHeight(value) {
   if (!Number.isFinite(number)) return DEFAULT_SETTINGS.readerLineHeight;
   const match = READER_LINE_HEIGHTS.find((item) => Math.abs(item.value - number) < 0.01);
   return match ? match.value : DEFAULT_SETTINGS.readerLineHeight;
+}
+
+class DeleteAnnotationModal extends Modal {
+  constructor(app, annotation, onConfirm) {
+    super(app);
+    this.annotation = annotation;
+    this.onConfirm = onConfirm;
+    this.busy = false;
+  }
+
+  onOpen() {
+    const content = this.contentEl;
+    content.empty();
+    content.createEl("h2", { text: "删除这条标注？" });
+    content.createEl("p", { text: "仅删除这一条摘录及其想法。原文、其他标注，以及重复保存的同一段内容都会保留。" });
+    content.createEl("blockquote", { text: (this.annotation.quote || this.annotation.note || this.annotation.mediaAlt || "图片标注").slice(0, 240) });
+    content.createEl("small", { text: `记录时间：${this.annotation.time || "未知"} · ${this.annotation.id}` });
+    const errorEl = content.createEl("p", { attr: { role: "alert" } });
+    const actions = content.createDiv({ cls: "reading-capture-button-row" });
+    const cancel = actions.createEl("button", { text: "取消" });
+    cancel.addEventListener("click", () => this.close());
+    const remove = actions.createEl("button", { text: "确认删除", cls: "mod-warning" });
+    remove.addEventListener("click", async () => {
+      if (this.busy) return;
+      this.busy = true;
+      remove.disabled = true;
+      try {
+        await this.onConfirm();
+        this.close();
+      } catch (error) {
+        errorEl.textContent = `删除失败：${error.message || error}`;
+        this.busy = false;
+        remove.disabled = false;
+      }
+    });
+    cancel.focus();
+  }
+}
+
+class DeleteLibraryFilesModal extends Modal {
+  constructor(app, plan, onConfirm) {
+    super(app);
+    this.plan = plan;
+    this.onConfirm = onConfirm;
+    this.busy = false;
+  }
+
+  onOpen() {
+    const content = this.contentEl;
+    content.empty();
+    content.addClass("reading-capture-delete-modal");
+    content.createEl("h2", { text: this.plan.mode === "group" ? "删除整组文章及阅读记录？" : "删除这个文件？" });
+    content.createEl("p", { text: this.plan.title });
+    content.createEl("p", { text: `将移入库内回收站（.trash）：${this.plan.sourcePaths.length} 个文章文件、${this.plan.recordPaths.length} 个阅读记录。` });
+    const list = content.createEl("ul", { cls: "reading-capture-delete-file-list" });
+    for (const path of [...this.plan.sourcePaths, ...this.plan.recordPaths]) list.createEl("li", { text: path });
+    content.createEl("p", { text: "仅处理以上文件，附件、其他文章及创作项目保留。需要恢复时，可从库内 .trash 移回原路径，再重建阅读索引。" });
+    const errorEl = content.createEl("p", { cls: "reading-capture-delete-error", attr: { role: "alert" } });
+    const actions = content.createDiv({ cls: "reading-capture-button-row" });
+    const cancel = actions.createEl("button", { text: "取消" });
+    cancel.addEventListener("click", () => { if (!this.busy) this.close(); });
+    const confirm = actions.createEl("button", { text: "确认移入回收站", cls: "mod-warning" });
+    confirm.addEventListener("click", async () => {
+      if (this.busy) return;
+      this.busy = true;
+      confirm.disabled = true;
+      cancel.disabled = true;
+      try {
+        await this.onConfirm();
+        this.close();
+      } catch (error) {
+        errorEl.textContent = error.message || String(error);
+        cancel.disabled = false;
+        cancel.textContent = "关闭";
+        this.busy = false;
+        // The plan may be stale or partially completed: require a fresh preview.
+      }
+    });
+    cancel.focus();
+  }
 }
 
 class TextInputModal extends Modal {
@@ -430,7 +536,7 @@ class VisualTaskEditorModal extends Modal {
     contentEl.addClass("reading-capture-modal", "reading-capture-visual-task-editor-modal");
     contentEl.createEl("div", { cls: "reading-capture-creation-kicker", text: "VISUAL TASK EDITOR" });
     contentEl.createEl("h2", { text: `调整配图：${this.task.childLabel || this.task.childKey || "当前任务"}` });
-    contentEl.createEl("p", { text: "更换 Skill 或修改提示词都会保留当前版本，并创建一条新的待生成任务；新图生成并验收前，不能进入最终定稿。" });
+    const modeDescription = contentEl.createEl("p");
     const requestPath = (this.task.inputs || []).find((value) => /\/visuals\/requests\/[^/]+\.json$/u.test(value));
     if (requestPath) {
       try { this.request = JSON.parse(await this.plugin.readFreshText(requestPath)); } catch (error) { this.request = {}; }
@@ -441,14 +547,68 @@ class VisualTaskEditorModal extends Modal {
       skill.createEl("option", { attr: { value }, text: label });
     }
     skill.value = this.request.skillId || this.task.skillId || "liangkeban-xiaoxiaoke-illustrations";
-    const promptLabel = contentEl.createEl("label", { text: "配图生成提示词" });
-    const prompt = promptLabel.createEl("textarea", { attr: { rows: "8" } });
+    const existingSource = String(this.request.sourceScreenshotPath || "");
+    const sourceModeLabel = contentEl.createEl("label", { text: "截图使用方式" });
+    const sourceMode = sourceModeLabel.createEl("select");
+    sourceMode.createEl("option", { attr: { value: "direct" }, text: "直接使用原截图（默认，不调用生图 Skill）" });
+    sourceMode.createEl("option", { attr: { value: "generated" }, text: "使用 Skill 加工（裁切、打码、框选或注释）" });
+    sourceMode.value = this.request.sourceMode === "generated" ? "generated" : existingSource ? "direct" : "generated";
+    // Mode is the parent decision: keep its dependent Skill control immediately below it.
+    sourceModeLabel.insertAdjacentElement("afterend", skillLabel);
+    const promptDetails = contentEl.createEl("details", { cls: "reading-capture-visual-advanced-prompt" });
+    promptDetails.createEl("summary", { text: "可选：自定义加工要求（不填也能直接生成）" });
+    const promptLabel = promptDetails.createEl("label", { text: "补充说明" });
+    const prompt = promptLabel.createEl("textarea", { attr: { rows: "8", placeholder: "例如：裁切成横版、打码并框选某个入口。留空时将按截图自动生成。" } });
     prompt.value = String(this.request.prompt || this.request.purpose || this.request.label || this.task.childLabel || "");
-    const promptTools = contentEl.createDiv({ cls: "reading-capture-visual-prompt-tools" });
+    let hasCustomPrompt = false;
+    prompt.addEventListener("input", () => { hasCustomPrompt = true; });
+    const syncSourceMode = () => {
+      const direct = sourceMode.value === "direct";
+      promptDetails.style.display = direct ? "none" : "";
+      skillLabel.style.display = direct ? "none" : "";
+      modeDescription.textContent = direct
+        ? "原截图会原样复制为本次配图，不调用生图 Skill，也不会重绘、裁切或转码；新图仍需在下一步验收。"
+        : "更换 Skill 或修改提示词都会保留当前版本，并创建一条新的待生成任务；新图生成并验收前，不能进入最终定稿。";
+    };
+    sourceMode.addEventListener("change", syncSourceMode);
+    syncSourceMode();
+    const promptTools = promptDetails.createDiv({ cls: "reading-capture-visual-prompt-tools" });
     const rewrite = promptTools.createEl("button", { text: "按当前 Skill 生成完整提示词" });
     rewrite.addEventListener("click", () => {
       prompt.value = this.plugin.buildCreationVisualPrompt(this.request, this.task, skill.value);
+      hasCustomPrompt = true;
       prompt.dispatchEvent(new Event("input"));
+    });
+    const sourceLabel = contentEl.createEl("label", { text: "真实界面源截图（可选）" });
+    const sourcePath = sourceLabel.createEl("input", { attr: { type: "text", readonly: "true", placeholder: "从本机选择 PNG、JPG、JPEG 或 WebP 图片" } });
+    sourcePath.value = existingSource ? `当前项目内副本：${existingSource.split("/").pop()}` : "";
+    const sourceFile = document.createElement("input");
+    sourceFile.type = "file";
+    sourceFile.accept = "image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp";
+    sourceFile.style.display = "none";
+    contentEl.appendChild(sourceFile);
+    const sourceTools = contentEl.createDiv({ cls: "reading-capture-visual-prompt-tools" });
+    const chooseSource = sourceTools.createEl("button", { text: "从本机选择图片" });
+    const sourceHint = contentEl.createEl("p", {
+      cls: "reading-capture-hint",
+      text: this.task.waitingReason === "missing_visual_source"
+        ? "此任务要求真实界面注释图，但没有可核验的原始截图。请从本机选择真实截图；若改为概念图，请在上方提示词中明确改写用途。"
+        : "仅当这张图需要呈现真实产品界面时上传。保存时会复制进当前项目，避免后续来源丢失。",
+    });
+    chooseSource.addEventListener("click", () => sourceFile.click());
+    sourceFile.addEventListener("change", () => {
+      const selected = sourceFile.files && sourceFile.files[0];
+      if (!selected) return;
+      if (!/\.(png|jpe?g|webp)$/iu.test(String(selected.name || ""))) {
+        sourceHint.textContent = "请选择 PNG、JPG、JPEG 或 WebP 格式的图片。";
+        sourceFile.value = "";
+        return;
+      }
+      this.sourceScreenshotFile = selected;
+      sourcePath.value = `已选择本机图片：${selected.name}`;
+      sourceMode.value = "direct";
+      syncSourceMode();
+      sourceHint.textContent = `已选择 ${selected.name}。将直接作为本次配图使用，不会调用生图 Skill；图片会复制到当前项目的 sources/visual-references 目录。`;
     });
     const hint = contentEl.createEl("p", { cls: "reading-capture-hint", text: "保存后会立即重新排队；原图会归档到 visuals/versions，不会被当作已验收版本覆盖。" });
     const buttons = contentEl.createDiv({ cls: "reading-capture-button-row" });
@@ -457,7 +617,12 @@ class VisualTaskEditorModal extends Modal {
     save.addEventListener("click", async () => {
       save.disabled = true;
       try {
-        await this.plugin.editCreationVisualTask(this.task, { skillId: skill.value, prompt: prompt.value });
+        await this.plugin.editCreationVisualTask(this.task, {
+          skillId: skill.value,
+          sourceMode: sourceMode.value,
+          prompt: sourceMode.value === "generated" && hasCustomPrompt ? prompt.value : "",
+          sourceScreenshotFile: this.sourceScreenshotFile || null,
+        });
         hint.textContent = "已保存，新的配图任务已排队。";
         this.close();
         if (this.onSaved) await this.onSaved();
@@ -901,13 +1066,24 @@ class ReadingCaptureReaderView extends ItemView {
     container.empty();
     container.addClass("reading-capture-creation-projects", "reading-capture-creation-workbench");
     const shell = container.createDiv({ cls: "reading-capture-creation-shell" });
+    const activeProjects = (this.projects || []).filter((project) => !hasCreationPublicationSnapshot(project));
+    const publishedProjects = (this.projects || []).filter((project) => hasCreationPublicationSnapshot(project));
     const hero = shell.createDiv({ cls: "reading-capture-creation-hero" });
     const heroCopy = hero.createDiv();
     heroCopy.createEl("div", { cls: "reading-capture-creation-kicker", text: "READING CAPTURE / CREATION WORKBENCH" });
     heroCopy.createEl("h1", { text: "创作项目" });
     heroCopy.createEl("p", { text: "所有生成内容先展示、可修改、可撤回，再进入下一阶段。" });
     const heroActions = hero.createDiv({ cls: "reading-capture-creation-hero-actions" });
-    heroActions.createEl("button", { text: "项目记录" });
+    const historyButton = heroActions.createEl("button", {
+      cls: "reading-capture-creation-history-trigger",
+      attr: { type: "button", title: "查看已创建发布快照的项目记录" },
+      text: publishedProjects.length ? `项目记录 · ${publishedProjects.length}` : "项目记录",
+    });
+    historyButton.addEventListener("click", async () => {
+      this.isProjectHistoryOpen = !this.isProjectHistoryOpen;
+      this.isProjectPickerOpen = false;
+      await this.render();
+    });
     heroActions.createEl("button", { text: "回到创作灵感" }).addEventListener("click", () => this.plugin.openTopicPool());
 
     if (!this.projects.length) {
@@ -915,7 +1091,8 @@ class ReadingCaptureReaderView extends ItemView {
       return;
     }
 
-    const selected = this.projects.find((project) => project.path === this.selectedPath) || this.projects[0];
+    const selected = this.projects.find((project) => project.path === this.selectedPath) || activeProjects[0] || publishedProjects[0];
+    if (selected && selected.path !== this.selectedPath) this.selectedPath = selected.path;
     const projectSwitch = shell.createDiv({ cls: "reading-capture-creation-project-switch" });
     const projectLabel = projectSwitch.createDiv();
     projectLabel.createEl("div", { cls: "reading-capture-creation-kicker", text: "CURRENT PROJECT" });
@@ -929,10 +1106,12 @@ class ReadingCaptureReaderView extends ItemView {
     const switchButton = current.createEl("button", { text: this.isProjectPickerOpen ? "收起项目" : "切换项目" });
     switchButton.addEventListener("click", async () => {
       this.isProjectPickerOpen = !this.isProjectPickerOpen;
+      this.isProjectHistoryOpen = false;
       await this.render();
     });
     projectSwitch.createEl("span", { cls: "reading-capture-creation-sync", text: "Vault 已同步" });
     if (this.isProjectPickerOpen) this.renderApprovedProjectPicker(projectSwitch);
+    if (this.isProjectHistoryOpen) this.renderApprovedPublicationHistory(projectSwitch, publishedProjects);
 
     const workspace = shell.createDiv({ cls: "reading-capture-creation-stage-workspace" });
     const navigation = workspace.createEl("nav", { cls: "reading-capture-creation-stage-nav" });
@@ -1029,6 +1208,14 @@ class ReadingCaptureReaderView extends ItemView {
         message: "Skill 返回的内容不符合当前交付格式。修复 Skill 或输出配置后可重新执行。",
         action: "修复后重试",
       },
+      missing_visual_source: {
+        message: "此图被定义为真实界面注释图，但项目里没有对应的真实源截图或版本信息。请在“调整 Skill / 提示词”中选择真实截图，或明确改为概念图后重新生成。",
+        action: "调整配图任务",
+      },
+      visual_generation_failed: {
+        message: "配图 Skill 已返回可读诊断，但没有生成可验收图片。请查看任务中的诊断后调整 Skill、提示词或来源输入。",
+        action: "调整配图任务",
+      },
       ownership_conflict: {
         message: "任务仍由另一台设备或旧执行租约持有。请先在 Runner 设置中完成执行权交接。",
         action: "重新检查执行权",
@@ -1057,7 +1244,7 @@ class ReadingCaptureReaderView extends ItemView {
         actions.createEl("button", { text: recovery.action }).addEventListener("click", async () => {
           await this.reload();
         });
-      } else if (task.waitingReason !== "skill_runtime_disabled") {
+      } else if (task.waitingReason !== "skill_runtime_disabled" && !["missing_visual_source", "visual_generation_failed"].includes(task.waitingReason)) {
         actions.createEl("button", { text: recovery.action }).addEventListener("click", async () => {
           await this.plugin.retryCreationTask(task);
           await this.reload();
@@ -1146,13 +1333,28 @@ class ReadingCaptureReaderView extends ItemView {
 
   renderApprovedProjectPicker(container) {
     const picker = container.createDiv({ cls: "reading-capture-creation-project-picker" });
+    const activeProjects = (this.projects || []).filter((project) => !hasCreationPublicationSnapshot(project));
+    const publishedProjects = (this.projects || []).filter((project) => hasCreationPublicationSnapshot(project));
     const pickerHeader = picker.createDiv({ cls: "reading-capture-creation-project-picker-header" });
-    pickerHeader.createEl("strong", { text: `全部项目 · ${this.projects.length}` });
-    pickerHeader.createEl("small", { text: "已完成项目仍会保留，可随时切换查看" });
+    pickerHeader.createEl("strong", { text: `进行中项目 · ${activeProjects.length}` });
+    if (publishedProjects.length) {
+      const historyLink = pickerHeader.createEl("button", {
+        cls: "reading-capture-creation-picker-history-link",
+        attr: { type: "button" },
+        text: `查看已发布记录 · ${publishedProjects.length}`,
+      });
+      historyLink.addEventListener("click", async () => {
+        this.isProjectPickerOpen = false;
+        this.isProjectHistoryOpen = true;
+        await this.render();
+      });
+    } else {
+      pickerHeader.createEl("small", { text: "只显示尚未创建发布快照的项目" });
+    }
     const search = picker.createEl("input", { attr: { type: "search", placeholder: "搜索项目标题…", "aria-label": "搜索创作项目" } });
     const options = picker.createDiv({ cls: "reading-capture-creation-project-options" });
     const rows = [];
-    for (const project of this.projects) {
+    for (const project of activeProjects) {
       const button = options.createEl("button", { cls: project.path === this.selectedPath ? "is-selected" : "" });
       const copy = button.createDiv({ cls: "reading-capture-creation-project-option-copy" });
       copy.createEl("strong", { text: project.title });
@@ -1160,14 +1362,63 @@ class ReadingCaptureReaderView extends ItemView {
       button.addEventListener("click", async () => {
         this.selectedPath = project.path;
         this.isProjectPickerOpen = false;
+        this.isProjectHistoryOpen = false;
         await this.render();
       });
       rows.push({ button, value: `${project.title} ${project.statusLabel}`.toLocaleLowerCase() });
+    }
+    if (!rows.length) {
+      options.createDiv({
+        cls: "reading-capture-creation-project-picker-empty",
+        text: publishedProjects.length
+          ? "没有进行中的项目。已创建发布快照的项目请从“项目记录”查看。"
+          : "还没有可切换的项目。",
+      });
     }
     search.addEventListener("input", () => {
       const query = String(search.value || "").trim().toLocaleLowerCase();
       for (const row of rows) row.button.toggleClass("is-filtered-out", !!query && !row.value.includes(query));
     });
+  }
+
+  renderApprovedPublicationHistory(container, publishedProjects = []) {
+    const history = container.createDiv({ cls: "reading-capture-creation-publication-history" });
+    const header = history.createDiv({ cls: "reading-capture-creation-publication-history-header" });
+    const copy = header.createDiv();
+    copy.createEl("strong", { text: "已发布记录" });
+    copy.createEl("small", { text: "已创建发布快照的项目会从“切换项目”中移到这里，不与进行中的工作混在一起。" });
+    const close = header.createEl("button", { attr: { type: "button" }, text: "收起" });
+    close.addEventListener("click", async () => {
+      this.isProjectHistoryOpen = false;
+      await this.render();
+    });
+    if (!publishedProjects.length) {
+      history.createDiv({ cls: "reading-capture-creation-publication-history-empty", text: "还没有已创建发布快照的项目。" });
+      return;
+    }
+    const records = history.createDiv({ cls: "reading-capture-creation-publication-records" });
+    for (const project of publishedProjects) {
+      const record = records.createDiv({ cls: "reading-capture-creation-publication-record" });
+      const recordCopy = record.createDiv({ cls: "reading-capture-creation-publication-record-copy" });
+      recordCopy.createEl("strong", { text: project.title });
+      const meta = recordCopy.createDiv({ cls: "reading-capture-creation-meta" });
+      meta.createEl("span", { cls: "is-platform", text: this.plugin.creationPlatformLabel(project.platform) });
+      meta.createEl("span", { cls: "is-status", text: "已创建发布快照" });
+      recordCopy.createEl("small", { text: creationPublicationTimeLabel(project) });
+      const actions = record.createDiv({ cls: "reading-capture-creation-publication-record-actions" });
+      const viewProject = actions.createEl("button", { attr: { type: "button" }, text: "查看项目" });
+      viewProject.addEventListener("click", async () => {
+        this.selectedPath = project.path;
+        this.displayedStage = "final";
+        this.isProjectHistoryOpen = false;
+        this.isProjectPickerOpen = false;
+        await this.render();
+      });
+      if (project.latestPublication && project.latestPublication.targetDirectory) {
+        const openDirectory = actions.createEl("button", { attr: { type: "button" }, text: "打开发布目录" });
+        openDirectory.addEventListener("click", () => this.plugin.openCreationProjectDirectory(project.latestPublication.targetDirectory));
+      }
+    }
   }
 
   renderApprovedRelations(canvas, selected) {
@@ -2679,7 +2930,12 @@ class ReadingCaptureReaderView extends ItemView {
       summary.createEl("p", { text: `已确认 ${confirmed} 张 · 已生成待你验收 ${awaitingReview} 张 · 正在执行 ${running} 张 · 需要处理 ${blocked} 张` });
       if (blocked) {
         const missingSkill = visualTasks.filter((item) => item.status === "waiting_user" && item.waitingReason === "missing_skill");
-        summary.createEl("strong", { text: missingSkill.length ? `${missingSkill.length} 张已阻塞：缺少锁定版本的 ${missingSkill[0].skillId}，不会自行继续。请在下方对应任务选择“查看并安装固定版本”。` : `${blocked} 张未完成：请在下方查看每张图的原因并处理或重试。` });
+        const missingSource = visualTasks.filter((item) => item.status === "waiting_user" && item.waitingReason === "missing_visual_source");
+        summary.createEl("strong", { text: missingSkill.length
+          ? `${missingSkill.length} 张已阻塞：缺少锁定版本的 ${missingSkill[0].skillId}，不会自行继续。请在下方对应任务选择“查看并安装固定版本”。`
+          : missingSource.length
+            ? `${missingSource.length} 张需要真实界面源截图。它们不会盲目重试；请在下方对应任务选择“调整 Skill / 提示词”，补充真实截图或改为概念图。`
+            : `${blocked} 张未完成：请在下方查看每张图的原因并处理或重试。` });
         if (missingSkill.length && missingSkill[0].skillRequirement) {
           const installAll = summary.createEl("button", { cls: "mod-cta", text: `查看并安装固定版本，然后继续 ${missingSkill.length} 张图` });
           installAll.addEventListener("click", () => new ManagedSkillInstallModal(this.app, this.plugin, missingSkill[0], async () => {
@@ -2725,8 +2981,12 @@ class ReadingCaptureReaderView extends ItemView {
             ? "已确认"
             : child.status === "waiting_user" && child.waitingReason === "missing_skill"
               ? "已阻塞：需要安装锁定的 Skill 版本"
+              : child.status === "waiting_user" && child.waitingReason === "missing_visual_source"
+                ? "需要补充真实界面源截图，或改为概念图"
+                : child.status === "waiting_user" && child.waitingReason === "visual_generation_failed"
+                  ? "配图未生成：请按诊断调整任务"
               : this.plugin.creationTaskStatusLabel(child.status);
-        rowCopy.createEl("small", { text: `${this.plugin.visualSkillLabel(child.skillId)} · ${statusText}` });
+        rowCopy.createEl("small", { text: `${child.sourceMode === "direct" ? "直接使用原截图" : this.plugin.visualSkillLabel(child.skillId)} · ${statusText}` });
         if (child.error) rowCopy.createEl("p", { text: child.error });
         const actions = row.createDiv();
         const edit = actions.createEl("button", { text: "调整 Skill / 提示词" });
@@ -2739,7 +2999,7 @@ class ReadingCaptureReaderView extends ItemView {
             await this.plugin.retryCreationTasksForSkill(selected.path, child.skillId);
             await this.reload();
           }).open());
-        } else if (["failed", "waiting_user", "partial", "stale"].includes(child.status)) {
+        } else if (["failed", "waiting_user", "partial", "stale"].includes(child.status) && !["missing_visual_source", "visual_generation_failed"].includes(child.waitingReason)) {
           const retry = actions.createEl("button", { text: "仅重试这张图" });
           retry.addEventListener("click", async () => {
             retry.disabled = true;
@@ -3253,16 +3513,7 @@ class ReadingCaptureReaderView extends ItemView {
 
   highlightQuoteInElement(root, annotation) {
     const quote = annotation && annotation.quote ? annotation.quote : annotation;
-    const cleanQuote = this.plugin.markdownTextForMatch(quote).replace(/\s+/g, " ").trim();
-    if (!cleanQuote) return;
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    const textNodes = [];
-    let fullText = "";
-    while (walker.nextNode()) {
-      const node = walker.currentNode;
-      textNodes.push({ node, start: fullText.length, end: fullText.length + node.nodeValue.length });
-      fullText += node.nodeValue;
-    }
+    const { textNodes, fullText } = this.plugin.buildReaderTextIndex(root);
     const rawRange = this.plugin.findQuoteRawRange(fullText, quote);
     if (!rawRange) return;
 
@@ -3324,9 +3575,10 @@ class ReadingCaptureReaderView extends ItemView {
       const meta = top.createDiv({ cls: "reading-capture-sidebar-card-meta" });
       meta.createEl("span", { cls: `reading-capture-type-pill ${typeClass}`, text: this.plugin.annotationLabel(item) });
       meta.createEl("span", { cls: "reading-capture-sidebar-time", text: this.plugin.shortTime(item.time) });
-      const copy = top.createEl("button", {
+      const actions = top.createDiv({ cls: "reading-capture-sidebar-card-actions" });
+      const copy = actions.createEl("button", {
         cls: "reading-capture-sidebar-copy",
-        text: "...",
+        text: "复制引用",
         attr: { title: "复制引用", "aria-label": "复制引用" },
       });
       copy.addEventListener("click", async (event) => {
@@ -3335,6 +3587,23 @@ class ReadingCaptureReaderView extends ItemView {
         if (!text) return;
         await this.plugin.writeClipboardText(text);
         new Notice("已复制引用。");
+      });
+      const remove = actions.createEl("button", {
+        cls: "reading-capture-sidebar-delete",
+        text: "删除",
+        attr: { title: "删除这条标注", "aria-label": "删除这条标注" },
+      });
+      remove.addEventListener("click", (event) => {
+        event.stopPropagation();
+        new DeleteAnnotationModal(this.app, item, async () => {
+          await this.plugin.deleteAnnotationForSource(sourceFile, item.id);
+          if (this.pendingAnnotationId === item.id) this.pendingAnnotationId = "";
+          try {
+            await this.renderKeepingScroll();
+          } catch (error) {
+            new Notice("标注已删除，请重新打开文章刷新显示。");
+          }
+        }).open();
       });
       if (!item.located && (item.quote || item.mediaType)) {
         card.addClass("is-unlocated");
@@ -3843,7 +4112,15 @@ class ReadingCaptureLibraryView extends ItemView {
     const statusClass = this.workflowStatusClass(status);
     detail.addClass(statusClass);
     const detailHeader = detail.createDiv({ cls: "reading-capture-library-detail-header" });
-    detailHeader.createEl("div", { cls: "reading-capture-library-detail-kicker", text: `${String(selected.sourceLabel || "").toUpperCase()} / ${selected.dateLabel}` });
+    const metaRow = detailHeader.createDiv({ cls: "reading-capture-library-detail-meta" });
+    metaRow.createEl("div", { cls: "reading-capture-library-detail-kicker", text: `${String(selected.sourceLabel || "").toUpperCase()} / ${selected.dateLabel}` });
+    const deleteGroup = metaRow.createEl("button", {
+      cls: "reading-capture-library-delete-group reading-capture-library-delete",
+      attr: { "aria-label": "删除整组文章及所有阅读记录", title: "删除整组文章及所有阅读记录" },
+    });
+    setIcon(deleteGroup, "trash-2");
+    deleteGroup.disabled = this.isLoading;
+    deleteGroup.addEventListener("click", () => this.requestDeletion(selected));
     const titleRow = detailHeader.createDiv({ cls: "reading-capture-library-detail-title-row" });
     titleRow.createEl("h2", { text: selected.title });
     titleRow.createEl("span", {
@@ -3877,8 +4154,16 @@ class ReadingCaptureLibraryView extends ItemView {
       );
     });
 
+    const exportPdf = actions.createEl("button", { cls: "reading-capture-library-export-pdf", text: "导出 PDF" });
+    const exportIcon = exportPdf.createSpan();
+    setIcon(exportIcon, "file-down");
+    exportPdf.prepend(exportIcon);
+    exportPdf.disabled = this.isLoading;
+    exportPdf.addEventListener("click", () => this.plugin.openPdfExport(selected));
+
     detail.createEl("h3", { text: "版本" });
     const versions = detail.createDiv({ cls: "reading-capture-library-version-list" });
+    const deleteButtons = [];
     for (const version of selected.versions) {
       const row = versions.createDiv({ cls: "reading-capture-library-version-row" });
       const isBest = selected.bestVersion && version.path === selected.bestVersion.path;
@@ -3889,13 +4174,52 @@ class ReadingCaptureLibraryView extends ItemView {
       if (isBest) versionTop.createEl("span", { cls: "reading-capture-library-version-best", text: "最佳" });
       const name = row.createEl("strong", { text: version.name });
       this.plugin.decorateVersionPathElement(name, version);
-      const button = row.createEl("button", { text: version.kind === "markdown" ? "阅读" : "打开" });
+      const versionActions = row.createDiv({ cls: "reading-capture-library-version-actions" });
+      const button = versionActions.createEl("button", { cls: "reading-capture-library-version-open", text: version.kind === "markdown" ? "阅读" : "打开" });
       button.addEventListener("click", async () => this.plugin.openLibraryVersion(version));
+      const remove = versionActions.createEl("button", {
+        cls: "reading-capture-library-delete",
+        attr: { "aria-label": `删除文件 ${version.name}`, title: "正在检查阅读记录…" },
+      });
+      setIcon(remove, "trash-2");
+      remove.disabled = true;
+      remove.addEventListener("click", () => this.requestDeletion(selected, version.path));
+      deleteButtons.push({ button: remove, path: version.path, row });
     }
+    this.plugin.libraryReadingAssociations().then(({ bySource }) => {
+      for (const { button, path, row } of deleteButtons) {
+        const hasRecord = (bySource.get(path)?.size || 0) > 0;
+        setIcon(button, hasRecord ? "lock-keyhole" : "trash-2");
+        button.disabled = hasRecord || this.isLoading;
+        button.title = hasRecord ? "已有阅读记录，不能单独删除" : "删除此文件（移入回收站）";
+        if (hasRecord) row.createEl("small", { cls: "reading-capture-library-delete-reason", text: "已有阅读记录，不能单独删除" });
+      }
+    }).catch(() => {
+      for (const { button, row } of deleteButtons) {
+        button.title = "阅读记录检查失败，请重新扫描后重试";
+        row.createEl("small", { cls: "reading-capture-library-delete-reason", text: "阅读记录检查失败，请重新扫描后重试" });
+      }
+    });
 
     if (selected.snippet) {
       detail.createEl("h3", { text: "摘要" });
       detail.createEl("blockquote", { text: selected.snippet });
+    }
+  }
+
+  async requestDeletion(group, sourcePath = "") {
+    try {
+      const plan = await this.plugin.prepareLibraryDeletion(group.id, sourcePath);
+      new DeleteLibraryFilesModal(this.app, plan, async () => {
+        try {
+          await this.plugin.executeLibraryDeletion(plan);
+          new Notice("已移入库内回收站（.trash）。");
+        } finally {
+          await this.reload();
+        }
+      }).open();
+    } catch (error) {
+      new Notice(error.message || String(error));
     }
   }
 
@@ -4219,6 +4543,7 @@ class ReadingCaptureCreationProjectView extends ItemView {
     this.selectedPath = "";
     this.isLoading = false;
     this.isProjectPickerOpen = false;
+    this.isProjectHistoryOpen = false;
     this.isRelatedInspirationPickerOpen = false;
     this.autoRefreshTimer = null;
     this.autoRefreshInFlight = false;
@@ -4261,7 +4586,8 @@ class ReadingCaptureCreationProjectView extends ItemView {
       const nextSignature = this.creationTaskLifecycleSignature(nextProjects);
       this.projects = nextProjects;
       if (!this.projects.some((project) => project.path === this.selectedPath)) {
-        this.selectedPath = this.projects[0] ? this.projects[0].path : "";
+        const fallback = preferredCreationProject(this.projects);
+        this.selectedPath = fallback ? fallback.path : "";
       }
       // Runner heartbeats are expected every few seconds.  Repainting the whole
       // workbench for a heartbeat made the page visibly flash and reset focus.
@@ -4344,7 +4670,8 @@ class ReadingCaptureCreationProjectView extends ItemView {
     try {
       this.projects = await this.plugin.listCreationProjects();
       if (!this.projects.some((project) => project.path === this.selectedPath)) {
-        this.selectedPath = this.projects[0] ? this.projects[0].path : "";
+        const fallback = preferredCreationProject(this.projects);
+        this.selectedPath = fallback ? fallback.path : "";
       }
     } finally {
       this.isLoading = false;
@@ -4359,6 +4686,10 @@ class ReadingCaptureCreationProjectView extends ItemView {
 
   renderApprovedProjectPicker(container) {
     return ReadingCaptureReaderView.prototype.renderApprovedProjectPicker.call(this, container);
+  }
+
+  renderApprovedPublicationHistory(container, publishedProjects) {
+    return ReadingCaptureReaderView.prototype.renderApprovedPublicationHistory.call(this, container, publishedProjects);
   }
 
   renderCreationTaskAlerts(container, selected) {
@@ -5626,6 +5957,11 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     }
   }
 
+  openPdfExport(group) {
+    const { openPdfExport } = require("./pdf-export");
+    return openPdfExport(this, group);
+  }
+
   async openLibraryVersion(version) {
     if (!version || !version.path) return;
     const file = this.app.vault.getAbstractFileByPath(version.path);
@@ -6528,6 +6864,8 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       ...(options.childLabel ? { childLabel: String(options.childLabel) } : {}),
       ...(options.dependencyAnchor ? { dependencyAnchor: String(options.dependencyAnchor) } : {}),
       ...(options.requiredChildCount ? { requiredChildCount: Number(options.requiredChildCount) } : {}),
+      ...(options.sourceMode ? { sourceMode: String(options.sourceMode) } : {}),
+      ...(options.sourceScreenshotPath ? { sourceScreenshotPath: `${directory}/${normalizePath(String(options.sourceScreenshotPath)).replace(/^\/+/, "")}` } : {}),
     };
     const taskPath = `${this.creationRunnerRoot()}/queue/${taskId}.json`;
     await this.ensureFolderForPath(taskPath);
@@ -6790,10 +7128,32 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     if (!requestPath || !(await this.pathExists(requestPath))) throw new Error("找不到这张图的生成请求记录");
     let request;
     try { request = JSON.parse(await this.readText(requestPath)); } catch (error) { throw new Error("配图请求记录无法解析"); }
-    const prompt = String(changes.prompt == null ? request.prompt || request.purpose || request.label || "" : changes.prompt).trim();
-    if (!prompt) throw new Error("请输入配图生成提示词");
+    const requestedPrompt = String(changes.prompt == null ? request.prompt || request.purpose || request.label || "" : changes.prompt).trim();
     const revision = Number(request.revision || 1) + 1;
     const directory = normalizePath(task.projectDirectory || String(task.projectPath || "").replace(/\/project\.md$/u, ""));
+    const uploadedSource = changes.sourceScreenshotFile && typeof changes.sourceScreenshotFile.arrayBuffer === "function"
+      ? changes.sourceScreenshotFile
+      : null;
+    const requestedSource = normalizePath(String(uploadedSource
+      ? ""
+      : changes.sourceScreenshotPath == null ? request.sourceScreenshotPath || "" : changes.sourceScreenshotPath).trim()).replace(/^\/+/, "");
+    let sourceScreenshotPath = "";
+    if (uploadedSource) {
+      const uploadedName = String(uploadedSource.name || "source-screenshot.png").trim();
+      if (!/\.(png|jpe?g|webp)$/iu.test(uploadedName)) throw new Error("真实界面源截图必须是 PNG、JPG、JPEG 或 WebP 文件");
+      const safeName = uploadedName.replace(/[^a-z0-9._-]+/giu, "-");
+      sourceScreenshotPath = `${directory}/sources/visual-references/${String(task.childKey || "image").replace(/[^a-z0-9_-]+/giu, "-")}-r${revision}-${safeName}`;
+      await this.writeCreationBinaryFile(sourceScreenshotPath, await uploadedSource.arrayBuffer());
+    } else if (requestedSource) {
+      if (!/\.(png|jpe?g|webp)$/iu.test(requestedSource)) throw new Error("真实界面源截图必须是 PNG、JPG、JPEG 或 WebP 文件");
+      if (!(await this.pathExists(requestedSource))) throw new Error("找不到已保存的真实界面源截图；请重新从本机选择图片");
+      const safeName = requestedSource.split("/").pop().replace(/[^a-z0-9._-]+/giu, "-");
+      sourceScreenshotPath = `${directory}/sources/visual-references/${String(task.childKey || "image").replace(/[^a-z0-9_-]+/giu, "-")}-r${revision}-${safeName}`;
+      await this.copyCreationSnapshotFile(requestedSource, sourceScreenshotPath);
+    }
+    const sourceMode = String(changes.sourceMode || request.sourceMode || (sourceScreenshotPath ? "direct" : "generated")).trim();
+    if (!["direct", "generated"].includes(sourceMode)) throw new Error("截图使用方式无效");
+    if (sourceMode === "direct" && !sourceScreenshotPath) throw new Error("直接使用原截图时，请先从本机选择图片");
     const archived = [];
     for (const output of task.outputs || []) {
       if (!(await this.pathExists(output))) continue;
@@ -6804,10 +7164,14 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       await this.copyCreationSnapshotFile(output, archivePath);
       archived.push(archivePath);
     }
+    const prompt = sourceMode === "direct" ? "" : requestedPrompt || this.buildCreationVisualPrompt({ ...request, sourceScreenshotPath }, task, skillId);
+    if (sourceMode === "generated" && !prompt) throw new Error("无法生成默认配图说明，请重新选择截图或补充加工要求");
     const nextRequest = {
       ...request,
       skillId,
       prompt,
+      sourceMode,
+      ...(sourceScreenshotPath ? { sourceScreenshotPath } : {}),
       revision,
       previousTaskId: task.taskId,
       previousOutputPaths: archived,
@@ -6817,16 +7181,26 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     const superseded = { ...task, status: "superseded", updatedAt: this.now(), supersededReason: "用户调整了配图 Skill 或生成提示词" };
     delete superseded.taskPath;
     await this.writeText(task.taskPath, `${JSON.stringify(superseded, null, 2)}\n`);
+    const directSourceExtension = sourceMode === "direct" ? (sourceScreenshotPath.match(/\.(png|jpe?g|webp)$/iu) || [])[1] : "";
     const next = await this.queueCreationStageTask(task.projectPath, "wechat.visual-item", {
       force: true,
       skillId,
+      sourceMode,
+      sourceScreenshotPath: sourceScreenshotPath ? sourceScreenshotPath.slice(directory.length + 1) : "",
       childKey: task.childKey,
       childLabel: task.childLabel,
       dependencyAnchor: task.dependencyAnchor,
       groupId: task.groupId,
       requiredChildCount: task.requiredChildCount,
-      inputOverride: (task.inputs || []).map((value) => value.startsWith(`${directory}/`) ? value.slice(directory.length + 1) : value),
-      outputOverride: (task.outputs || []).map((value) => value.startsWith(`${directory}/`) ? value.slice(directory.length + 1) : value),
+      inputOverride: [...(task.inputs || [])
+        .filter((value) => !normalizePath(String(value || "")).startsWith(`${directory}/sources/visual-references/`))
+        .map((value) => value.startsWith(`${directory}/`) ? value.slice(directory.length + 1) : value), ...(sourceScreenshotPath ? [sourceScreenshotPath.slice(directory.length + 1)] : [])],
+      outputOverride: (task.outputs || []).map((value) => {
+        const relative = value.startsWith(`${directory}/`) ? value.slice(directory.length + 1) : value;
+        return directSourceExtension && /\.(png|jpe?g|webp)$/iu.test(relative)
+          ? relative.replace(/\.(png|jpe?g|webp)$/iu, `.${directSourceExtension.toLowerCase()}`)
+          : relative;
+      }),
     });
     const state = await this.loadCreationWorkflowState(directory);
     await this.saveCreationWorkflowState(directory, {
@@ -6912,9 +7286,17 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     const sourceAnchor = String(request.sourceAnchor || request.insertionAnchor || "对应正文段落").trim();
     const sourceExcerpt = String(request.sourceExcerpt || "").replace(/\s+/gu, " ").trim().slice(0, 360);
     const context = sourceExcerpt ? `\n正文依据（只用于理解，不要把整段照抄到图上）：${sourceExcerpt}` : "";
+    const sourceScreenshot = String(request.sourceScreenshotPath || "").trim();
+    const sourceScreenshotNote = sourceScreenshot
+      ? `\n真实界面来源：已提供 ${sourceScreenshot}。只能以这张真实截图为界面事实依据；如需标注，只能在其基础上做清楚、可追溯的说明，不得重绘或补造不存在的 UI。端类型、版本、套餐和采集日期均为可选信息；未提供时使用“用户提供截图，版本未标注”的中性说明，不得因此拒绝生成。`
+      : "";
     const taskMeaning = `${subject} ${purpose}`;
     const isLoopGraph = /loop/iu.test(taskMeaning) && /graph/iu.test(taskMeaning);
     const isLoopGraphDecision = isLoopGraph && /(还是|何时|该.*(?:继续|上)|继续.*(?:还是|上)|决策|选择|升级|分流)/u.test(taskMeaning);
+
+    if (sourceScreenshot) {
+      return `基于用户已上传的真实产品界面截图，生成一张可直接插入微信公众号正文的横版说明配图，1600×900。\n\n任务：${subject}\n用途：${purpose}\n放置位置：${sourceAnchor}${context}${sourceScreenshotNote}\n\n处理规则：\n1. 以原截图为唯一的界面事实来源；允许裁切、横版排版、必要的模糊/打码，以及不超过 3 处的框选和短注释。\n2. 不需要用户另写提示词，也不要求补充端类型、版本、套餐或采集日期；这些信息未提供时，在图下注明“界面来源：用户提供截图，版本未标注”。\n3. 截图中看不见的按钮、状态、数据和功能都不得补画、重绘或推测。\n4. 保持正文主题相关，中文注释要短且手机端可读；不要添加无关 Logo、营销文案或大段说明。\n5. 若截图含有账号、头像、客户、文件名或其他敏感信息，先做克制打码再输出。`;
+    }
 
     if (skillId === "baoyu-infographic") {
       const layout = isLoopGraphDecision
@@ -6925,7 +7307,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
         : isLoopGraph
         ? "画面中央是一组由 4–5 个节点连接而成的 Graph；放大其中一个节点，露出节点内部的 Loop 小循环。外围节点只用‘路由、并行、交接、恢复’四个短标签，内部循环只用‘计划、行动、观察、校验’四个短标签。用一条清楚但不夸张的连接关系表达：Graph 负责节点之间的组织，Loop 负责节点内的收敛。"
         : `以“${subject}”为中心，用一个主结构与 3–5 个必要组成部分解释“${purpose}”。元素之间只保留能支撑正文判断的关系，不要把正文改造成完整流程图。`;
-      return `为微信公众号正文生成 1 张可独立理解的 16:9 横向中文技术信息图，1600×900。\n\n任务定位：\n主题：${subject}\n这张图只要帮助读者理解：${purpose}\n放置位置：${sourceAnchor}${context}\n\n信息结构：\n采用 ${layout}，不是通用海报，也不是产品界面。${composition}\n\n视觉与文字：\n使用 technical-schematic 技术示意风格：干净浅色或白色背景，深墨色线条与文字，有限的一种强调色用于关键关系；清晰的层级、留白和对齐。中文必须简短、准确、可读，控制在 6–8 个以内的短标签；不使用长段解释，不虚构数据、案例或结论。\n\n构图要求：\n主结构占画面约 55%，四周保留足够呼吸空间；先让读者一眼看到核心关系，再读到局部标注。画面只表达一个判断，不要塞入多个并列结论。\n\n明确禁止：\n不要 3D 装饰、渐变光效、玻璃拟态、真实 App 截图、无关 Logo、品牌标识、夸张科技网格、密集方框、PPT 模板感或无法阅读的小字。不要把“${subject}”做成只有标题的空泛概念图。`;
+      return `为微信公众号正文生成 1 张可独立理解的 16:9 横向中文技术信息图，1600×900。\n\n任务定位：\n主题：${subject}\n这张图只要帮助读者理解：${purpose}\n放置位置：${sourceAnchor}${context}${sourceScreenshotNote}\n\n信息结构：\n采用 ${layout}，不是通用海报，也不是产品界面。${composition}\n\n视觉与文字：\n使用 technical-schematic 技术示意风格：干净浅色或白色背景，深墨色线条与文字，有限的一种强调色用于关键关系；清晰的层级、留白和对齐。中文必须简短、准确、可读，控制在 6–8 个以内的短标签；不使用长段解释，不虚构数据、案例或结论。\n\n构图要求：\n主结构占画面约 55%，四周保留足够呼吸空间；先让读者一眼看到核心关系，再读到局部标注。画面只表达一个判断，不要塞入多个并列结论。\n\n明确禁止：\n不要 3D 装饰、渐变光效、玻璃拟态、${sourceScreenshot ? "把真实来源之外的内容伪装成 App 截图" : "真实 App 截图"}、无关 Logo、品牌标识、夸张科技网格、密集方框、PPT 模板感或无法阅读的小字。不要把“${subject}”做成只有标题的空泛概念图。`;
     }
 
     const composition = isLoopGraphDecision
@@ -6936,7 +7318,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     const labels = isLoopGraphDecision
       ? "Loop / Graph / 局部闭环 / 并行协作 / 交接恢复 / 复杂度阈值"
       : isLoopGraph ? "节点内 Loop / 路由 / 并行 / 交接 / 恢复 / 校验" : "只保留 3–6 个与主题直接相关的短中文批注；不要写大标题";
-    return `生成 1 张独立的 16:9 横版微信公众号中文正文配图，1600×900。\n\nVisual DNA：\n纯白背景；以黑色或近黑色的轻微抖动手绘线稿为主；至少保留 35% 留白。只用两克伴酒红（接近 #B5122B）做少量信号弧、校准刻度和关键判断点；若必须区分主路径，才极少量使用橙色；默认不使用蓝色。整体像一张克制、怪诞、清爽的产品草图，不是海报或信息图。\n\n小小克 IP（必须出现且承担核心动作）：\n一个纯黑或近黑的不规则、有质量感的小生物，白色圆点眼、细腿、表情冷静；像黑豆、墨滴或被压扁的软块，绝不是猫、标准砝码、印章、贴纸或可爱吉祥物。\n\n主题与正文判断：\n主题：${subject}\n要让读者理解：${purpose}\n放置位置：${sourceAnchor}${context}\n\n具体构图：\n${composition}\n\n画面标注：\n${labels}。全部采用少量中文手写感标注，每个 2–8 个字，最多 5–8 处；不要在左上角写类型标题。\n\n构图与质量约束：\n主体占画面约 40%–60%，让小小克与核心结构共同成为视觉中心；一张图只讲一个关系，读者不看正文也能大致理解。不要复刻旧图，不要用复杂架构图、正式流程图、PPT 信息图、商业矢量插画、儿童卡通、渐变、阴影、纸张纹理、密集文字、真实 UI、无关 Logo 或未经证实的事实。画面应有轻微幽默感，但不幼稚，中文在手机端必须清晰可读。`;
+    return `生成 1 张独立的 16:9 横版微信公众号中文正文配图，1600×900。\n\nVisual DNA：\n纯白背景；以黑色或近黑色的轻微抖动手绘线稿为主；至少保留 35% 留白。只用两克伴酒红（接近 #B5122B）做少量信号弧、校准刻度和关键判断点；若必须区分主路径，才极少量使用橙色；默认不使用蓝色。整体像一张克制、怪诞、清爽的产品草图，不是海报或信息图。\n\n小小克 IP（必须出现且承担核心动作）：\n一个纯黑或近黑的不规则、有质量感的小生物，白色圆点眼、细腿、表情冷静；像黑豆、墨滴或被压扁的软块，绝不是猫、标准砝码、印章、贴纸或可爱吉祥物。\n\n主题与正文判断：\n主题：${subject}\n要让读者理解：${purpose}\n放置位置：${sourceAnchor}${context}${sourceScreenshotNote}\n\n具体构图：\n${composition}\n\n画面标注：\n${labels}。全部采用少量中文手写感标注，每个 2–8 个字，最多 5–8 处；不要在左上角写类型标题。\n\n构图与质量约束：\n主体占画面约 40%–60%，让小小克与核心结构共同成为视觉中心；一张图只讲一个关系，读者不看正文也能大致理解。不要复刻旧图，不要用复杂架构图、正式流程图、PPT 信息图、商业矢量插画、儿童卡通、渐变、阴影、纸张纹理、密集文字、${sourceScreenshot ? "伪造的真实 UI" : "真实 UI"}、无关 Logo 或未经证实的事实。画面应有轻微幽默感，但不幼稚，中文在手机端必须清晰可读。`;
   }
 
   async retryCreationTasksForSkill(projectPath, skillId) {
@@ -7411,6 +7793,26 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     }
   }
 
+  async writeCreationBinaryFile(targetPath, binary) {
+    const adapter = this.app && this.app.vault ? this.app.vault.adapter : null;
+    if (!adapter) throw new Error("当前 Vault 适配器不可用");
+    await this.ensureFolderForPath(targetPath);
+    if (typeof adapter.writeBinary === "function") {
+      await adapter.writeBinary(targetPath, binary);
+      return;
+    }
+    if (this.app.vault && typeof this.app.vault.createBinary === "function") {
+      const existing = this.app.vault.getAbstractFileByPath(targetPath);
+      if (existing && typeof this.app.vault.modifyBinary === "function") {
+        await this.app.vault.modifyBinary(existing, binary);
+      } else {
+        await this.app.vault.createBinary(targetPath, binary);
+      }
+      return;
+    }
+    throw new Error("当前 Vault 适配器不支持保存本机图片");
+  }
+
   async withCreationExportLock(key, callback) {
     if (!this.creationExportLocks) this.creationExportLocks = new Map();
     const previous = this.creationExportLocks.get(key) || Promise.resolve();
@@ -7854,6 +8256,19 @@ module.exports = class ReadingCapturePlugin extends Plugin {
           await this.saveCreationWorkflowState(directory, workflowState);
         }
         projectTasks.sort((left, right) => (Date.parse(right.updatedAt || right.createdAt || "") || 0) - (Date.parse(left.updatedAt || left.createdAt || "") || 0));
+        // The visual folder can contain a previous format of the same image
+        // (for example a superseded PNG followed by a user-supplied JPG).
+        // The review gallery must follow the active child Tasks, rather than
+        // treating every file in that folder as the current delivery.
+        const currentWechatVisualGroup = workflowState.deliverables
+          && workflowState.deliverables.wechat
+          && workflowState.deliverables.wechat.visualGroupId;
+        const activeWechatVisualOutputs = new Set(projectTasks
+          .filter((task) => task.kind === "wechat.visual-item"
+            && !["superseded", "cancelled"].includes(task.status)
+            && (!currentWechatVisualGroup || task.groupId === currentWechatVisualGroup))
+          .flatMap((task) => Array.isArray(task.outputs) ? task.outputs : [])
+          .map((output) => normalizePath(String(output || ""))));
         let latestPublication = null;
         for (const publicationFile of [`${directory}/publication-records.jsonl`, `${directory}/publications.jsonl`]) {
           if (!(await this.pathExists(publicationFile))) continue;
@@ -7886,6 +8301,12 @@ module.exports = class ReadingCapturePlugin extends Plugin {
             await this.writeDiagnosticEvent("error", "creation-xhs-plan-decision-read", { path: xhsPlanDecisionPath, error: this.errorToDiagnostic(error) });
           }
         }
+        const hasPublicationSnapshot = Boolean(
+          workflowState.currentStage === "final"
+          && latestPublication
+          && latestPublication.platform === (workflowState.activeDeliverable || platform)
+          && latestPublication.targetDirectory
+        );
         projects.push({
           path,
           directory,
@@ -7909,13 +8330,30 @@ module.exports = class ReadingCapturePlugin extends Plugin {
           xhsPlanDecision,
           wechatDraft: (await this.pathExists(`${directory}/deliverables/wechat/wechat-001/drafts/v1.md`)) ? await this.readText(`${directory}/deliverables/wechat/wechat-001/drafts/v1.md`) : "",
           wechatVisualManifest: (await this.pathExists(`${directory}/deliverables/wechat/wechat-001/visuals/manifest.md`)) ? await this.readText(`${directory}/deliverables/wechat/wechat-001/visuals/manifest.md`) : "",
+          // `visuals/versions` is an audit trail, not the current delivery.
+          // Including it here lets the inspection button reopen a superseded
+          // image after a user has just supplied a new screenshot.
           wechatVisualFiles: this.getVaultFiles()
-            .filter((item) => normalizePath(item.path || "").startsWith(`${directory}/deliverables/wechat/wechat-001/visuals/`) && /\.(?:png|jpe?g|webp|svg)$/i.test(item.name || ""))
+            .filter((item) => {
+              const visualPath = normalizePath(item.path || "");
+              return visualPath.startsWith(`${directory}/deliverables/wechat/wechat-001/visuals/`)
+                && !visualPath.includes("/visuals/versions/")
+                && /\.(?:png|jpe?g|webp|svg)$/i.test(item.name || "")
+                && (!activeWechatVisualOutputs.size || activeWechatVisualOutputs.has(visualPath));
+            })
             .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), undefined, { numeric: true, sensitivity: "base" })),
           xhsCaption: (await this.pathExists(`${directory}/deliverables/xiaohongshu/xiaohongshu-001/caption.md`)) ? await this.readText(`${directory}/deliverables/xiaohongshu/xiaohongshu-001/caption.md`) : "",
           xhsCardsManifest: (await this.pathExists(`${directory}/deliverables/xiaohongshu/xiaohongshu-001/cards-manifest.md`)) ? await this.readText(`${directory}/deliverables/xiaohongshu/xiaohongshu-001/cards-manifest.md`) : "",
+          // Apply the same rule to Xiaohongshu: the review gallery must show
+          // the current package only; historic revisions stay in their own
+          // history entry and cannot masquerade as an active card.
           xhsImageFiles: this.getVaultFiles()
-            .filter((item) => normalizePath(item.path || "").startsWith(`${directory}/deliverables/xiaohongshu/xiaohongshu-001/images/`) && /\.(?:png|jpe?g|webp|svg)$/i.test(item.name || ""))
+            .filter((item) => {
+              const imagePath = normalizePath(item.path || "");
+              return imagePath.startsWith(`${directory}/deliverables/xiaohongshu/xiaohongshu-001/images/`)
+                && !imagePath.includes("/images/versions/")
+                && /\.(?:png|jpe?g|webp|svg)$/i.test(item.name || "");
+            })
             .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), undefined, { numeric: true, sensitivity: "base" })),
           xhsSampleFiles: this.getVaultFiles()
             .filter((item) => normalizePath(item.path || "").startsWith(`${directory}/deliverables/xiaohongshu/xiaohongshu-001/samples/`) && /\.(?:png|jpe?g|webp|svg)$/i.test(item.name || ""))
@@ -7923,6 +8361,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
           tasks: projectTasks,
           latestTask: projectTasks[0] || null,
           latestPublication,
+          hasPublicationSnapshot,
         });
       } catch (error) {
         await this.writeDiagnosticEvent("error", "creation-project-read", { path, error: this.errorToDiagnostic(error) });
@@ -8185,6 +8624,35 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     return [...new Set(candidates.filter(Boolean))];
   }
 
+  buildReaderTextIndex(root) {
+    // Match Selection.toString() boundaries without separating inline text
+    // (e.g. a word split by emphasis or an existing highlight).
+    const blocks = new Set(["P", "DIV", "SECTION", "ARTICLE", "BLOCKQUOTE", "PRE",
+      "H1", "H2", "H3", "H4", "H5", "H6", "UL", "OL", "LI",
+      "TABLE", "THEAD", "TBODY", "TFOOT", "TR", "TH", "TD", "HR"]);
+    const textNodes = [];
+    let fullText = "";
+    const boundary = () => {
+      if (fullText && !/\s$/.test(fullText)) fullText += "\n";
+    };
+    const visit = (node) => {
+      if (node.nodeType === 3) {
+        const value = node.nodeValue || "";
+        textNodes.push({ node, start: fullText.length, end: fullText.length + value.length });
+        fullText += value;
+        return;
+      }
+      const tag = node.tagName;
+      if (tag === "SCRIPT" || tag === "STYLE") return;
+      const separated = blocks.has(tag) || tag === "BR";
+      if (separated) boundary();
+      for (const child of node.childNodes || []) visit(child);
+      if (separated) boundary();
+    };
+    visit(root);
+    return { fullText, textNodes };
+  }
+
   normalizeTextWithMap(text) {
     const normalized = [];
     const rawIndexes = [];
@@ -8211,15 +8679,20 @@ module.exports = class ReadingCapturePlugin extends Plugin {
   }
 
   findQuoteRawRange(fullText, quote) {
-    const cleanQuote = this.markdownTextForMatch(quote).replace(/\s+/g, " ").trim();
-    if (!cleanQuote) return null;
     const normalizedFull = this.normalizeTextWithMap(fullText);
-    const index = normalizedFull.text.indexOf(cleanQuote);
-    if (index === -1) return null;
-    const start = normalizedFull.rawIndexes[index];
-    const last = normalizedFull.rawIndexes[index + cleanQuote.length - 1];
-    if (typeof start !== "number" || typeof last !== "number") return null;
-    return { start, end: last + 1 };
+    // Reader selections are already plain text: preserve literal #, *, _, etc.
+    // Keep the Markdown fallback for older/editor-origin annotations.
+    const candidates = [String(quote || ""), this.markdownTextForMatch(quote)];
+    for (const candidate of candidates) {
+      const cleanQuote = candidate.replace(/\s+/g, " ").trim();
+      if (!cleanQuote) continue;
+      const index = normalizedFull.text.indexOf(cleanQuote);
+      if (index === -1) continue;
+      const start = normalizedFull.rawIndexes[index];
+      const last = normalizedFull.rawIndexes[index + cleanQuote.length - 1];
+      if (typeof start === "number" && typeof last === "number") return { start, end: last + 1 };
+    }
+    return null;
   }
 
   markdownTextForMatch(text) {
@@ -8515,7 +8988,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     return basename(fileName, extname(fileName)).toLowerCase();
   }
 
-  async buildArticleLibraryGroups() {
+  collectArticleLibraryGroups() {
     const roots = this.getArticleLibraryRoots();
     const files = this.getVaultFiles().filter((file) => this.isLibraryCandidate(file) && !this.isExcludedLibraryPath(file.path));
     const grouped = new Map();
@@ -8537,11 +9010,15 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       grouped.get(id).files.push(file);
     }
 
+    return [...grouped.values()].flatMap((item) => this.splitArticleDirectoryGroup(item));
+  }
+
+  async buildArticleLibraryGroups() {
     const index = await this.loadIndex();
     const groups = [];
     const currentCache = this.normalizeArticleLibraryCache(this.articleLibraryCache);
     const nextCache = { version: ARTICLE_LIBRARY_CACHE_VERSION, groups: {} };
-    for (const group of [...grouped.values()].flatMap((item) => this.splitArticleDirectoryGroup(item))) {
+    for (const group of this.collectArticleLibraryGroups()) {
       group.files.sort((left, right) => left.path.localeCompare(right.path));
       group.versions = group.files
         .map((file) => ({
@@ -8581,6 +9058,116 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     await this.saveSettings();
 
     return sortedGroups;
+  }
+
+  async libraryReadingAssociations() {
+    // Deletion must fail closed on a corrupt index, unlike the normal library scan.
+    const index = await this.pathExists(this.indexPath())
+      ? JSON.parse(await this.readText(this.indexPath())) : { sources: {} };
+    if (!index.sources || typeof index.sources !== "object" || Array.isArray(index.sources)) {
+      throw new Error("阅读索引格式错误，请先重建阅读索引。");
+    }
+    const bySource = new Map();
+    const records = new Map();
+    const link = (source, record) => {
+      if (!source || !record) return;
+      if (!bySource.has(source)) bySource.set(source, new Set());
+      bySource.get(source).add(record);
+    };
+    const indexedPaths = new Set();
+    for (const [source, entry] of Object.entries(index.sources)) {
+      if (entry?.reading_note_path) {
+        link(source, entry.reading_note_path);
+        indexedPaths.add(entry.reading_note_path);
+      }
+    }
+    const readingRoot = normalizeVaultPath(this.settings.readingRoot).replace(/\/+$/, "");
+    const candidates = this.app.vault.getMarkdownFiles().filter(file => {
+      const metadata = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      return file.path.startsWith(`${readingRoot}/`) || indexedPaths.has(file.path) || metadata?.source_vault_path;
+    });
+    for (const file of candidates) {
+      const text = await this.readText(file.path);
+      const source = this.readFrontmatterValue(text, "source_vault_path");
+      if (source || indexedPaths.has(file.path)) {
+        records.set(file.path, { file, source, text });
+        link(source, file.path);
+      }
+    }
+    return { index, bySource, records };
+  }
+
+  async prepareLibraryDeletion(groupId, sourcePath = "") {
+    const group = this.collectArticleLibraryGroups().find(item => item.id === groupId);
+    if (!group || (sourcePath && !group.files.some(file => file.path === sourcePath))) {
+      throw new Error("文章组已变化，请重新扫描后再操作。");
+    }
+    const sourcePaths = group.files.map(file => file.path).filter(path => !sourcePath || path === sourcePath).sort();
+    const sources = new Set(sourcePaths);
+    const { index, bySource, records } = await this.libraryReadingAssociations();
+    const recordPaths = [...new Set(sourcePaths.flatMap(path => [...(bySource.get(path) || [])]))].sort();
+    if (sourcePath && recordPaths.length) throw new Error("这个文件已有阅读记录，不能单独删除。可使用「删除整组」一并删除文章及阅读记录。");
+    for (const path of recordPaths) {
+      const record = records.get(path);
+      if (!record) throw new Error("关联阅读记录缺失，请先重建阅读索引后重试。");
+      if (!record.source || !sources.has(record.source) || sources.has(path)) {
+        throw new Error("阅读记录的来源关联不一致，已停止删除，请先检查并重建阅读索引。");
+      }
+      for (const [source, paths] of bySource) {
+        if (!sources.has(source) && paths.has(path)) throw new Error("阅读记录被其他文章共同引用，已停止删除。");
+      }
+    }
+    const files = [...sourcePaths, ...recordPaths].map(path => {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (!this.isFile(file) || path.startsWith(".") || path.split("/").some(part => part === ".." || part === ".")) {
+        throw new Error("文件已变化或路径无效，请重新扫描。");
+      }
+      return { path, mtime: file.stat?.mtime || 0, size: file.stat?.size || 0 };
+    });
+    const relatedIndex = Object.fromEntries(sourcePaths.map(path => [path, index.sources[path] || null]));
+    const signature = crypto.createHash("sha256").update(JSON.stringify({
+      groupPaths: group.files.map(file => file.path).sort(), files, relatedIndex,
+      records: recordPaths.map(path => [path, records.get(path).text]),
+    })).digest("hex");
+    return {
+      mode: sourcePath ? "file" : "group", groupId, sourcePath, sourcePaths, recordPaths, files, signature,
+      title: sourcePath ? sourcePath.split("/").pop() : group.groupPath,
+    };
+  }
+
+  async executeLibraryDeletion(plan) {
+    if (this.libraryDeletionInProgress) throw new Error("正在删除文件，请稍后再试。");
+    this.libraryDeletionInProgress = true;
+    const moved = [];
+    try {
+      const current = await this.prepareLibraryDeletion(plan.groupId, plan.sourcePath);
+      if (current.signature !== plan.signature) throw new Error("文章或阅读记录已变化，请关闭并重新确认删除范围。");
+      this.libraryDeletionSources = new Set(current.sourcePaths);
+      // Never trash a directory: different article groups can share one folder.
+      for (const target of current.files) {
+        const file = this.app.vault.getAbstractFileByPath(target.path);
+        if (!this.isFile(file) || (file.stat?.mtime || 0) !== target.mtime || (file.stat?.size || 0) !== target.size) {
+          throw new Error("文件在删除过程中发生变化，已停止后续删除。");
+        }
+        await this.app.vault.trash(file, false);
+        moved.push(target.path);
+      }
+      const index = await this.pathExists(this.indexPath())
+        ? JSON.parse(await this.readText(this.indexPath())) : { sources: {} };
+      for (const path of current.sourcePaths) delete index.sources[path];
+      await this.saveIndex(index);
+    } catch (error) {
+      const progress = moved.length ? `已将 ${moved.length} 个文件移入 .trash，其余文件保留。请检查当前状态并重建阅读索引。` : "未删除任何文件。";
+      throw new Error(`${progress}\n${error.message || error}`);
+    } finally {
+      this.libraryDeletionSources = null;
+      this.libraryDeletionInProgress = false;
+      if (moved.length) {
+        this.articleLibraryCache = { version: ARTICLE_LIBRARY_CACHE_VERSION, groups: {} };
+        this.articleLibrarySnapshot = [];
+      }
+    }
+    return moved;
   }
 
   getArticleLibrarySnapshot() {
@@ -9397,7 +9984,36 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     return String(error).slice(0, 120);
   }
 
+  removeAnnotationFromMarkdown(markdown, annotationId) {
+    if (!/^ann_[A-Za-z0-9_-]+$/.test(annotationId || "")) throw new Error("标注 ID 无效。");
+    const headers = [...markdown.matchAll(/^### (ann_[^\s]+)[ \t]*\r?$/gm)];
+    const matches = headers.filter(header => header[1] === annotationId);
+    if (matches.length !== 1) throw new Error(matches.length ? "标注 ID 重复，为避免误删已停止。" : "这条标注已不存在，请重新打开文章。");
+    const start = matches[0].index;
+    const tail = markdown.slice(start + matches[0][0].length);
+    const next = /^## |^### ann_/m.exec(tail);
+    const end = next ? start + matches[0][0].length + next.index : markdown.length;
+    return markdown.slice(0, start) + markdown.slice(end);
+  }
+
+  async deleteAnnotationForSource(sourceFile, annotationId) {
+    if (!this.isFile(sourceFile)) throw new Error("未找到原文。");
+    const noteFile = await this.findReadingNoteForSource(sourceFile);
+    if (!noteFile) throw new Error("未找到阅读记录。");
+    // Process the latest note atomically so concurrent edits are preserved.
+    await this.app.vault.process(noteFile, markdown =>
+      this.touchFrontmatter(this.removeAnnotationFromMarkdown(markdown, annotationId)));
+    try {
+      await this.refreshIndexEntry(sourceFile, noteFile, "obsidian-plugin");
+    } catch (error) {
+      new Notice("标注已删除，但索引更新失败，请重建阅读索引。");
+      return;
+    }
+    new Notice("已删除这条标注。");
+  }
+
   async captureForFile(file, { selectedText, note, type, heading, media = null }) {
+    if (this.libraryDeletionSources?.has(file?.path)) throw new Error("这篇文章正在删除，暂时无法保存标注。");
     if (!this.isFile(file)) {
       new Notice("没有找到当前文件。");
       return null;
@@ -9433,6 +10049,8 @@ module.exports = class ReadingCapturePlugin extends Plugin {
   }
 
   async getOrCreateReadingNote(sourceFile) {
+    if (this.libraryDeletionSources?.has(sourceFile?.path)) throw new Error("这篇文章正在删除，暂时无法创建阅读记录。");
+    if (!this.isFile(this.app.vault.getAbstractFileByPath(sourceFile?.path))) throw new Error("源文件已不存在，请重新打开文章。");
     await this.ensureReadingRoot();
     const source = this.buildSource(sourceFile);
     const index = await this.loadIndex();

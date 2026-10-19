@@ -4,3 +4,8 @@ node_modules/
 coverage/
 dist/
 
+# Local verification files, private exports, and plugin backups
+/work/
+/output/
+/.gstack/
+

@@ -122,6 +122,17 @@ function makeFakeApp() {
         }
         files.get(path).content = content;
       },
+      async writeBinary(path, content) {
+        const stored = Buffer.from(content).toString("utf8");
+        if (!files.has(path)) {
+          files.set(path, { file: makeFile(path, stored), content: stored });
+          return;
+        }
+        files.get(path).content = stored;
+      },
+      async readBinary(path) {
+        return Buffer.from(files.get(path).content, "utf8");
+      },
       async list(path) {
         const prefix = `${path.replace(/\/+$/g, "")}/`;
         return {
@@ -2227,14 +2238,64 @@ async function testCreationProjectVisualFilesUseNaturalFilenameOrder() {
   for (const name of ["09-final.png", "02-middle.png", "01-cover.png", "10-extra.png"]) {
     await app.vault.create(`${wechatRoot}/${name}`, name);
   }
+  await app.vault.create(`${wechatRoot}/versions/cover/r2-01-cover.png`, "historic wechat image");
   for (const name of ["card-10.png", "card-2.png", "card-1.png"]) {
     await app.vault.create(`${xhsRoot}/${name}`, name);
   }
+  await app.vault.create(`${xhsRoot}/versions/card-1/r2-card-1.png`, "historic xhs image");
 
   const [listed] = await plugin.listCreationProjects();
 
   assert.deepStrictEqual(Array.from(listed.wechatVisualFiles, (file) => file.name), ["01-cover.png", "02-middle.png", "09-final.png", "10-extra.png"]);
   assert.deepStrictEqual(Array.from(listed.xhsImageFiles, (file) => file.name), ["card-1.png", "card-2.png", "card-10.png"]);
+  assert.ok(listed.wechatVisualFiles.every((file) => !file.path.includes("/visuals/versions/")), "inspection gallery must never select a superseded WeChat visual revision");
+  assert.ok(listed.xhsImageFiles.every((file) => !file.path.includes("/images/versions/")), "inspection gallery must never select a superseded Xiaohongshu card revision");
+}
+
+async function testCreationProjectVisualGalleryUsesActiveTaskOutputInsteadOfSupersededFormat() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { creationProjectRoot: "Reading Capture/creation-projects", defaultWritingStyle: "keke" };
+  plugin.now = () => fixedNow;
+  const project = await plugin.createCreationProject({ title: "当前配图优先", kind: "manual" }, { platform: "wechat" });
+  const groupId = "wechat-visual-current-output";
+  const state = await plugin.loadCreationWorkflowState(project.directory);
+  state.currentStage = "visual";
+  state.deliverables.wechat.visualGroupId = groupId;
+  await plugin.saveCreationWorkflowState(project.directory, state);
+  const oldTask = await plugin.queueCreationStageTask(project.path, "wechat.visual-item", {
+    skillId: "baoyu-infographic",
+    childKey: "assistant-ui",
+    childLabel: "助理真实界面注释图",
+    groupId,
+    outputOverride: ["deliverables/wechat/wechat-001/visuals/wb-03-assistant-ui.png"],
+  });
+  const currentTask = await plugin.queueCreationStageTask(project.path, "wechat.visual-item", {
+    force: true,
+    skillId: "liangkeban-xiaoxiaoke-illustrations",
+    childKey: "assistant-ui",
+    childLabel: "助理真实界面注释图",
+    groupId,
+    outputOverride: ["deliverables/wechat/wechat-001/visuals/wb-03-assistant-ui.jpg"],
+  });
+  const oldRecord = JSON.parse(files.get(oldTask.taskPath).content);
+  oldRecord.status = "superseded";
+  files.get(oldTask.taskPath).content = `${JSON.stringify(oldRecord, null, 2)}\n`;
+  const currentRecord = JSON.parse(files.get(currentTask.taskPath).content);
+  currentRecord.status = "awaiting_approval";
+  files.get(currentTask.taskPath).content = `${JSON.stringify(currentRecord, null, 2)}\n`;
+  await app.vault.create(`${project.directory}/deliverables/wechat/wechat-001/visuals/wb-03-assistant-ui.png`, "old generated image");
+  await app.vault.create(`${project.directory}/deliverables/wechat/wechat-001/visuals/wb-03-assistant-ui.jpg`, "new uploaded screenshot");
+
+  const [listed] = await plugin.listCreationProjects();
+
+  assert.deepStrictEqual(
+    Array.from(listed.wechatVisualFiles, (file) => file.name),
+    ["wb-03-assistant-ui.jpg"],
+    "a revised direct-source screenshot must replace its superseded generated format in the active inspection gallery"
+  );
 }
 
 async function testProjectRecoversTaskReferenceFromRunHistory() {
@@ -3495,7 +3556,7 @@ async function testWechatVisualChildrenRetainSuccessRetryFailureAndBlockFinaliza
   assert.ok(reopened.deliverables.wechat.staleStages.includes("final"));
 }
 
-async function testWechatVisualTaskCanChangeSkillAndPromptBeforeFinalAcceptance() {
+async function testWechatVisualTaskCanUseUploadedScreenshotWithoutASeparatePrompt() {
   const PluginClass = loadPluginClass();
   const plugin = new PluginClass();
   const { app, files } = makeFakeApp();
@@ -3516,6 +3577,10 @@ async function testWechatVisualTaskCanChangeSkillAndPromptBeforeFinalAcceptance(
     skillId: "baoyu-infographic",
     purpose: "用清晰的风险矩阵解释五道闸门",
   }, null, 2)}\n`);
+  const sourceScreenshot = {
+    name: "workbuddy-assistant.png",
+    async arrayBuffer() { return Buffer.from("real-screenshot-bytes", "utf8"); },
+  };
   const task = await plugin.queueCreationStageTask(project.path, "wechat.visual-item", {
     skillId: "baoyu-infographic",
     childKey: "gates",
@@ -3531,14 +3596,20 @@ async function testWechatVisualTaskCanChangeSkillAndPromptBeforeFinalAcceptance(
   task.status = "awaiting_approval";
   const next = await plugin.editCreationVisualTask(task, {
     skillId: "liangkeban-xiaoxiaoke-illustrations",
-    prompt: "用两克伴小小克风格，画出五道风险闸门的工程现场隐喻，留白充足，不放文字。",
+    prompt: "",
+    sourceScreenshotFile: sourceScreenshot,
   });
   assert.strictEqual(next.skillId, "liangkeban-xiaoxiaoke-illustrations");
   assert.strictEqual(next.status, "pending");
+  assert.strictEqual(next.sourceMode, "direct", "an uploaded screenshot must default to direct use instead of invoking an image Skill");
   assert.strictEqual(JSON.parse(files.get(task.taskPath).content).status, "superseded");
   const request = JSON.parse(files.get(`${project.directory}/deliverables/wechat/wechat-001/visuals/requests/gates.json`).content);
   assert.strictEqual(request.skillId, "liangkeban-xiaoxiaoke-illustrations");
-  assert.match(request.prompt, /两克伴小小克/);
+  assert.strictEqual(request.sourceMode, "direct");
+  assert.strictEqual(request.prompt, "", "direct use must not retain a hidden generation prompt");
+  assert.match(request.sourceScreenshotPath, /sources\/visual-references\/gates-r2-workbuddy-assistant\.png$/u);
+  assert.strictEqual(files.get(request.sourceScreenshotPath).content, "real-screenshot-bytes", "the locally selected source screenshot must be copied into the project for a reproducible task");
+  assert.ok(next.inputs.includes(request.sourceScreenshotPath), "the next visual task must receive the project-local source screenshot");
   assert.strictEqual(request.previousTaskId, task.taskId);
   const savedState = JSON.parse(files.get(`${project.directory}/workflow-state.json`).content);
   assert.strictEqual(savedState.currentStage, "visual");
@@ -3963,6 +4034,87 @@ async function testCreationProjectViewShowsEightStageEntryContract() {
   assert.strictEqual(optionCopies.length, 2, "project picker should show all available projects by default");
   assert.ok(fakeElementTexts(optionCopies[0]).includes("Project 1"));
   assert.ok(fakeElementTexts(optionCopies[0]).some((text) => text.includes("策划中")), "project option should keep status in a separate metadata row");
+}
+
+async function testCreationProjectPickerSeparatesPublishedHistory() {
+  const PluginClass = loadPluginClass();
+  const plugin = new PluginClass();
+  const registeredViews = {};
+  const { app } = makeFakeApp();
+  plugin.app = app;
+  plugin.app.workspace.on = () => ({});
+  plugin.addSettingTab = () => {};
+  plugin.registerEvent = () => {};
+  plugin.addCommand = () => {};
+  plugin.registerView = (type, factory) => { registeredViews[type] = factory; };
+  plugin.loadData = async () => null;
+  const activeState = creationWorkflow.createWorkflowState({
+    projectId: "active-project",
+    title: "进行中项目",
+    workflowMode: "idea_creation",
+    activeDeliverable: "wechat",
+  });
+  const publishedState = creationWorkflow.createWorkflowState({
+    projectId: "published-project",
+    title: "已发布项目",
+    workflowMode: "idea_creation",
+    activeDeliverable: "xiaohongshu",
+  });
+  publishedState.currentStage = "final";
+  publishedState.deliverables.xiaohongshu.stage = "final";
+  plugin.listCreationProjects = async () => [
+    {
+      path: "Reading Capture/creation-projects/active-project/project.md",
+      directory: "Reading Capture/creation-projects/active-project",
+      title: "进行中项目",
+      platform: "wechat",
+      statusLabel: "项目与灵感",
+      primaryTitle: "进行中项目",
+      relatedTitles: [],
+      workflowState: activeState,
+      stageStates: creationWorkflow.deriveStageStates(activeState),
+      tasks: [],
+    },
+    {
+      path: "Reading Capture/creation-projects/published-project/project.md",
+      directory: "Reading Capture/creation-projects/published-project",
+      title: "已发布项目",
+      platform: "xiaohongshu",
+      statusLabel: "已创建发布快照",
+      primaryTitle: "已发布项目",
+      relatedTitles: [],
+      workflowState: publishedState,
+      stageStates: creationWorkflow.deriveStageStates(publishedState),
+      latestPublication: {
+        platform: "xiaohongshu",
+        snapshotId: "snapshot-published-project",
+        targetDirectory: "Work/business/content-accounts/xiaohongshu/20260728_已发布项目",
+        exportedAt: fixedNow,
+      },
+      tasks: [],
+    },
+  ];
+
+  await plugin.onload();
+  const view = registeredViews["reading-capture-creation-project"]({});
+  view.containerEl = { children: [makeFakeElement(), makeFakeElement()] };
+  await view.reload();
+
+  const switchButton = fakeElementsByTag(view.containerEl.children[1], "button").find((button) => button.text === "切换项目");
+  await switchButton.listeners.click();
+  const pickerOptions = fakeElementsByClass(view.containerEl.children[1], "reading-capture-creation-project-options")[0];
+  const optionCopies = fakeElementsByClass(pickerOptions, "reading-capture-creation-project-option-copy");
+  assert.strictEqual(optionCopies.length, 1, "the project picker should only show work that has not been exported as a publication snapshot");
+  assert.ok(fakeElementTexts(optionCopies[0]).includes("进行中项目"));
+  assert.ok(!fakeElementTexts(pickerOptions).includes("已发布项目"));
+  assert.ok(fakeElementTexts(view.containerEl.children[1]).includes("进行中项目 · 1"));
+
+  const historyButton = fakeElementsByTag(view.containerEl.children[1], "button").find((button) => button.text.startsWith("项目记录"));
+  await historyButton.listeners.click();
+  const texts = fakeElementTexts(view.containerEl.children[1]);
+  assert.ok(texts.includes("已发布记录"), "published projects must remain reachable from the dedicated history entry");
+  assert.ok(texts.includes("已发布项目"));
+  assert.ok(texts.includes("查看项目"));
 }
 
 async function testCreationProjectViewShowsDiagnosisContract() {
@@ -5420,6 +5572,7 @@ testCaptureWritesAnnotationAndIndex()
   .then(testRunnerAcceptsRelativeAdapterListings)
   .then(testProjectLoadsTaskFromDurableReferenceWithoutQueueListing)
   .then(testCreationProjectVisualFilesUseNaturalFilenameOrder)
+  .then(testCreationProjectVisualGalleryUsesActiveTaskOutputInsteadOfSupersededFormat)
   .then(testProjectRecoversTaskReferenceFromRunHistory)
   .then(testProjectReadsMarkdownRunReceiptWhenJsonIsNotIndexed)
   .then(testRunnerResultReceiptRecoversStaleQueueFile)
@@ -5449,7 +5602,7 @@ testCaptureWritesAnnotationAndIndex()
   .then(testXhsPlanRendersGeneratedProposalsInsteadOfHardcodedCards)
   .then(testXhsTaskChainUsesApprovedPlanAndIndependentDualQa)
   .then(testWechatVisualChildrenRetainSuccessRetryFailureAndBlockFinalization)
-  .then(testWechatVisualTaskCanChangeSkillAndPromptBeforeFinalAcceptance)
+  .then(testWechatVisualTaskCanUseUploadedScreenshotWithoutASeparatePrompt)
   .then(testXhsCardTaskCanBeRevisedWithoutDiscardingOtherPages)
   .then(testVisualTaskPromptRewriteUsesSelectedSkillDesignBrief)
   .then(testXhsCardChildrenRetainSuccessfulPagesAndRetryOnlyFailure)
@@ -5457,6 +5610,7 @@ testCaptureWritesAnnotationAndIndex()
   .then(testXhsContentReviewShowsCardThumbnailsInsteadOfManifestDump)
   .then(testWechatVisualViewSummarizesBlockedAndPendingWork)
   .then(testCreationProjectViewShowsEightStageEntryContract)
+  .then(testCreationProjectPickerSeparatesPublishedHistory)
   .then(testCreationProjectViewShowsDiagnosisContract)
   .then(testDiagnosisReviewReturnsToResearchWithoutRepeatingDecision)
   .then(testCreationTaskAlertsExplainRecoveryByWaitingReason)

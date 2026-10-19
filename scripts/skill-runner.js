@@ -310,6 +310,11 @@ async function prepareIsolatedWorkspace(paths, workspaceDirectory) {
   for (const item of paths.inputs) await copyPathIfExists(item.real, item.absolute);
   for (const item of paths.outputs) await copyPathIfExists(item.real, item.absolute);
   for (const item of paths.outputDirectories) await copyPathIfExists(item.real, item.absolute);
+  // A declared output is often a brand-new file. Copying it from the real
+  // project is then a no-op, but its parent must still exist for the Skill to
+  // create it inside the isolated attempt workspace.
+  for (const item of paths.outputs) await fsp.mkdir(path.dirname(item.absolute), { recursive: true });
+  for (const item of paths.outputDirectories) await fsp.mkdir(item.absolute, { recursive: true });
 }
 
 async function promoteDeclaredOutputs(paths) {
@@ -631,7 +636,8 @@ async function validateOutputs(task, beforeHashes) {
       }
     }
     const hash = await hashFile(output.absolute);
-    const mayRemainUnchanged = task.kind === "xhs.copy-qa" && /caption\.md$/u.test(output.relative);
+    const mayRemainUnchanged = (task.kind === "xhs.copy-qa" && /caption\.md$/u.test(output.relative))
+      || (task.kind === "wechat.visual-item" && task.sourceMode === "direct");
     if (!hash || (!mayRemainUnchanged && hash === beforeHashes[output.relative])) throw new Error(`Output was not updated: ${output.relative}`);
     hashes[output.relative] = hash;
   }
@@ -750,6 +756,29 @@ function buildCodexExecutionArgs(task, workspaceDirectory, lastMessagePath, prom
   ];
 }
 
+async function readVisualFailureDiagnostic(task) {
+  if (!task || task.kind !== "wechat.visual-item") return null;
+  const receipt = (task.outputs || []).find((output) => /\/visuals\/results\/[^/]+\.json$/iu.test(String(output && output.relative || "")));
+  if (!receipt) return null;
+  let value;
+  try {
+    value = JSON.parse(await fsp.readFile(receipt.absolute, "utf8"));
+  } catch (error) {
+    return null;
+  }
+  if (!value || value.status !== "failed" || !value.diagnostic || typeof value.diagnostic !== "object") return null;
+  const diagnostic = value.diagnostic;
+  const code = String(diagnostic.code || "VISUAL_GENERATION_FAILED").trim();
+  const message = String(diagnostic.message || "配图 Skill 未生成可验收图片。请根据诊断补充输入或调整任务后再试。").trim();
+  const failure = new Error(message);
+  failure.retryable = false;
+  failure.waitingReason = code === "MISSING_REQUIRED_SOURCE_SCREENSHOT"
+    ? "missing_visual_source"
+    : "visual_generation_failed";
+  failure.visualDiagnostic = diagnostic;
+  return failure;
+}
+
 async function taskQualityScore(task) {
   const scores = [];
   for (const output of task.outputs || []) {
@@ -772,7 +801,12 @@ async function executeTask(taskPath, task, options) {
   const vaultRoot = path.resolve(options.vault);
   const creationRootAbsolute = resolveVaultPath(vaultRoot, options.creationRoot);
   const projectDirectory = validateTask(task, vaultRoot, creationRootAbsolute);
-  const managedPreflight = await preflightManagedSkill(task, options.skillRuntime || path.join(os.homedir(), "Library", "Application Support", "Reading Capture", "skill-runtime"));
+  const directSourceTask = task.kind === "wechat.visual-item" && task.sourceMode === "direct" && Boolean(task.sourceScreenshotPath);
+  // A user-supplied product screenshot is already the desired image. It must
+  // never be sent to an image Skill merely to create a second interpretation.
+  const managedPreflight = directSourceTask
+    ? { status: "legacy", directSource: true }
+    : await preflightManagedSkill(task, options.skillRuntime || path.join(os.homedir(), "Library", "Application Support", "Reading Capture", "skill-runtime"));
   if (!["legacy", "ready"].includes(managedPreflight.status)) {
     const waitingReason = managedPreflight.status === "permission_expansion"
       ? "skill_permission_expansion"
@@ -865,43 +899,71 @@ async function executeTask(taskPath, task, options) {
       return waiting;
     }
 
-    const lastMessagePath = path.join(runDirectory, "last-message.txt");
-    const leaseHeartbeat = startTaskLeaseHeartbeat(taskPath, claimed, vaultRoot, options);
-    let result;
-    let processEnvironment;
-    try {
-      processEnvironment = addManagedRuntimeEnvironment(
-        buildSkillExecutionEnvironment(task.skillRequirement, process.env),
-        managedSkillWorkspace,
-        task.skillRequirement,
-      );
-      result = await runProcess(
-        options.codex,
-        buildCodexExecutionArgs(task, workspaceDirectory, lastMessagePath, prompt),
-        { cwd: workspaceDirectory, env: processEnvironment },
-      );
-    } finally {
-      if (leaseHeartbeat && typeof clearInterval === "function") clearInterval(leaseHeartbeat);
-    }
-    await fsp.writeFile(path.join(runDirectory, "stdout.log"), redact(result.stdout, vaultRoot), "utf8");
-    await fsp.writeFile(path.join(runDirectory, "stderr.log"), redact(result.stderr, vaultRoot), "utf8");
-    if (result.code !== 0) {
-      const detail = String(result.stderr || result.stdout || "").trim();
-      const failure = new Error(`Codex exited with code ${result.code}${result.signal ? ` (${result.signal})` : ""}${detail ? `: ${detail}` : ""}`);
-      if (/(?:authentication|unauthorized|credential|permission|unknown skill|skill[^\n]*not found|command not found)/iu.test(detail)) {
-        failure.retryable = false;
-        failure.waitingReason = /skill/iu.test(detail) ? "missing_skill" : "credentials_or_permission";
-      }
-      throw failure;
-    }
-    if (task.kind === "xhs.samples") {
+    if (directSourceTask) {
+      const sourceRealPath = resolveVaultPath(vaultRoot, task.sourceScreenshotPath);
+      const source = inputs.find((item) => item.real === sourceRealPath);
+      const imageOutput = outputs.find((item) => /\.(png|jpe?g|webp)$/iu.test(item.relative));
+      const receiptOutput = outputs.find((item) => /\/visuals\/results\/[^/]+\.json$/iu.test(item.relative));
+      if (!source || !imageOutput || !receiptOutput) throw new Error("原截图直用任务缺少来源、图片输出或回执文件");
+      const bytes = await fsp.readFile(source.absolute);
+      const isPng = bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x0d, 0x0a, 0x1a, 0x0a]));
+      const isJpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+      const isWebp = bytes.length >= 12 && bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
+      if (bytes.length < 1024 || !(isPng || isJpeg || isWebp)) throw new Error("上传的原截图不是可用的 PNG、JPG、JPEG 或 WebP 图片");
+      await fsp.copyFile(source.absolute, imageOutput.absolute);
+      await fsp.writeFile(receiptOutput.absolute, `${JSON.stringify({
+        schemaVersion: 1,
+        status: "complete",
+        mode: "direct_source",
+        sourceScreenshot: path.relative(projectDirectory, source.real).split(path.sep).join("/"),
+        output: path.relative(projectDirectory, imageOutput.real).split(path.sep).join("/"),
+        detail: "用户上传的原始截图已直接作为配图使用；未调用生图 Skill、未重绘、未裁切或转码。",
+        completedAt: nowIso(options),
+      }, null, 2)}\n`, "utf8");
+      await fsp.writeFile(path.join(runDirectory, "stdout.log"), "direct source screenshot promoted without image skill\n", "utf8");
+      await fsp.writeFile(path.join(runDirectory, "stderr.log"), "", "utf8");
+      await appendJsonl(eventsPath, { event: "direct-source-promoted", at: nowIso(options), source: path.relative(projectDirectory, source.real) });
+    } else {
+      const lastMessagePath = path.join(runDirectory, "last-message.txt");
+      const leaseHeartbeat = startTaskLeaseHeartbeat(taskPath, claimed, vaultRoot, options);
+      let result;
+      let processEnvironment;
       try {
-        await renderXhsSamplesWithRunner(executableTask, managedSkillWorkspace, processEnvironment);
-      } catch (error) {
-        error.retryable = false;
-        error.waitingReason = "invalid_output_contract";
-        throw error;
+        processEnvironment = addManagedRuntimeEnvironment(
+          buildSkillExecutionEnvironment(task.skillRequirement, process.env),
+          managedSkillWorkspace,
+          task.skillRequirement,
+        );
+        result = await runProcess(
+          options.codex,
+          buildCodexExecutionArgs(task, workspaceDirectory, lastMessagePath, prompt),
+          { cwd: workspaceDirectory, env: processEnvironment },
+        );
+      } finally {
+        if (leaseHeartbeat && typeof clearInterval === "function") clearInterval(leaseHeartbeat);
       }
+      await fsp.writeFile(path.join(runDirectory, "stdout.log"), redact(result.stdout, vaultRoot), "utf8");
+      await fsp.writeFile(path.join(runDirectory, "stderr.log"), redact(result.stderr, vaultRoot), "utf8");
+      if (result.code !== 0) {
+        const detail = String(result.stderr || result.stdout || "").trim();
+        const failure = new Error(`Codex exited with code ${result.code}${result.signal ? ` (${result.signal})` : ""}${detail ? `: ${detail}` : ""}`);
+        if (/(?:authentication|unauthorized|credential|permission|unknown skill|skill[^\n]*not found|command not found)/iu.test(detail)) {
+          failure.retryable = false;
+          failure.waitingReason = /skill/iu.test(detail) ? "missing_skill" : "credentials_or_permission";
+        }
+        throw failure;
+      }
+      if (task.kind === "xhs.samples") {
+        try {
+          await renderXhsSamplesWithRunner(executableTask, managedSkillWorkspace, processEnvironment);
+        } catch (error) {
+          error.retryable = false;
+          error.waitingReason = "invalid_output_contract";
+          throw error;
+        }
+      }
+      const visualFailure = await readVisualFailureDiagnostic(executableTask);
+      if (visualFailure) throw visualFailure;
     }
     let outputHashes;
     try {
@@ -1025,4 +1087,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { TASK_REGISTRY, addManagedRuntimeEnvironment, buildCodexExecutionArgs, buildPrompt, buildSkillExecutionEnvironment, executeTask, extractQualityScore, isInside, listPendingTasks, parseArgs, preflightManagedSkill, prepareIsolatedWorkspace, promoteDeclaredOutputs, recoverExpiredTaskLeases, redact, resolveVaultPath, runOnce, stagedTaskPaths, synchronizedSkillPreflight, validateOutputs, validateRunnerOwnership, validateTask };
+module.exports = { TASK_REGISTRY, addManagedRuntimeEnvironment, buildCodexExecutionArgs, buildPrompt, buildSkillExecutionEnvironment, executeTask, extractQualityScore, isInside, listPendingTasks, parseArgs, preflightManagedSkill, prepareIsolatedWorkspace, promoteDeclaredOutputs, readVisualFailureDiagnostic, recoverExpiredTaskLeases, redact, resolveVaultPath, runOnce, stagedTaskPaths, synchronizedSkillPreflight, validateOutputs, validateRunnerOwnership, validateTask };

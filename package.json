@@ -4,9 +4,13 @@
   "private": true,
   "description": "Obsidian plugin for immersive reading, highlights, and structured reading notes.",
   "scripts": {
-    "test": "node --check plugin/main.js && node --check plugin/creation-workflow.js && node --check plugin/skill-registry.js && node --check scripts/package-plugin.js && node --check scripts/skill-runner.js && node --check scripts/skill-manager.js && node test/reading-core.test.js && node test/creation-workflow.test.js && node test/plugin-capture.test.js && node test/skill-runner.test.js && node test/skill-registry.test.js",
+    "test": "node --check plugin/main.js && node --check plugin/creation-workflow.js && node --check plugin/skill-registry.js && node --check scripts/package-plugin.js && node --check scripts/skill-runner.js && node --check scripts/skill-manager.js && node test/reading-core.test.js && node test/creation-workflow.test.js && node test/plugin-capture.test.js && node test/library-deletion.test.js && node test/skill-runner.test.js && node test/skill-registry.test.js && node --check plugin/pdf-export.js && node --check plugin/pdf-export-render.js && node --check plugin/pdf-export-desktop.js && node test/pdf-export.test.js",
     "package": "node scripts/package-plugin.js",
     "release:check": "npm test && npm run package && node test/release-package.test.js"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "pdf-lib": "1.17.1"
+  }
 }

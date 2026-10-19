@@ -5,7 +5,7 @@ const path = require("path");
 const crypto = require("crypto");
 
 const root = path.join(__dirname, "..");
-const runtimeFiles = ["main.js", "manifest.json", "styles.css", "reading-core.js", "creation-workflow.js", "skill-registry.js", "skill-runner.js", "skill-manager.js"];
+const runtimeFiles = ["THIRD-PARTY-NOTICES.md", "main.js", "manifest.json", "styles.css", "reading-core.js", "creation-workflow.js", "skill-registry.js", "skill-runner.js", "skill-manager.js"];
 
 function readJson(relativePath) {
   return JSON.parse(fs.readFileSync(path.join(root, relativePath), "utf8"));
@@ -79,6 +79,7 @@ function testPackagedMainIsBundled() {
   assert.doesNotMatch(packagedMain, /require\(["']\.\/reading-core["']\)/);
   assert.doesNotMatch(packagedMain, /require\(["']\.\/creation-workflow["']\)/);
   assert.doesNotMatch(packagedMain, /require\(["']\.\/skill-registry["']\)/);
+  assert.doesNotMatch(packagedMain, /require\(["']\.\/pdf-export["']\)/);
   assert.match(packagedMain, /const core = \(\(\) =>/);
   assert.match(packagedMain, /const creationWorkflow = \(\(\) =>/);
   assert.match(packagedMain, /const skillRegistry = \(\(\) =>/);
