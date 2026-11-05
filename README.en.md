@@ -2,279 +2,109 @@
 
 [简体中文](README.md) | English
 
-Reading Capture is an Obsidian plugin for people who save articles, read deeply, and turn reading into notes, creative ideas, and follow-up tasks.
+Browse saved articles, read Markdown and static HTML, and collect highlights and thoughts in structured Obsidian notes.
 
-It gives you a focused reading space inside Obsidian, a library view for browsing saved articles, and a separate reading record for highlights, thoughts, creative ideas, and fact-check items.
+Reading Capture includes an article library (知见录), a Markdown reader, an HTML preview, and reading-record views. Basic reading and annotation do not require an AI model, Topic Miner, or an automation service.
 
-Version: `0.4.4`
+> This guide describes the current `personal/topic-miner` branch. Its source manifest declares version `0.4.4`. Development features may not yet be available in a GitHub Release; check the package you install.
 
-> Cross-device update instructions, including a ready-to-use Agent brief: [docs/cross-device-plugin-update.md](docs/cross-device-plugin-update.md)
+## Current reading experience
 
-## What You Can Do
+- **Sticky library toolbar:** the title, search box, creation actions, rescan button, and theme switch remain visible as you scroll through articles.
+- **Independent side panels:** collapse filters to the left and article details to the right. Edge arrows reopen them without clearing filters or the selected article.
+- **Responsive cards:** one to four columns based on available width. Narrow windows use temporary side drawers.
+- **Consistent light and dark themes:** the sun/moon button at the end of the toolbar also updates the reader, reading records, inspiration, creation projects, and plugin dialogs.
+- **Remembered preferences:** theme and panel visibility persist locally for each vault. They do not change Obsidian's global theme or authored HTML colors.
+- **Typography:** the interface uses system sans-serif fonts, preferring PingFang SC when available. The Markdown reader defaults to sans-serif; its Aa controls offer a serif option, font size, and line spacing.
 
-- Browse saved articles in the `知见录` article library.
-- Open Markdown articles in a cleaner reading view.
-- Open PDFs from the same article group when they are available.
-- Highlight passages and save your thoughts without turning the original article into a messy note.
-- Save three kinds of reading records:
-  - general thoughts
-  - creative ideas
-  - facts or claims to check later
-- View all records for an article in a dedicated reading-record page.
-- Jump from a saved record back to the original article position when the plugin can locate it.
-- Copy article paths, quotes, and thoughts when you need to reuse them.
+Outdated redrawn screenshots have been removed from this guide. Future screenshots will use anonymous demo data and be checked for local paths, account details, and private article content before upload.
 
-## Screenshots
+## Install and update
 
-The screenshots below are layout-matched anonymous demo images. They show the current product flow without exposing any real vault content.
+Download `reading-capture.zip`, when available, from [Releases](https://github.com/kingqiu/reading-capture-plugin/releases). GitHub's `Source code.zip` is not an installable plugin package.
 
-### Article Library
+1. Extract the complete `reading-capture` folder into your vault's `.obsidian/plugins/` directory.
+2. Ensure `main.js`, `manifest.json`, `styles.css`, and all supporting modules sit directly inside that folder, without an extra nested folder.
+3. Enable Reading Capture under **Settings → Community plugins**.
 
-Browse saved articles, reading status, file versions, highlights, and creative ideas in one place.
+Before updating, back up the entire existing plugin directory. Replace runtime files with the new package, preserve your existing `data.json`, and reload the plugin or restart Obsidian. Reading records and attachments are separate vault files; do not delete them during an update.
 
-![Article library preview](docs/assets/screenshots/library.svg)
+See the [cross-device update guide (Chinese)](docs/cross-device-plugin-update.md). For unreleased branch features, build from source using the commands below.
 
-### Reader And Capture
+## First use
 
-Read in a quieter view and save highlights, thoughts, creative ideas, and fact-check items.
+In Reading Capture settings:
 
-![Reader preview](docs/assets/screenshots/reader.svg)
+1. Set library scan directories, one vault-relative path per line, such as `Articles` or `Research`. Markdown, PDF, HTML, and HTM are supported.
+2. Configure exclusions if needed. Reading-record folders and `.obsidian` are excluded by default.
+3. Confirm the reading-note root, which defaults to `Reading Capture/notes`.
+4. Run **Reading Capture: 打开知见录** from Obsidian's command palette. Use rescan after adding files.
 
-### Reading Records
+Select a card to inspect its details. Use its reading button, the best-version action, or a specific version in the details panel to open a file. Existing Markdown preferences remain in effect; HTML-only articles can open directly.
 
-Review all saved records for one article, copy useful material, or jump back to the original article.
+## Markdown and reading records
 
-![Reading record preview](docs/assets/screenshots/record.svg)
+Select text and use the context menu or a Reading Capture command to highlight it or save a thought, creative idea, or fact to check. You can also record a whole-article thought without selecting text.
 
-### Install And Settings
+Reading records are centralized Markdown files in your vault. The reader sidebar and record view let you browse notes, copy quotes, and return to the source. Substantial source edits can prevent precise relocation without deleting the saved record.
 
-For manual installation, the plugin folder should directly contain `main.js`, `manifest.json`, `styles.css`, and `reading-core.js`.
+## HTML / HTM preview and annotations
 
-![Install and settings preview](docs/assets/screenshots/settings.svg)
+HTML versions open as rendered pages inside Obsidian, preserving their layout rather than displaying source code.
 
-## Installation
+- Same-name Markdown files in the same folder are associated first. Other HTML files may join when all Markdown files in the folder belong to one article group; ambiguous HTML files appear independently.
+- Vault-relative CSS, images, and fonts are supported. Original page colors are retained.
+- Page scripts, embedded pages, and automatic network-resource loading are disabled. Pages depending on scripts or online assets may be incomplete.
+- The compact toolbar and annotation sidebar can be collapsed. Refresh reloads the page and its resources.
+- Right-click selected text to highlight it or save a thought, idea, or fact to check.
+- Right-click an image to annotate the whole image. Local images, embedded images, responsive images, and static SVG diagrams are supported.
 
-This plugin is currently meant for manual installation from GitHub. It is not yet published in the official Obsidian community plugin directory.
+HTML annotations share the centralized reading-note directory while retaining a separate source association from Markdown annotations. Image copies are stored under `attachments/html/` in the reading-note directory and deduplicated by content. The original HTML is not modified.
 
-1. Download `reading-capture.zip` from the latest GitHub Release.
-2. Unzip it.
-3. Put the unzipped `reading-capture` folder into your Obsidian vault:
+Highlights, image markers, and navigation are restored on reopening or refreshing. If the source changes and cannot be reliably matched, the annotation is marked unlocated while its excerpt or image copy remains available. Image-region selection, CSS background images, and canvas annotations are not supported. Audio and PDF export for HTML still depend on an available Markdown/PDF version.
 
-```text
-Your Vault/
-└── .obsidian/
-    └── plugins/
-        └── reading-capture/
-            ├── main.js
-            ├── reading-core.js
-            ├── manifest.json
-            └── styles.css
+HTML features have been verified on macOS desktop Obsidian. Mobile has not been validated.
+
+## PDF export
+
+Select an article in the library and choose **导出 PDF** in its details panel. Export one version at a time; Chinese translations are preferred by default, with an option to select the original.
+
+- Export just the article, or include reading notes for the article group. AI summaries require a separate opt-in.
+- Markdown notes can appear after corresponding passages or at the end. Notes from other versions and unlocated notes are retained at the end.
+- Native PDFs retain their original pages and append notes.
+- Missing images can be retried or explicitly skipped with placeholders.
+
+Conversion is local and uses a system save dialog. This feature has been verified on macOS desktop and is unavailable on mobile. Encrypted, damaged, or signed PDFs require a processable copy.
+
+## Inspiration and creation projects
+
+The inspiration view works independently with manually captured ideas. Local Topic Miner reports can optionally supply additional candidates; Topic Miner is not a prerequisite.
+
+This development branch also includes a creation workspace for planning from an idea or adapting existing articles, notes, and PDFs into WeChat articles or Xiaohongshu posts. It supports stage tracking, sample comparisons, image previews, individual image retries, content review, and publication-package preparation.
+
+Automated generation requires a configured local Skill Runner, relevant skills, and project/output directories. External model or service use depends on those tools; review their data handling before running them. Basic reading and annotations do not need this setup.
+
+## Commands and troubleshooting
+
+Search for `Reading Capture` in the Obsidian command palette to open the library, reader, reading records, inspiration, or creation workspace; capture highlights and thoughts; mark reading complete; rebuild the index; or export diagnostics.
+
+- **Plugin missing or failing to load:** check the package, folder nesting, and supporting files.
+- **Old interface after updating:** reload the plugin and confirm you updated the currently open vault.
+- **Articles missing:** check vault-relative scan paths and exclusions, then rescan. Moved articles may require an index rebuild.
+- **Annotation cannot relocate:** check whether the source path, text, or image changed. Unlocated records are retained.
+- **Reporting an issue:** export diagnostics, then review and redact settings, paths, and personal information before sharing. Do not upload private vault screenshots, notes, or `data.json` directly.
+
+## Build from source
+
+With Node.js and npm installed, run:
+
+```sh
+npm ci
+npm run release:check
 ```
 
-4. Open Obsidian.
-5. Go to `Settings` -> `Community plugins`.
-6. Make sure community plugins are enabled.
-7. Find and enable `Reading Capture`.
-
-If Obsidian was already open while you copied the files, reload Obsidian or disable and re-enable the plugin.
-
-## Updating
-
-To update a manual installation:
-
-1. Download the newest `reading-capture.zip`.
-2. Unzip it.
-3. Replace the old plugin files in:
-
-```text
-Your Vault/.obsidian/plugins/reading-capture/
-```
-
-4. Restart Obsidian, or disable and re-enable the plugin.
-
-Your reading records are stored in your vault as Markdown files. Replacing the plugin files should not delete your reading records.
-
-## Manual Install Troubleshooting
-
-### Reading Capture does not appear in Obsidian
-
-Check the folder location first. The final folder should be:
-
-```text
-Your Vault/.obsidian/plugins/reading-capture/
-```
-
-Inside that folder, you should directly see `main.js`, `manifest.json`, `styles.css`, and `reading-core.js`.
-
-If you see this instead, the folder is nested one level too deep:
-
-```text
-reading-capture/
-└── reading-capture/
-    ├── main.js
-    ├── manifest.json
-    └── styles.css
-```
-
-Move the inner `reading-capture` folder into `.obsidian/plugins/`.
-
-### The GitHub source code zip does not work
-
-Download `reading-capture.zip` from the GitHub Release page. Do not use GitHub's `Source code.zip` for normal installation. The source archive is meant for development and is not the ready-to-install plugin package.
-
-### The old interface still appears after updating
-
-Restart Obsidian, or disable and re-enable Reading Capture from `Settings` -> `Community plugins`.
-
-### Plugin load, view, or highlight capture fails
-
-If the plugin can be enabled, but opening a view, highlighting text, or saving a record fails, run this command from Obsidian's command palette:
-
-```text
-Reading Capture: 导出诊断日志
-```
-
-The plugin will create a diagnostic report at:
-
-```text
-Reading Capture/diagnostics/diagnostic-report.md
-```
-
-Send that report to the plugin author. It contains plugin version, Obsidian version, operating-system/client information, plugin settings, and recent error records. It does not upload your article content.
-
-If Obsidian immediately shows "plugin failed to load" when enabling Reading Capture, the most common cause is still an installation package or folder-location issue. Make sure you downloaded `reading-capture.zip` from GitHub Releases, and that the plugin folder directly contains `main.js`, `manifest.json`, `styles.css`, and `reading-core.js`.
-
-## First-Time Setup
-
-After enabling the plugin, open `Settings` -> `Reading Capture`.
-
-The most important setting is `知见录扫描目录`. Add the folders where you keep saved articles.
-
-Examples:
-
-```text
-Articles
-Reading
-Saved Articles
-Research Notes
-```
-
-Use paths relative to your Obsidian vault. For example, if an article is here:
-
-```text
-Your Vault/Saved Articles/example/article.md
-```
-
-then you can add:
-
-```text
-Saved Articles
-```
-
-After setting the scan folders, run `Reading Capture: 打开知见录` from the Obsidian command palette.
-
-## Main Settings
-
-### 阅读笔记根目录
-
-This is where Reading Capture saves your reading records.
-
-Default:
-
-```text
-Reading Capture/notes
-```
-
-You usually do not need to change this unless you want the records to live in a different folder.
-
-### 知见录扫描目录
-
-These are the folders that the article library scans.
-
-Add one folder per line. The plugin will look for Markdown and PDF files inside these folders.
-
-### 知见录排除目录
-
-These folders are ignored while scanning.
-
-The plugin already skips the reading-record folder and Obsidian's own `.obsidian` folder. You can add more folders if you have archives, drafts, or temporary files that should not appear in the article library.
-
-## Daily Use
-
-### Open the Article Library
-
-Run:
-
-```text
-Reading Capture: 打开知见录
-```
-
-The library shows your article groups, their reading status, available files, and saved reading signals.
-
-### Open an Article
-
-In `知见录`, click `阅读` or `打开最佳版本`.
-
-When several versions exist, Reading Capture tries to choose the most useful Markdown version first. If there is only one Markdown file, it can still open that file as a single article.
-
-### Save a Highlight or Thought
-
-In the reader view:
-
-1. Select a passage.
-2. Right-click, or use the Reading Capture command.
-3. Choose the record type and write your thought.
-
-You can also save a thought without selecting text by using `记录当前想法`.
-
-### Save a Creative Idea
-
-Use `加入创作灵感` when a passage or thought might become a future article, research question, or creative work.
-
-### Save a Fact-Check Item
-
-Use `加入事实待核查` when something sounds important but needs verification later.
-
-### View Reading Records
-
-Click `阅读记录` from the article detail panel or from the reader sidebar.
-
-The reading-record page lets you:
-
-- browse records by type
-- read the original quote and your thought side by side
-- switch between the designed record view and the original Markdown
-- jump back to the original article position when possible
-- copy quotes, thoughts, or the article path
-
-## Useful Commands
-
-Open Obsidian's command palette and search for `Reading Capture`.
-
-Common commands:
-
-- `Reading Capture: 打开知见录`
-- `Reading Capture: 打开创作灵感`
-- `Reading Capture: 打开阅读器视图`
-- `Reading Capture: 标注选中文本并记录想法`
-- `Reading Capture: 快速高亮选中文本`
-- `Reading Capture: 记录当前想法`
-- `Reading Capture: 加入创作灵感`
-- `Reading Capture: 加入事实待核查`
-- `Reading Capture: 打开当前文件的阅读记录`
-- `Reading Capture: 标记当前阅读为已完成`
-- `Reading Capture: 重建阅读索引`
-- `Reading Capture: 导出诊断日志`
-
-## Notes and Limitations
-
-- Reading Capture works inside your Obsidian vault.
-- The plugin does not send your notes or articles to an online service.
-- AI topic mining is not built into this plugin and is not required. `创作灵感` works on its own with ideas you save manually while reading.
-- If your vault contains local Topic Miner reports, `创作灵感` can also show AI topic candidates. Feedback choices such as `待定 / 想写 / 暂存 / 不要 / 已写` and your extra notes are written only to the local file `Learning/reading-notes/topic-miner/feedback.jsonl`, so Topic Miner can read them on the next run.
-- Jumping back to the exact original position works best when the quoted text still exists in the article.
-- If you move article files after capturing records, you may need to rebuild the index or update paths.
+This runs tests, builds the package, and checks its structure. Installable files are written to `dist/reading-capture/` and the archive to `dist/reading-capture.zip`. A source build includes the modules and version declared by this branch, not extra integrations from another installed build.
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE).
+[Apache License 2.0](LICENSE).

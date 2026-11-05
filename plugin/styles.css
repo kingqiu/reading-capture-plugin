@@ -5859,7 +5859,11 @@ button.reading-capture-visual-source-picker .reading-capture-creation-source-row
 .reading-capture-library .reading-capture-library-filters,.reading-capture-library .reading-capture-library-detail { position: relative; top: 0; max-height: calc(100vh - 140px); overflow: auto; padding-top: 38px; }
 .reading-capture-library .reading-capture-library-detail-header { position: static; }
 .reading-capture-library [hidden] { display: none !important; }
-.reading-capture-library .reading-capture-library-top { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+/* Keep library actions visible while the article list scrolls; drawers remain above it. */
+.reading-capture-library .reading-capture-library-top {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+  position: sticky; top: 0; z-index: 8;
+}
 .reading-capture-library .reading-capture-library-tools { display: flex; flex-direction: row; flex-wrap: wrap; min-width: 0; flex: 1 1 450px; }
 .reading-capture-library .reading-capture-library-tools input { min-width: 150px; width: 180px; }
 .reading-capture-library .rc-library-backdrop { position: fixed; top: var(--rc-drawer-top); left: var(--rc-drawer-left); width: var(--rc-drawer-width); height: var(--rc-drawer-height); background: #0007; z-index: 10; }
