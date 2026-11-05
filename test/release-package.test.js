@@ -80,6 +80,7 @@ function testPackagedMainIsBundled() {
   assert.doesNotMatch(packagedMain, /require\(["']\.\/creation-workflow["']\)/);
   assert.doesNotMatch(packagedMain, /require\(["']\.\/skill-registry["']\)/);
   assert.doesNotMatch(packagedMain, /require\(["']\.\/pdf-export["']\)/);
+  assert.doesNotMatch(packagedMain, /require\(["']\.\/html-preview["']\)/);
   assert.match(packagedMain, /const core = \(\(\) =>/);
   assert.match(packagedMain, /const creationWorkflow = \(\(\) =>/);
   assert.match(packagedMain, /const skillRegistry = \(\(\) =>/);

@@ -64,7 +64,12 @@ function buildBundledMain() {
   const bundledCore = `const core = (() => {\n  const module = { exports: {} };\n  const exports = module.exports;\n${indent(core)}\n  return module.exports;\n})();`;
   const bundledCreationWorkflow = `const creationWorkflow = (() => {\n  const module = { exports: {} };\n  const exports = module.exports;\n${indent(creationWorkflow)}\n  return module.exports;\n})();`;
   const bundledSkillRegistry = `const skillRegistry = (() => {\n  const module = { exports: {} };\n  const exports = module.exports;\n${indent(skillRegistry)}\n  return module.exports;\n})();`;
+  const htmlPreview = require("esbuild").buildSync({
+    entryPoints: [path.join(pluginDir, "html-preview.js")], bundle: true, write: false,
+    platform: "node", format: "cjs", target: "es2020", external: ["obsidian"],
+  }).outputFiles[0].text;
   return main
+    .replace('require("./html-preview")', () => `(() => { const module = { exports: {} };\n${htmlPreview}\nreturn module.exports; })()`)
     .replace(coreRequireLine, bundledCore)
     .replace(creationWorkflowRequireLine, bundledCreationWorkflow)
     .replace(skillRegistryRequireLine, bundledSkillRegistry)

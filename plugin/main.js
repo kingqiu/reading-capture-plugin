@@ -20,7 +20,7 @@ const ALWAYS_EXCLUDED_LIBRARY_ROOTS = [
 ];
 
 const ARTICLE_LIBRARY_ROOTS_PLACEHOLDER = ["Articles", "Reading", "Sources"].join("\n");
-const ARTICLE_LIBRARY_CACHE_VERSION = 1;
+const ARTICLE_LIBRARY_CACHE_VERSION = 2;
 const DIAGNOSTIC_LOG_PATH = "Reading Capture/diagnostics/diagnostic-log.md";
 const DIAGNOSTIC_REPORT_PATH = "Reading Capture/diagnostics/diagnostic-report.md";
 const DIAGNOSTIC_LOG_MAX_CHARS = 120000;
@@ -182,6 +182,7 @@ const DEFAULT_SETTINGS = {
   openNoteAfterCapture: false,
   articleLibraryRoots: "",
   articleLibraryExcludeRoots: ".obsidian",
+  readerFontFamily: "sans",
   readerFontSize: 18,
   readerLineHeight: 1.72,
   creationProjectRoot: "Reading Capture/creation-projects",
@@ -3266,6 +3267,7 @@ class ReadingCaptureReaderView extends ItemView {
     if (!body || !body.style || typeof body.style.setProperty !== "function") return;
     const fontSize = clampReaderFontSize(this.plugin.settings.readerFontSize);
     const lineHeight = normalizeReaderLineHeight(this.plugin.settings.readerLineHeight);
+    body.style.setProperty("--rc-reader-font-family", this.plugin.settings.readerFontFamily === "serif" ? '"Songti SC", "Noto Serif SC", Georgia, serif' : 'var(--rc-font-ui)');
     body.style.setProperty("--rc-reader-font-size", `${fontSize}px`);
     body.style.setProperty("--rc-reader-line-height", String(lineHeight));
   }
@@ -3279,6 +3281,18 @@ class ReadingCaptureReaderView extends ItemView {
     });
     const panel = settings.createDiv({ cls: "reading-capture-reader-settings-popover is-hidden" });
     panel.createEl("div", { cls: "reading-capture-reader-settings-title", text: "阅读设置" });
+
+    const familyRow = panel.createDiv({ cls: "reading-capture-reader-settings-row" });
+    familyRow.createEl("span", { cls: "reading-capture-reader-settings-label", text: "字体" });
+    const familySelect = familyRow.createEl("select", { cls: "reading-capture-reader-font-family", attr: { "aria-label": "阅读字体" } });
+    familySelect.createEl("option", { value: "sans", text: "黑体（默认）" });
+    familySelect.createEl("option", { value: "serif", text: "宋体" });
+    familySelect.value = this.plugin.settings.readerFontFamily === "serif" ? "serif" : "sans";
+    familySelect.addEventListener("change", async () => {
+      this.plugin.settings.readerFontFamily = familySelect.value === "serif" ? "serif" : "sans";
+      this.applyReaderDisplaySettings(body);
+      await this.plugin.saveSettings();
+    });
 
     const sizeRow = panel.createDiv({ cls: "reading-capture-reader-settings-row" });
     sizeRow.createEl("span", { cls: "reading-capture-reader-settings-label", text: "字号" });
@@ -3353,6 +3367,8 @@ class ReadingCaptureReaderView extends ItemView {
       });
     });
     resetButton.addEventListener("click", async () => {
+      this.plugin.settings.readerFontFamily = "sans";
+      familySelect.value = "sans";
       await updateDisplay(DEFAULT_SETTINGS.readerFontSize, DEFAULT_SETTINGS.readerLineHeight);
     });
 
@@ -3761,6 +3777,16 @@ class ReadingCaptureLibraryView extends ItemView {
   }
 
   async onOpen() {
+    this.libraryPreferenceKey = `reading-capture:library-ui:${this.app.vault.adapter.getBasePath?.() || this.app.vault.getName()}`;
+    this.libraryPreferences = { left: true, right: true, theme: "dark" };
+    try {
+      const saved = JSON.parse(this.containerEl.ownerDocument.defaultView.localStorage.getItem(this.libraryPreferenceKey) || "{}");
+      for (const key of ["left", "right"]) if (typeof saved[key] === "boolean") this.libraryPreferences[key] = saved[key];
+      if (saved.theme === "light") this.libraryPreferences.theme = "light";
+    } catch {}
+    this.registerDomEvent(this.containerEl.ownerDocument, "keydown", event => {
+      if (event.key === "Escape" && this.libraryDrawer && !this.containerEl.ownerDocument.querySelector(".modal-container")) { event.preventDefault(); event.stopImmediatePropagation(); this.libraryDrawer = null; this.applyLibraryAppearance(); this.libraryReturnFocus?.focus(); }
+    }, true);
     await this.reload();
   }
 
@@ -3788,6 +3814,8 @@ class ReadingCaptureLibraryView extends ItemView {
 
   async render() {
     const container = this.containerEl.children[1];
+    const previousScroll = container.scrollTop;
+    this.libraryResizeObserver?.disconnect();
     container.empty();
     container.addClass("reading-capture-library");
 
@@ -3844,6 +3872,86 @@ class ReadingCaptureLibraryView extends ItemView {
       });
     }
     this.renderMainLayout(primary, workspace);
+    const theme = tools.createEl("button", { cls: "rc-library-theme" });
+    this.libraryThemeButton = theme;
+    theme.addEventListener("click", () => this.saveLibraryPreference("theme", this.libraryPreferences.theme === "light" ? "dark" : "light"));
+    const backdrop = container.createDiv({ cls: "rc-library-backdrop" });
+    backdrop.addEventListener("click", () => { this.libraryDrawer = null; this.applyLibraryAppearance(); this.libraryReturnFocus?.focus(); });
+    this.applyLibraryAppearance();
+    const WindowResizeObserver = container.ownerDocument?.defaultView?.ResizeObserver;
+    if (WindowResizeObserver) {
+      this.libraryResizeObserver = new WindowResizeObserver(() => this.applyLibraryAppearance());
+      this.libraryResizeObserver.observe(container);
+      this.libraryResizeObserver.observe(container.querySelector(".reading-capture-library-list"));
+    }
+    container.scrollTop = previousScroll;
+  }
+
+  async onClose() { this.libraryResizeObserver?.disconnect(); }
+
+  saveLibraryPreference(key, value) {
+    this.libraryPreferences[key] = value;
+    if (key === "theme") this.plugin.setAppearance(value);
+    try { this.containerEl.ownerDocument.defaultView.localStorage.setItem(this.libraryPreferenceKey, JSON.stringify(this.libraryPreferences)); }
+    catch { new Notice("显示偏好暂时无法保存，当前窗口仍然生效。"); }
+    for (const leaf of this.app.workspace.getLeavesOfType(ARTICLE_LIBRARY_VIEW_TYPE)) {
+      if (leaf.view.libraryPreferences) { leaf.view.libraryPreferences = { ...this.libraryPreferences }; leaf.view.applyLibraryAppearance(); }
+    }
+  }
+
+  toggleLibraryPanel(side, button) {
+    if (this.libraryNarrow) {
+      this.libraryReturnFocus = button;
+      this.libraryDrawer = this.libraryDrawer === side ? null : side;
+      this.applyLibraryAppearance();
+      if (this.libraryDrawer) this.containerEl.querySelector(`.rc-library-${side}-panel .rc-library-panel-close`)?.focus();
+    } else this.saveLibraryPreference(side, !this.libraryPreferences[side]);
+  }
+
+  applyLibraryAppearance() {
+    const root = this.containerEl.children[1];
+    if (!root?.querySelector(".reading-capture-library-list")) return;
+    const pref = this.libraryPreferences || { left: true, right: true, theme: "dark" };
+    const narrow = root.clientWidth < 1100;
+    if (narrow !== this.libraryNarrow) this.libraryDrawer = null;
+    this.libraryNarrow = narrow;
+    root.classList.toggle("rc-library-narrow", narrow);
+    root.classList.toggle("rc-library-light", pref.theme === "light");
+    for (const side of ["left", "right"]) {
+      const open = narrow ? this.libraryDrawer === side : pref[side];
+      root.classList.toggle(`rc-${side}-closed`, !open);
+      const panel = root.querySelector(`.rc-library-${side}-panel`);
+      panel.hidden = !open;
+      for (const button of root.querySelectorAll(`[data-library-side="${side}"]`)) {
+        button.setAttribute("aria-expanded", String(open));
+        button.setAttribute("aria-label", `${open ? "收起" : "展开"}${side === "left" ? "筛选" : "文章详情"}`);
+        setIcon(button, side === "left" ? (open ? "chevron-left" : "chevron-right") : (open ? "chevron-right" : "chevron-left"));
+      }
+    }
+    const rect = root.getBoundingClientRect();
+    root.style.setProperty("--rc-drawer-top", `${rect.top}px`);
+    root.style.setProperty("--rc-drawer-left", `${rect.left}px`);
+    root.style.setProperty("--rc-drawer-width", `${rect.width}px`);
+    root.style.setProperty("--rc-drawer-height", `${rect.height}px`);
+    root.querySelector(".rc-library-backdrop").hidden = !narrow || !this.libraryDrawer;
+    // Obsidian's containing blocks can offset fixed elements from the viewport.
+    for (const [element, right] of [[root.querySelector(".rc-library-backdrop"), false], [root.querySelector(".rc-library-left-panel"), false], [root.querySelector(".rc-library-right-panel"), true]]) {
+      element.style.removeProperty("left"); element.style.removeProperty("top");
+      if (narrow && !element.hidden) {
+        element.style.left = "0px"; element.style.top = "0px";
+        const origin = element.getBoundingClientRect();
+        element.style.left = `${(right ? rect.right - origin.width : rect.left) - origin.left}px`;
+        element.style.top = `${rect.top - origin.top}px`;
+      }
+    }
+    const list = root.querySelector(".reading-capture-library-list");
+    const columns = Math.max(1, Math.min(4, Math.floor((list.clientWidth + 12) / 272)));
+    list.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
+    if (this.libraryThemeButton) {
+      const label = pref.theme === "light" ? "切换到深色" : "切换到浅色";
+      this.libraryThemeButton.setAttribute("aria-label", label); this.libraryThemeButton.title = label;
+      setIcon(this.libraryThemeButton, pref.theme === "light" ? "moon" : "sun");
+    }
   }
 
   applySearch() {
@@ -3858,13 +3966,21 @@ class ReadingCaptureLibraryView extends ItemView {
 
   renderMainLayout(primary, workspace) {
     const layout = primary.createDiv({ cls: "reading-capture-library-layout" });
-    const filters = layout.createEl("aside", { cls: "reading-capture-library-filters" });
+    const leftSlot = layout.createDiv({ cls: "rc-library-left-slot" });
+    const filters = leftSlot.createEl("aside", { cls: "reading-capture-library-filters rc-library-left-panel" });
     const list = layout.createDiv({ cls: "reading-capture-library-list" });
-    const detail = workspace.createEl("aside", { cls: "reading-capture-library-detail" });
+    const rightSlot = workspace.createDiv({ cls: "rc-library-right-slot" });
+    const detail = rightSlot.createEl("aside", { cls: "reading-capture-library-detail rc-library-right-panel" });
 
     this.renderFilters(filters);
     this.renderList(list);
     this.renderDetail(detail);
+    for (const [side, slot, panel] of [["left", leftSlot, filters], ["right", rightSlot, detail]]) {
+      const toggle = slot.createEl("button", { cls: "rc-library-edge", attr: { "data-library-side": side } });
+      toggle.addEventListener("click", () => this.toggleLibraryPanel(side, toggle));
+      const close = panel.createEl("button", { cls: "rc-library-panel-close", attr: { "data-library-side": side } });
+      close.addEventListener("click", () => this.toggleLibraryPanel(side, toggle));
+    }
   }
 
   renderFilters(filters) {
@@ -4158,7 +4274,7 @@ class ReadingCaptureLibraryView extends ItemView {
     const exportIcon = exportPdf.createSpan();
     setIcon(exportIcon, "file-down");
     exportPdf.prepend(exportIcon);
-    exportPdf.disabled = this.isLoading;
+    exportPdf.disabled = this.isLoading || !selected.versions.some((version) => version.kind === "markdown" || version.kind === "pdf");
     exportPdf.addEventListener("click", () => this.plugin.openPdfExport(selected));
 
     detail.createEl("h3", { text: "版本" });
@@ -4175,7 +4291,7 @@ class ReadingCaptureLibraryView extends ItemView {
       const name = row.createEl("strong", { text: version.name });
       this.plugin.decorateVersionPathElement(name, version);
       const versionActions = row.createDiv({ cls: "reading-capture-library-version-actions" });
-      const button = versionActions.createEl("button", { cls: "reading-capture-library-version-open", text: version.kind === "markdown" ? "阅读" : "打开" });
+      const button = versionActions.createEl("button", { cls: "reading-capture-library-version-open", text: version.kind === "markdown" ? "阅读" : version.kind === "html" ? "预览" : "打开" });
       button.addEventListener("click", async () => this.plugin.openLibraryVersion(version));
       const remove = versionActions.createEl("button", {
         cls: "reading-capture-library-delete",
@@ -4225,8 +4341,8 @@ class ReadingCaptureLibraryView extends ItemView {
 
   async openBestVersion(group) {
     const version = group && group.bestVersion;
-    if (!version || version.kind !== "markdown") {
-      new Notice("这个文章组没有可打开的 Markdown 版本。");
+    if (!version) {
+      new Notice("这个文章组没有可打开的版本。");
       return;
     }
     const file = this.plugin.app.vault.getAbstractFileByPath(version.path);
@@ -4234,7 +4350,7 @@ class ReadingCaptureLibraryView extends ItemView {
       new Notice("找不到这个版本的源文件。");
       return;
     }
-    await this.plugin.openReaderForFile(file);
+    await this.plugin.openLibraryVersion(version);
   }
 }
 
@@ -4484,6 +4600,12 @@ class ReadingCaptureRecordView extends ItemView {
     if (item.mediaType === "image") {
       detailPane.createEl("h3", { text: "图片" });
       detailPane.createEl("blockquote", { cls: group.cls, text: item.mediaAlt || item.mediaSrc || "图片记录" });
+      if (item.htmlAnchor?.snapshot) {
+        const file = this.plugin.app.vault.getAbstractFileByPath(item.htmlAnchor.snapshot);
+        const root = `${this.plugin.settings.readingRoot.replace(/\/+$/g, "")}/attachments/html/`;
+        if (item.htmlAnchor.snapshot.startsWith(root) && this.plugin.isFile(file)) detailPane.createEl("img", { cls: "reading-capture-html-note-image", attr: { src: this.plugin.app.vault.getResourcePath(file), alt: item.mediaAlt || "标注图片" } });
+        else detailPane.createEl("small", { text: "图片副本缺失" });
+      }
     }
     detailPane.createEl("h3", { text: "我的想法" });
     detailPane.createEl("p", { text: item.note || "这条记录还没有补充想法。" });
@@ -4495,7 +4617,7 @@ class ReadingCaptureRecordView extends ItemView {
     pathRow.createEl("strong", { text: this.sourcePath || "未记录来源路径" });
     const statusRow = source.createDiv({ cls: "reading-capture-record-source-row" });
     statusRow.createEl("span", { text: "位置状态" });
-    statusRow.createEl("strong", { cls: "reading-capture-record-location-status", text: item.quote || item.mediaType ? "已定位到正文" : "关联到文章" });
+    statusRow.createEl("strong", { cls: "reading-capture-record-location-status", text: item.quote || item.mediaType ? (sourceKindFromPath(this.sourcePath) === "html" ? "回到原文时核对位置" : "已定位到正文") : "关联到文章" });
 
     const actions = detailPane.createDiv({ cls: "reading-capture-record-detail-actions" });
     const jump = actions.createEl("button", { text: "回到原文位置" });
@@ -5370,10 +5492,16 @@ module.exports = class ReadingCapturePlugin extends Plugin {
   async onload() {
     try {
       await this.loadSettings();
+      this.initializeAppearance();
       await this.writeDiagnosticEvent("info", "plugin-load-start", this.getRuntimeInfo());
       this.registerGlobalErrorHandlers();
       this.addSettingTab(new ReadingCaptureSettingTab(this.app, this));
       this.registerView(READER_VIEW_TYPE, (leaf) => new ReadingCaptureReaderView(leaf, this));
+      this.registerView("reading-capture-html", (leaf) => {
+        const { createHtmlViewClass } = require("./html-preview");
+        const HtmlView = createHtmlViewClass(ItemView);
+        return new HtmlView(leaf, this);
+      });
       this.registerView(ARTICLE_LIBRARY_VIEW_TYPE, (leaf) => new ReadingCaptureLibraryView(leaf, this));
       this.registerView(TOPIC_POOL_VIEW_TYPE, (leaf) => new ReadingCaptureTopicPoolView(leaf, this));
       this.registerView(RECORD_VIEW_TYPE, (leaf) => new ReadingCaptureRecordView(leaf, this));
@@ -5558,6 +5686,57 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     this.stopLocalSkillRunnerWatchdog();
     if (this.localSkillRunnerProcess && typeof this.localSkillRunnerProcess.unref === "function") this.localSkillRunnerProcess.unref();
     this.localSkillRunnerProcess = null;
+  }
+
+  initializeAppearance() {
+    const doc = this.app.workspace.containerEl?.ownerDocument;
+    if (!doc?.defaultView?.MutationObserver) return;
+    const key = `reading-capture:library-ui:${this.app.vault.adapter.getBasePath?.() || this.app.vault.getName()}`;
+    this.appearance = "dark";
+    try { if (JSON.parse(doc.defaultView.localStorage.getItem(key) || "{}").theme === "light") this.appearance = "light"; } catch {}
+    this.appearanceDocuments = new Map();
+    const watch = (document) => {
+      if (!document || this.appearanceDocuments.has(document)) return;
+      const observer = new document.defaultView.MutationObserver(() => this.applyAppearance(document));
+      this.appearanceDocuments.set(document, observer);
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+      this.applyAppearance(document);
+    };
+    watch(doc);
+    this.app.workspace.iterateAllLeaves(leaf => watch(leaf.view.containerEl.ownerDocument));
+    this.registerEvent(this.app.workspace.on("window-open", (workspaceWindow) => watch(workspaceWindow.win?.document)));
+    this.registerEvent(this.app.workspace.on("window-close", (workspaceWindow) => {
+      const document = workspaceWindow.win?.document;
+      this.appearanceDocuments.get(document)?.disconnect();
+      this.appearanceDocuments.delete(document);
+    }));
+    this.register(() => {
+      for (const [document, observer] of this.appearanceDocuments) {
+        observer.disconnect();
+        document.querySelectorAll(".rc-plugin-theme").forEach(el => el.classList.remove("rc-plugin-theme", "rc-plugin-light"));
+      }
+      this.appearanceDocuments.clear();
+    });
+  }
+
+  setAppearance(theme) {
+    this.appearance = theme === "light" ? "light" : "dark";
+    for (const document of this.appearanceDocuments.keys()) this.applyAppearance(document);
+  }
+
+  applyAppearance(document) {
+    // Scope to plugin-owned surfaces; never recolor Obsidian or authored HTML frames.
+    const owned = el => [...el.classList].some(name => name.startsWith("reading-capture-"));
+    for (const el of document.querySelectorAll(".view-content, .modal, .reading-capture-floating-note")) {
+      const isOwned = owned(el) || (el.matches(".modal") && !!el.querySelector('[class*="reading-capture-"]'));
+      if (!isOwned) {
+        if (el.classList.contains("rc-plugin-theme")) el.classList.remove("rc-plugin-theme", "rc-plugin-light");
+        continue;
+      }
+      if (!el.classList.contains("rc-plugin-theme")) el.classList.add("rc-plugin-theme");
+      const light = this.appearance === "light";
+      if (el.classList.contains("rc-plugin-light") !== light) el.classList.toggle("rc-plugin-light", light);
+    }
   }
 
   localSkillRunnerPreferenceKey() {
@@ -5933,6 +6112,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
   }
 
   async openReaderForFile(file, annotationId = "") {
+    if (sourceKindFromPath(file.path) === "html") return this.openHtmlPreview(file.path, annotationId);
     const leaf = this.app.workspace.getLeaf(false);
     await leaf.setViewState({
       type: READER_VIEW_TYPE,
@@ -5962,11 +6142,33 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     return openPdfExport(this, group);
   }
 
+  async openHtmlPreview(sourcePath, annotationId = "") {
+    const file = this.app.vault.getAbstractFileByPath(sourcePath);
+    if (!this.isFile(file)) { new Notice("找不到 HTML 文件。"); return; }
+    const existing = this.app.workspace.getLeavesOfType("reading-capture-html")
+      .find((leaf) => leaf.view.sourcePath === sourcePath);
+    if (existing) {
+      await this.app.workspace.revealLeaf(existing);
+      this.app.workspace.setActiveLeaf(existing, { focus: true });
+      if (annotationId) {
+        existing.view.pendingAnnotationId = annotationId;
+        if (existing.view.controller) await existing.view.controller.restore();
+      }
+      return;
+    }
+    const leaf = this.app.workspace.getLeaf("tab");
+    await leaf.setViewState({ type: "reading-capture-html", active: true, state: { sourcePath, annotationId } });
+  }
+
   async openLibraryVersion(version) {
     if (!version || !version.path) return;
     const file = this.app.vault.getAbstractFileByPath(version.path);
     if (!this.isFile(file)) {
       new Notice("找不到这个版本的源文件。");
+      return;
+    }
+    if (version.kind === "html") {
+      await this.openHtmlPreview(file.path);
       return;
     }
     if (version.kind === "markdown") {
@@ -8883,7 +9085,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
   isLibraryCandidate(file) {
     if (!this.isFile(file)) return false;
     const kind = sourceKindFromPath(file.path);
-    return kind === "markdown" || kind === "pdf";
+    return kind === "markdown" || kind === "pdf" || kind === "html";
   }
 
   resolveArticleGroupPath(filePath, roots = this.getArticleLibraryRoots()) {
@@ -8919,6 +9121,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
   articleVersionRank(fileName) {
     const name = basename(fileName, extname(fileName)).toLowerCase();
     const ext = extname(fileName).toLowerCase();
+    if (ext === ".html" || ext === ".htm") return 80;
     if (ext === ".pdf") return 90;
     if (name === "article_zh_enriched") return 1;
     if (name.includes("zh_enriched") || name.includes("enriched")) return 2;
@@ -8932,6 +9135,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
   articleVersionLabel(fileName) {
     const name = basename(fileName, extname(fileName)).toLowerCase();
     const ext = extname(fileName).toLowerCase();
+    if (ext === ".html" || ext === ".htm") return "HTML";
     if (ext === ".pdf") {
       if (name.includes("zh_enriched") || name.includes("enriched")) return "扩展 PDF";
       if (name === "article_zh" || name.endsWith("_zh") || name.includes("_zh_") || name.includes("translation")) return "中文 PDF";
@@ -8993,7 +9197,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     const files = this.getVaultFiles().filter((file) => this.isLibraryCandidate(file) && !this.isExcludedLibraryPath(file.path));
     const grouped = new Map();
 
-    for (const file of files) {
+    for (const file of files.filter((file) => sourceKindFromPath(file.path) !== "html")) {
       const groupInfo = this.resolveArticleGroupPath(file.path, roots);
       if (!groupInfo) continue;
       const id = `${groupInfo.groupType}:${groupInfo.groupPath}`;
@@ -9010,7 +9214,24 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       grouped.get(id).files.push(file);
     }
 
-    return [...grouped.values()].flatMap((item) => this.splitArticleDirectoryGroup(item));
+    const result = [...grouped.values()].flatMap((item) => this.splitArticleDirectoryGroup(item));
+    const parent = (path) => path.slice(0, path.lastIndexOf("/") + 1);
+    const markdown = result.flatMap((group) => group.files
+      .filter((file) => sourceKindFromPath(file.path) === "markdown")
+      .map((file) => ({ file, group })));
+    for (const file of files.filter((item) => sourceKindFromPath(item.path) === "html")) {
+      const info = this.resolveArticleGroupPath(file.path, roots);
+      if (!info) continue;
+      const siblings = markdown.filter((item) => parent(item.file.path) === parent(file.path));
+      const matches = siblings.filter((item) => this.fileStem(item.file.name) === this.fileStem(file.name));
+      const candidates = [...new Set((matches.length ? matches : siblings).map((item) => item.group))];
+      if (candidates.length === 1) candidates[0].files.push(file);
+      else result.push({
+        id: `single-file:${file.path}`, groupType: "single-file", groupPath: file.path,
+        sourceRoot: info.sourceRoot, sourceLabel: rootSlug(info.sourceRoot), files: [file],
+      });
+    }
+    return result;
   }
 
   async buildArticleLibraryGroups() {
@@ -9029,7 +9250,8 @@ module.exports = class ReadingCapturePlugin extends Plugin {
           priority: this.articleVersionRank(file.name),
           mtime: file.stat && file.stat.mtime ? file.stat.mtime : 0,
         }))
-        .sort((left, right) => left.priority - right.priority || left.name.localeCompare(right.name));
+        .sort((left, right) => left.priority - right.priority || (left.kind === "html" && right.kind === "html"
+          ? left.path.localeCompare(right.path) : left.name.localeCompare(right.name)));
       group.bestVersion = group.versions.find((version) => version.kind === "markdown") || group.versions[0] || null;
       group.mtime = Math.max(...group.files.map((file) => (file.stat && file.stat.mtime ? file.stat.mtime : 0)), 0);
       const signature = this.articleGroupCacheSignature(group, index);
@@ -10012,7 +10234,14 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     new Notice("已删除这条标注。");
   }
 
-  async captureForFile(file, { selectedText, note, type, heading, media = null }) {
+  promptHtmlAnnotation({ image, preview, save }) {
+    new TextInputModal(this.app, image ? "记录图片想法" : "记录想法", image ? "写下你对这张图的想法。" : "写下你的想法。文字引用可留空。",
+      async (note, type) => { await save(note, type); },
+      { includeTypeSelect: true, previewText: this.previewSelectedText(preview), onError: error => this.writeDiagnosticEvent("error", "html-annotation-save", this.errorToDiagnostic(error)) }
+    ).open();
+  }
+
+  async captureForFile(file, { selectedText, note, type, heading, media = null, htmlAnchor = null, suppressOpen = false }) {
     if (this.libraryDeletionSources?.has(file?.path)) throw new Error("这篇文章正在删除，暂时无法保存标注。");
     if (!this.isFile(file)) {
       new Notice("没有找到当前文件。");
@@ -10030,6 +10259,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
       type,
       captureSource: "obsidian-plugin",
       media,
+      htmlAnchor,
       now: this.now(),
     });
     const original = await this.readText(noteFile.path);
@@ -10038,7 +10268,7 @@ module.exports = class ReadingCapturePlugin extends Plugin {
     await this.refreshIndexEntry(file, noteFile, "obsidian-plugin");
     new Notice("已保存到阅读记录。");
 
-    if (this.settings.openNoteAfterCapture) {
+    if (this.settings.openNoteAfterCapture && !suppressOpen) {
       await this.openReadingRecord(noteFile, file);
     }
     const annotationMatch = block.match(/^###\s+(\S+)/m);
@@ -10174,6 +10404,9 @@ module.exports = class ReadingCapturePlugin extends Plugin {
         if (key === "type") current.type = value;
         if (key === "quote_hash") current.quoteHash = value;
         if (key === "location_hint") current.locationHint = value;
+        if (key === "html_anchor") {
+          try { current.htmlAnchor = JSON.parse(value); } catch { current.htmlAnchor = null; }
+        }
         if (key === "confidence") current.confidence = value;
         if (key === "media_type") current.mediaType = value;
         if (key === "media_src") current.mediaSrc = this.readInlineValue(value);

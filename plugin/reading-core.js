@@ -68,6 +68,7 @@ function sourceKindFromPath(vaultPath) {
   const ext = extname(vaultPath).toLowerCase();
   if (ext === ".md" || ext === ".markdown") return "markdown";
   if (ext === ".pdf") return "pdf";
+  if (ext === ".html" || ext === ".htm") return "html";
   if ([".mp3", ".m4a", ".wav", ".aac", ".flac"].includes(ext)) return "audio";
   if ([".mp4", ".mov", ".mkv", ".webm"].includes(ext)) return "video";
   if ([".png", ".jpg", ".jpeg", ".webp", ".gif"].includes(ext)) return "image";
@@ -230,6 +231,7 @@ function buildAnnotationBlock({
   locationHint = "",
   confidence = "high",
   media = null,
+  htmlAnchor = null,
   now = new Date().toISOString(),
 }) {
   const parts = dateParts(now);
@@ -248,6 +250,7 @@ function buildAnnotationBlock({
     `- location_hint: ${locationHint}`,
     `- confidence: ${confidence}`,
   ];
+  if (htmlAnchor) lines.push(`- html_anchor: ${JSON.stringify(htmlAnchor)}`);
   if (media) {
     lines.push(
       `- media_type: ${media.type || ""}`,

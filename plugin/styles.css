@@ -5813,3 +5813,324 @@ button.reading-capture-visual-source-picker .reading-capture-creation-source-row
 .reading-capture-library-export-pdf { display: flex; align-items: center; justify-content: center; gap: 8px; }
 .reading-capture-library-export-pdf svg { width: 16px; height: 16px; }
 .reading-capture-pdf-modal { --checkbox-color: #416f34; --checkbox-color-hover: #507e43; }
+
+/* Static HTML preview: toolbar belongs to Obsidian, document owns its colors. */
+.reading-capture-html-preview { display: flex; flex-direction: column; height: 100%; padding: 0 !important; overflow: hidden; }
+.reading-capture-html-toolbar { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--background-modifier-border); flex: 0 0 auto; }
+.reading-capture-html-toolbar strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reading-capture-html-status { flex: 0 0 auto; padding: 10px 20px; color: var(--text-muted); font-size: var(--font-ui-small); }
+.reading-capture-html-status[hidden] { display: none; }
+.reading-capture-html-frame { flex: 1; min-height: 0; width: 100%; border: 0; background: white; color-scheme: normal; }
+
+/* HTML reading controls and annotations. Only this view loses its duplicate title. */
+.reading-capture-html-leaf > .view-header { display: none; }
+.reading-capture-html-preview { position: relative; }
+.reading-capture-html-toolbar { height: 36px; min-height: 36px; box-sizing: border-box; padding: 3px 12px; gap: 6px; justify-content: flex-end; }
+.reading-capture-html-toolbar button { height: 28px; padding: 2px 10px; font-size: var(--font-ui-small); }
+.reading-capture-html-restore { display: none; position: absolute; top: 6px; right: 12px; z-index: 5; opacity: .8; }
+.reading-capture-html-preview.is-toolbar-collapsed > .reading-capture-html-toolbar { display: none; }
+.reading-capture-html-preview.is-toolbar-collapsed > .reading-capture-html-restore { display: block; }
+.reading-capture-html-status { position: absolute; z-index: 6; top: 40px; right: 12px; max-width: min(440px,90%); background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 8px; box-shadow: var(--shadow-s); }
+.reading-capture-html-workspace { display: flex; flex: 1; min-height: 0; min-width: 0; }
+.reading-capture-html-article { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.reading-capture-html-notes { width: clamp(240px,28%,360px); flex-shrink: 0; padding: 16px; overflow: auto; border-left: 1px solid var(--background-modifier-border); background: var(--background-primary); }
+.reading-capture-html-notes[hidden] { display: none; }
+.reading-capture-html-notes-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+.reading-capture-html-note { padding: 14px 0; border-bottom: 1px solid var(--background-modifier-border); cursor: pointer; }
+.reading-capture-html-note small { color: var(--text-muted); }
+.reading-capture-html-note blockquote { margin: 10px 0; padding-left: 12px; border-left: 3px solid var(--text-accent); }
+.reading-capture-html-note-image { display: block; max-width: 100%; max-height: 280px; object-fit: contain; margin: 10px 0; border-radius: 4px; background: white; }
+.reading-capture-html-context { min-width: 210px; padding: 6px; }
+.reading-capture-html-context .menu-item { display: block; width: 100%; text-align: left; box-shadow: none; border: 0; background: transparent; }
+.reading-capture-html-context .menu-item:hover { background: var(--background-modifier-hover); }
+
+/* Library layout and local appearance preferences */
+.reading-capture-library .reading-capture-library-shell { position: relative; padding-top: 16px; }
+.reading-capture-library .rc-library-theme { position: static; flex: 0 0 36px; width: 36px; height: 36px; padding: 7px; display: inline-flex; align-items: center; justify-content: center; }
+.reading-capture-library .reading-capture-library-workspace { grid-template-columns: minmax(0,1fr) 360px; }
+.reading-capture-library.rc-right-closed .reading-capture-library-workspace { grid-template-columns: minmax(0,1fr) 26px; }
+.reading-capture-library .reading-capture-library-layout { grid-template-columns: 230px minmax(0,1fr); padding: 0; }
+.reading-capture-library.rc-left-closed .reading-capture-library-layout { grid-template-columns: 26px minmax(0,1fr); }
+.reading-capture-library .rc-library-left-slot,.reading-capture-library .rc-library-right-slot { position: sticky; top: 12px; min-width: 0; }
+.reading-capture-library .rc-library-edge { width: 26px; min-height: 42px; padding: 3px; }
+.reading-capture-library:not(.rc-left-closed) .rc-library-left-slot > .rc-library-edge,
+.reading-capture-library:not(.rc-right-closed) .rc-library-right-slot > .rc-library-edge { display: none; }
+.reading-capture-library .rc-library-panel-close { position: absolute; right: 6px; top: 6px; width: 26px; height: 26px; min-height: 26px; padding: 3px; z-index: 4; }
+.reading-capture-library .reading-capture-library-filters,.reading-capture-library .reading-capture-library-detail { position: relative; top: 0; max-height: calc(100vh - 140px); overflow: auto; padding-top: 38px; }
+.reading-capture-library .reading-capture-library-detail-header { position: static; }
+.reading-capture-library [hidden] { display: none !important; }
+.reading-capture-library .reading-capture-library-top { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.reading-capture-library .reading-capture-library-tools { display: flex; flex-direction: row; flex-wrap: wrap; min-width: 0; flex: 1 1 450px; }
+.reading-capture-library .reading-capture-library-tools input { min-width: 150px; width: 180px; }
+.reading-capture-library .rc-library-backdrop { position: fixed; top: var(--rc-drawer-top); left: var(--rc-drawer-left); width: var(--rc-drawer-width); height: var(--rc-drawer-height); background: #0007; z-index: 10; }
+.reading-capture-library.rc-library-narrow .reading-capture-library-workspace { grid-template-columns: minmax(0,1fr) 26px; }
+.reading-capture-library.rc-library-narrow .reading-capture-library-layout { grid-template-columns: 26px minmax(0,1fr); }
+.reading-capture-library.rc-library-narrow .rc-library-edge { display: block; }
+.reading-capture-library.rc-library-narrow .rc-library-left-panel,
+.reading-capture-library.rc-library-narrow .rc-library-right-panel { position: fixed; top: var(--rc-drawer-top); height: var(--rc-drawer-height); max-height: var(--rc-drawer-height); width: min(360px, calc(var(--rc-drawer-width) - 48px)); z-index: 11; margin: 0; }
+.reading-capture-library.rc-library-narrow .rc-library-left-panel { left: var(--rc-drawer-left); }
+.reading-capture-library.rc-library-narrow .rc-library-right-panel { left: calc(var(--rc-drawer-left) + var(--rc-drawer-width) - min(360px, var(--rc-drawer-width) - 48px)); }
+/* Palette B: Mintlify-inspired neutral surfaces and teal actions. */
+.rc-plugin-theme,
+.reading-capture-library {
+  --rc-bg: #0a0a0a; --rc-panel: #141416; --rc-panel-raised: #1c1c1e;
+  --rc-card: #1c1c1e; --rc-card-soft: #252528;
+  --rc-border: #37373a; --rc-border-soft: #2c2c2f;
+  --rc-ink: #f5f5f5; --rc-ink-muted: #b3b3b3; --rc-ink-faint: #a0a0a5;
+  --rc-accent: #50c4a5; --rc-accent-hover: #76d5ba; --rc-on-accent: #0a0a0a;
+  --rc-selection: #162521; --rc-shadow: 0 4px 14px #00000018;
+}
+.rc-plugin-theme.rc-plugin-light,
+.reading-capture-library.rc-library-light {
+  color-scheme: light;
+  --rc-bg: #f7f7f7; --rc-panel: #ffffff; --rc-panel-raised: #f7f7f7;
+  --rc-card: #ffffff; --rc-card-soft: #eeeeef;
+  --rc-border: #d5d5d8; --rc-border-soft: #e5e5e5;
+  --rc-ink: #0a0a0a; --rc-ink-muted: #5a5a5c; --rc-ink-faint: #66666a;
+  --rc-accent: #00856a; --rc-accent-hover: #006b56; --rc-on-accent: #ffffff;
+  --rc-selection: #e6f4ef; --rc-shadow: 0 4px 14px #00000006;
+}
+.reading-capture-library.reading-capture-library {
+  background: var(--rc-bg) !important; color: var(--rc-ink);
+  --text-normal: var(--rc-ink); --text-muted: var(--rc-ink-muted);
+  --text-faint: var(--rc-ink-faint); --interactive-accent: var(--rc-accent);
+}
+.reading-capture-library.reading-capture-library .reading-capture-library-top,
+.reading-capture-library.reading-capture-library .reading-capture-library-filters,
+.reading-capture-library.reading-capture-library .reading-capture-library-detail,
+.reading-capture-library.reading-capture-library .reading-capture-library-detail-header {
+  background: var(--rc-panel); color: var(--rc-ink); border-color: var(--rc-border); box-shadow: var(--rc-shadow);
+}
+.reading-capture-library.reading-capture-library .reading-capture-library-card { background: var(--rc-card); border-color: var(--rc-border); box-shadow: none; opacity: 1; }
+.reading-capture-library.reading-capture-library .reading-capture-library-card.is-active { background: var(--rc-selection); border-color: var(--rc-accent); }
+.reading-capture-library.reading-capture-library .reading-capture-library-card:hover { box-shadow: var(--rc-shadow); }
+.reading-capture-library.reading-capture-library button,
+.reading-capture-library.reading-capture-library input,
+.reading-capture-library.reading-capture-library select { background: var(--rc-panel-raised); color: var(--rc-ink); border-color: var(--rc-border); box-shadow: none; }
+.reading-capture-library.reading-capture-library button:hover:not(:disabled) { background: var(--rc-card-soft); color: var(--rc-ink); border-color: var(--rc-ink-faint); }
+.reading-capture-library.reading-capture-library button:focus-visible,
+.reading-capture-library.reading-capture-library input:focus-visible,
+.reading-capture-library.reading-capture-library select:focus-visible { outline: 2px solid var(--rc-accent); outline-offset: 2px; }
+.reading-capture-library.reading-capture-library button:disabled { opacity: .5; }
+.reading-capture-library.reading-capture-library .reading-capture-library-filter-section button.is-active { background: var(--rc-selection); color: var(--rc-accent); border-color: var(--rc-accent); box-shadow: inset 3px 0 0 var(--rc-accent); }
+.reading-capture-library.reading-capture-library .reading-capture-library-filter-section button.is-active::after { background: var(--rc-accent); }
+.reading-capture-library.reading-capture-library .reading-capture-library-filter-section button.is-active .reading-capture-library-filter-count { color: var(--rc-accent); }
+.reading-capture-library.reading-capture-library .reading-capture-library-card-meta span,
+.reading-capture-library.reading-capture-library .reading-capture-library-versions span,
+.reading-capture-library.reading-capture-library .reading-capture-library-stats span { background: var(--rc-panel-raised); color: var(--rc-ink-muted); border-color: var(--rc-border-soft); }
+.reading-capture-library.reading-capture-library .reading-capture-library-version-row.is-best { background: var(--rc-card); border-color: var(--rc-border); box-shadow: none; }
+.reading-capture-library.reading-capture-library .reading-capture-library-version-best { background: var(--rc-selection); color: var(--rc-accent) !important; }
+.reading-capture-library.reading-capture-library button.mod-cta { background: var(--rc-accent); color: var(--rc-on-accent); border-color: var(--rc-accent); }
+.reading-capture-library.reading-capture-library button.mod-cta:hover { background: var(--rc-accent-hover); color: var(--rc-on-accent); border-color: var(--rc-accent-hover); }
+.reading-capture-library.reading-capture-library .reading-capture-library-delete { background: transparent; border-color: transparent; }
+.reading-capture-library.reading-capture-library .reading-capture-library-delete:hover:not(:disabled) { color: var(--text-error); }
+
+.reading-capture-library.rc-library-narrow:not(.rc-left-closed) .rc-library-left-slot,
+.reading-capture-library.rc-library-narrow:not(.rc-right-closed) .rc-library-right-slot { z-index: 11; }
+
+.reading-capture-library.rc-library-narrow .rc-library-left-panel,
+.reading-capture-library.rc-library-narrow .rc-library-right-panel { background: var(--rc-panel); }
+
+/* Reading progress is expressed by labels, not competing accent palettes. */
+.reading-capture-library.reading-capture-library .reading-capture-library-card::before { display: none; }
+.reading-capture-library.reading-capture-library .reading-capture-library-status-pill,
+.reading-capture-library.reading-capture-library .reading-capture-library-detail-status {
+  background: var(--rc-panel-raised); border-color: var(--rc-border); color: var(--rc-ink-muted);
+}
+.reading-capture-library.reading-capture-library .reading-capture-library-card:hover:not(.is-active) { border-color: var(--rc-ink-faint); }
+.reading-capture-library.reading-capture-library .reading-capture-library-version-row span { color: var(--rc-ink-muted); }
+.reading-capture-library.reading-capture-library .reading-capture-library-version-row.is-best .reading-capture-library-version-open {
+  background: var(--rc-panel-raised); border-color: var(--rc-border); color: var(--rc-accent);
+}
+.reading-capture-library.reading-capture-library .reading-capture-library-version-row.is-best .reading-capture-library-version-open:hover {
+  background: var(--rc-selection); border-color: var(--rc-accent); color: var(--rc-accent);
+}
+
+/* Shared appearance: all plugin pages inherit the library's saved choice. */
+.rc-plugin-theme.rc-plugin-theme {
+  color-scheme: dark;
+  background: var(--rc-bg) !important; color: var(--rc-ink);
+  --background-primary: var(--rc-panel); --background-primary-alt: var(--rc-card);
+  --background-secondary: var(--rc-panel-raised); --background-secondary-alt: var(--rc-card-soft);
+  --background-modifier-border: var(--rc-border); --background-modifier-hover: var(--rc-card-soft);
+  --text-normal: var(--rc-ink); --text-muted: var(--rc-ink-muted); --text-faint: var(--rc-ink-faint);
+  --text-accent: var(--rc-accent); --text-on-accent: var(--rc-on-accent);
+  --interactive-normal: var(--rc-panel-raised); --interactive-hover: var(--rc-card-soft);
+  --interactive-accent: var(--rc-accent); --interactive-accent-hover: var(--rc-accent-hover);
+  --checkbox-color: var(--rc-accent); --checkbox-color-hover: var(--rc-accent-hover);
+  --rc-blue: var(--rc-accent); --rc-blue-text: var(--rc-accent); --rc-blue-rgb: 80,196,165;
+  --rc-mint: var(--rc-accent); --rc-mint-text: var(--rc-accent); --rc-mint-rgb: 80,196,165;
+  --rc-amber: var(--rc-accent); --rc-amber-text: var(--rc-accent); --rc-amber-rgb: 80,196,165;
+  --rc-slate: var(--rc-ink-muted); --rc-slate-text: var(--rc-ink-muted); --rc-slate-rgb: 160,160,165;
+  --rc-workbench-bg: var(--rc-bg); --rc-workbench-panel: var(--rc-panel); --rc-workbench-card: var(--rc-card);
+  --rc-workbench-line: var(--rc-border); --rc-workbench-line-soft: var(--rc-border-soft);
+  --rc-workbench-ink: var(--rc-ink); --rc-workbench-muted: var(--rc-ink-muted); --rc-workbench-faint: var(--rc-ink-faint);
+  --rc-workbench-green: var(--rc-accent); --rc-workbench-blue: var(--rc-accent);
+}
+.rc-plugin-theme.rc-plugin-theme.rc-plugin-light {
+  color-scheme: light;
+  --rc-blue-rgb: 0,133,106; --rc-mint-rgb: 0,133,106; --rc-amber-rgb: 0,133,106; --rc-slate-rgb: 90,90,92;
+}
+/* Text colors are shared by plugin UI, not by content inside the HTML iframe. */
+.rc-plugin-theme:not(.reading-capture-library) :is([class*="reading-capture-"], h1,h2,h3,h4,h5,h6,p,li,blockquote,code,strong,label) {
+  color: var(--rc-ink) !important;
+  border-color: var(--rc-border);
+}
+.rc-plugin-theme:not(.reading-capture-library) :is([class*="-muted"],[class*="-subtitle"],[class*="-kicker"],[class*="-hint"],[class*="-meta"],[class*="-count"],[class*="-time"],small) { color: var(--rc-ink-muted) !important; }
+.rc-plugin-theme:not(.reading-capture-library) :is(
+ .reading-capture-reader-toolbar,.reading-capture-reader-sidebar,.reading-capture-reader-footer,
+ .reading-capture-reader-settings-popover,.reading-capture-sidebar-card,.reading-capture-sidebar-empty,
+ .reading-capture-record,.reading-capture-record-card,.reading-capture-record-header,
+ .reading-capture-topic-pool,.reading-capture-creation-projects,
+ [class*="reading-capture-"][class$="-panel"],[class*="reading-capture-"][class$="-card"],
+ [class*="reading-capture-"][class$="-header"],[class*="reading-capture-"][class$="-hero"],
+ [class*="reading-capture-"][class$="-empty"],[class*="reading-capture-"][class$="-toolbar"],
+ .reading-capture-creation-project-switch,.reading-capture-creation-project-picker,
+ .reading-capture-creation-stage-nav,.reading-capture-creation-stage,.reading-capture-creation-screen,
+ .reading-capture-creation-publication-history,.reading-capture-creation-publication-record,
+ .reading-capture-html-status,.reading-capture-pdf-choice,.reading-capture-pdf-fixed,
+ .reading-capture-modal,.reading-capture-creation-modal
+) { background: var(--rc-panel); border-color: var(--rc-border); box-shadow: none; }
+.rc-plugin-theme.rc-plugin-theme :is(button,input,select,textarea) {
+  background: var(--rc-panel-raised); color: var(--rc-ink) !important;
+  border-color: var(--rc-border); box-shadow: none; accent-color: var(--rc-accent);
+}
+.rc-plugin-theme.rc-plugin-theme button:hover:not(:disabled) { background: var(--rc-card-soft); border-color: var(--rc-ink-faint); }
+.rc-plugin-theme.rc-plugin-theme :is(button,input,select,textarea):focus-visible { outline: 2px solid var(--rc-accent); outline-offset: 2px; }
+.rc-plugin-theme.rc-plugin-theme button.mod-cta { background: var(--rc-accent) !important; border-color: var(--rc-accent) !important; color: var(--rc-on-accent) !important; }
+.rc-plugin-theme.rc-plugin-theme button.mod-cta:hover { background: var(--rc-accent-hover) !important; }
+.rc-plugin-theme.rc-plugin-theme button.mod-warning { color: var(--text-error) !important; }
+.rc-plugin-theme:not(.reading-capture-library) :is(button.is-active,button.is-selected,.reading-capture-sidebar-card.is-active,.reading-capture-creation-stage.is-current,.reading-capture-pdf-choice.is-selected) {
+  background: var(--rc-selection); border-color: var(--rc-accent); color: var(--rc-accent) !important;
+}
+.rc-plugin-theme.rc-plugin-theme .reading-capture-reader-body.markdown-preview-view { color: var(--rc-ink) !important; }
+.rc-plugin-theme.rc-plugin-theme :is(a,.reading-capture-reader-body a) { color: var(--rc-accent) !important; }
+.rc-plugin-theme.rc-plugin-theme :is(.reading-capture-reader-body blockquote,.reading-capture-reader-body pre,.reading-capture-reader-body code) { background: var(--rc-panel-raised); color: var(--rc-ink) !important; }
+.rc-plugin-theme.rc-plugin-theme .reading-capture-reader-body blockquote { border-left-color: var(--rc-accent); }
+.rc-plugin-theme.rc-plugin-theme .reading-capture-reader-highlight { background: var(--rc-selection); color: var(--rc-ink) !important; }
+.rc-plugin-theme.rc-plugin-theme .reading-capture-reader-progress { background: var(--rc-border); }
+.rc-plugin-theme.rc-plugin-theme .reading-capture-reader-progress-bar { background: var(--rc-accent); }
+.rc-plugin-theme:not(.reading-capture-library) :is([class*="-badge"],[class*="-tag"],.reading-capture-sidebar-card-type) { background: var(--rc-panel-raised); color: var(--rc-ink-muted) !important; border-color: var(--rc-border); }
+
+/* Neutral surfaces for the secondary workbenches and reading records. */
+.rc-plugin-theme.rc-plugin-theme :is(
+ .reading-capture-creation-action-card,
+ .reading-capture-creation-agent-discussion,
+ .reading-capture-creation-brief-document,
+ .reading-capture-creation-brief-editor,
+ .reading-capture-creation-brief-revision,
+ .reading-capture-creation-canvas,
+ .reading-capture-creation-card,
+ .reading-capture-creation-card-page-tasks,
+ .reading-capture-creation-content-editor,
+ .reading-capture-creation-count,
+ .reading-capture-creation-current,
+ .reading-capture-creation-current-project,
+ .reading-capture-creation-detail,
+ .reading-capture-creation-detail-block,
+ .reading-capture-creation-diagnosis-card,
+ .reading-capture-creation-entry-card,
+ .reading-capture-creation-export-card,
+ .reading-capture-creation-final-card,
+ .reading-capture-creation-final-package,
+ .reading-capture-creation-gate,
+ .reading-capture-creation-hero,
+ .reading-capture-creation-input-panel,
+ .reading-capture-creation-list,
+ .reading-capture-creation-metric,
+ .reading-capture-creation-modal,
+ .reading-capture-creation-next,
+ .reading-capture-creation-notice,
+ .reading-capture-creation-picker,
+ .reading-capture-creation-picker-history-link,
+ .reading-capture-creation-plan-document,
+ .reading-capture-creation-project-picker,
+ .reading-capture-creation-project-switch,
+ .reading-capture-creation-projects,
+ .reading-capture-creation-publication-history,
+ .reading-capture-creation-publication-record,
+ .reading-capture-creation-qa,
+ .reading-capture-creation-quality-override,
+ .reading-capture-creation-related-picker,
+ .reading-capture-creation-relation,
+ .reading-capture-creation-reopen-research-confirmation,
+ .reading-capture-creation-research-context,
+ .reading-capture-creation-research-context-details,
+ .reading-capture-creation-research-progress,
+ .reading-capture-creation-research-review-route,
+ .reading-capture-creation-research-route,
+ .reading-capture-creation-result-review,
+ .reading-capture-creation-review-document,
+ .reading-capture-creation-risk-panel,
+ .reading-capture-creation-sample-item,
+ .reading-capture-creation-sample-placeholder,
+ .reading-capture-creation-sample-preview,
+ .reading-capture-creation-sample-progress,
+ .reading-capture-creation-search,
+ .reading-capture-creation-source-picker,
+ .reading-capture-creation-source-read,
+ .reading-capture-creation-stage,
+ .reading-capture-creation-stage-nav,
+ .reading-capture-creation-task-alert,
+ .reading-capture-creation-task-progress,
+ .reading-capture-creation-transmission,
+ .reading-capture-creation-transmission-details,
+ .reading-capture-creation-visual-manifest,
+ .reading-capture-creation-visual-summary,
+ .reading-capture-creation-visual-task-details,
+ .reading-capture-creation-xhs-caption-preview,
+ .reading-capture-creation-xhs-card-review,
+ .reading-capture-creation-xhs-card-thumbnail,
+ .reading-capture-creation-xhs-card-tile,
+ .reading-capture-creation-xhs-copy-qa-progress,
+ .reading-capture-creation-xhs-phases,
+ .reading-capture-creation-xhs-proposal,
+ .reading-capture-record-card,
+ .reading-capture-record-detail-pane,
+ .reading-capture-record-group-menu,
+ .reading-capture-record-mode-toggle,
+ .reading-capture-record-top,
+ .reading-capture-topic-card,
+ .reading-capture-topic-detail,
+ .reading-capture-topic-feedback-note,
+ .reading-capture-topic-filters,
+ .reading-capture-topic-group-header,
+ .reading-capture-topic-hero,
+ .reading-capture-topic-main,
+ .reading-capture-topic-pool,
+ .reading-capture-topic-save-button,
+ .reading-capture-topic-sort-select
+) { background: var(--rc-panel); border-color: var(--rc-border); box-shadow: none; }
+.rc-plugin-theme.rc-plugin-theme :is(.reading-capture-topic-card.is-selected,.reading-capture-record-card.is-active,.reading-capture-creation-card.is-selected,.reading-capture-creation-entry-card.is-active,.reading-capture-creation-research-route:has(input:checked)) { background: var(--rc-selection); border-color: var(--rc-accent); }
+.rc-plugin-theme.rc-plugin-theme .reading-capture-topic-save-button { background: var(--rc-accent); color: var(--rc-on-accent) !important; }
+.rc-plugin-theme.rc-plugin-theme .reading-capture-topic-save-button { background: var(--rc-accent) !important; border-color: var(--rc-accent) !important; box-shadow: none !important; }
+.rc-plugin-theme.rc-plugin-theme .reading-capture-topic-save-button:hover { background: var(--rc-accent-hover) !important; }
+.rc-plugin-theme.rc-plugin-theme :is(.reading-capture-topic-feedback-pill,.reading-capture-topic-card-meta span,.reading-capture-location-pill,.reading-capture-type-pill) {
+  background: var(--rc-panel-raised); border-color: var(--rc-border) !important; color: var(--rc-ink-muted) !important;
+}
+.rc-plugin-theme.rc-plugin-theme :is(.reading-capture-record-filter-row span,.reading-capture-record-detail-pane blockquote,.reading-capture-record-detail-pane p,.reading-capture-record-markdown pre) {
+  background: var(--rc-panel-raised); color: var(--rc-ink) !important; border-color: var(--rc-border);
+}
+
+/* Shared typography: quiet UI weights, with an independent reading font. */
+.rc-plugin-theme {
+  --rc-font-ui: "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  --font-interface: var(--rc-font-ui);
+  font-family: var(--rc-font-ui);
+  font-weight: 400;
+}
+.rc-plugin-theme :is([class*="reading-capture-"],button,input,textarea,select) {
+  font-family: var(--rc-font-ui) !important;
+  font-weight: 400 !important;
+}
+.rc-plugin-theme :is(button,button span,label,[class*="-pill"],[class*="-badge"],.reading-capture-library-card-meta span,.reading-capture-library-filter-label,.reading-capture-library-filter-count) { font-weight: 500 !important; }
+.rc-plugin-theme :is(h1,h2,h3,h4,h5,h6,strong,b,.reading-capture-reader-title,.reading-capture-reader-settings-title,.reading-capture-creation-current-project) {
+  font-family: var(--rc-font-ui) !important;
+  font-weight: 600 !important;
+}
+.rc-plugin-theme .reading-capture-reader-body.markdown-preview-view,
+.rc-plugin-theme .reading-capture-reader-body :is(h1,h2,h3,h4,h5,h6,p,li,blockquote,strong,b,em,a,span,mark) {
+  font-family: var(--rc-reader-font-family, var(--rc-font-ui)) !important;
+}
+.rc-plugin-theme .reading-capture-reader-body :is(strong,b) { font-weight: 600 !important; }
+.rc-plugin-theme :is(code,pre,kbd,samp,.reading-capture-reader-body code,.reading-capture-reader-body pre) { font-family: var(--font-monospace) !important; }

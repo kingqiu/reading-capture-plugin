@@ -1,0 +1,77 @@
+// Runs only in an isolated vault containing the Articles/annotations fixture.
+module.exports=async function(app){
+ const document=app.workspace.containerEl.ownerDocument;
+ const window=document.defaultView;
+ window.htmlAnnotationsStage='entered';
+ delete require.cache[require.resolve('../plugin/html-annotations')];
+ const A=require('../plugin/html-annotations');
+ const p=app.plugins.plugins['reading-capture'];
+ const results=[];const check=(value,label)=>{if(!value)throw Error(label);results.push(label);window.htmlAnnotationsStage=label;};
+ const wait=async(fn)=>{for(let i=0;i<240;i++){if(fn())return;await new Promise(r=>window.setTimeout(r,25));}throw Error('timeout');};
+ const path='Articles/annotations/article.html';await p.openHtmlPreview(path);window.htmlAnnotationsStage='opened';
+ const view=app.workspace.getLeavesOfType('reading-capture-html').find(l=>l.view.sourcePath===path).view;
+ await wait(()=>view.controller?.doc?.querySelector('#responsive')?.complete);
+ let c=view.controller,doc=c.doc;
+ view.setToolbarCollapsed(false);view.setSidebarOpen(false);
+ check(view.contentEl.querySelector('.reading-capture-html-toolbar').getBoundingClientRect().height<=36,'compact toolbar');
+ check(view.containerEl.querySelector('.view-header').getBoundingClientRect().height===0,'duplicate header removed');
+ view.setToolbarCollapsed(true);
+ check(view.contentEl.querySelector('.reading-capture-html-toolbar').getBoundingClientRect().height===0,'toolbar collapses');
+ check(view.contentEl.querySelector('.reading-capture-html-restore').getBoundingClientRect().height>0,'restore control stays visible');
+ view.setToolbarCollapsed(false);
+ const range=doc.createRange();range.selectNodeContents(doc.querySelector('#second em'));
+ const sel=doc.defaultView.getSelection();sel.removeAllRanges();sel.addRange(range);
+ const anchor=A.selectionAnchor(doc.body,sel);
+ check(anchor.exact==='阅读让理解逐渐清晰。','iframe selection captured');
+ doc.querySelector('#second em').dispatchEvent(new doc.defaultView.MouseEvent('contextmenu',{bubbles:true,clientX:100,clientY:100,cancelable:true}));
+ await wait(()=>[...document.querySelectorAll('.menu-item')].some(n=>n.textContent.includes('标注选中文字')));
+ [...document.querySelectorAll('.menu-item')].find(n=>n.textContent.includes('标注选中文字')).click();
+ await wait(()=>document.querySelector('.reading-capture-modal textarea'));
+ document.querySelector('.reading-capture-modal textarea').value='第二处引用：验证重复文字不误定位。';
+ document.querySelector('.reading-capture-modal button.mod-cta').click();
+ await wait(()=>!c.saving && !document.querySelector('.reading-capture-modal') && c.entries.some(e=>e.note==='第二处引用：验证重复文字不误定位。'));
+ const textEntry=c.entries.find(e=>e.note==='第二处引用：验证重复文字不误定位。');
+ check(c.targets.get(textEntry.id)?.startContainer.parentElement.closest('#second'),'repeat quote locates second occurrence');
+ check(doc.defaultView.CSS.highlights.get('rc-reading').size>0,'text highlight painted');
+ check(view.sidebar.hidden,'saving does not force sidebar open');
+ const cross=doc.createRange();cross.selectNodeContents(doc.querySelector('#cross'));sel.removeAllRanges();sel.addRange(cross);
+ const crossResult=await c.save(A.selectionAnchor(doc.body,sel),null,'跨节点笔记','thought');
+ check(c.targets.has(crossResult.annotationId),'cross-node text range');
+ const saved=[];
+ for(const id of ['local','inline','embedded','responsive']){
+  const payload=A.imagePayload(doc.getElementById(id),c.sources);
+  const capture=await c.save(null,payload,`${id} 图片想法`,'thought');
+  const entry=c.entries.find(e=>e.id===capture.annotationId);saved.push(entry);
+  check(!!entry?.htmlAnchor?.snapshot && c.targets.has(entry.id),`${id} image saved and located`);
+ }
+ check(saved[0].htmlAnchor.snapshot===saved[3].htmlAnchor.snapshot,'same image attachment deduplicated');
+ const noteFile=await p.findReadingNoteForSource(app.vault.getAbstractFileByPath(path));
+ const markdown=await p.readText(noteFile.path);
+ check(!markdown.includes('base64,'),'notes contain paths rather than data URLs');
+ check(markdown.includes('html_anchor:'),'anchors persisted in Markdown notes');
+ const other=app.vault.getAbstractFileByPath('Articles/annotations/article.md');
+ await p.captureForFile(other,{selectedText:'Markdown 版本',note:'独立来源验证',type:'highlight-with-note',heading:'标注记录',suppressOpen:true});
+ check((await p.findReadingNoteForSource(other)).path!==noteFile.path,'HTML and Markdown sources separate');
+ view.setSidebarOpen(true);await new Promise(r=>window.setTimeout(r,80));
+ check(view.sidebar.querySelectorAll('img').length>=4,'sidebar displays stored snapshots');
+ const original=await app.vault.read(app.vault.getAbstractFileByPath(path));
+ const refresh=async()=>{await view.render();await wait(()=>view.controller?.entries?.length>0);c=view.controller;doc=c.doc;};
+ try{
+  await app.vault.modify(app.vault.getAbstractFileByPath(path),original.replace('<section>','<section><p>新增的段落。</p>'));
+  await refresh();check(c.targets.has(textEntry.id),'quote relocated after inserted content');
+  await app.vault.modify(app.vault.getAbstractFileByPath(path),original.replaceAll('阅读让理解逐渐清晰。','原文已经修改。').replace('src="diagram.svg"','src="missing.svg"'));
+  await refresh();check(!c.targets.has(textEntry.id),'removed quote remains unlocated');
+  check(await app.vault.adapter.exists(saved[0].htmlAnchor.snapshot),'original image snapshot remains available');
+ }finally{await app.vault.modify(app.vault.getAbstractFileByPath(path),original);await refresh();}
+ check(c.targets.has(textEntry.id),'refresh restores annotations');
+ const data=await p.loadData();check(data.htmlSidebarOpen===true && data.htmlToolbarCollapsed===false,'reading preferences persisted');
+ await p.openReadingRecord(noteFile,app.vault.getAbstractFileByPath(path));
+ const record=app.workspace.activeLeaf.view;
+ record.activeAnnotationId=saved[1].id;await record.render();
+ check(record.containerEl.querySelector('img.reading-capture-html-note-image'),'record view displays SVG snapshot');
+ await record.openSourceForRecord(saved[1]);
+ check(app.workspace.activeLeaf.view.getViewType()==='reading-capture-html','record routes back to HTML');
+ await wait(()=>view.controller.targets.has(saved[1].id));
+ view.setSidebarOpen(true);
+ return results;
+};

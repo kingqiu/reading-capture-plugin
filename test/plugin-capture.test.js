@@ -636,6 +636,36 @@ async function testArticleLibraryGrouping() {
   assert.strictEqual(groups.some((group) => group.groupPath === "Learning/web/x_articles/digest"), false);
 }
 
+async function testHtmlLibrarySupport() {
+  const plugin = new (loadPluginClass())();
+  const { app, files } = makeFakeApp();
+  plugin.app = app;
+  plugin.settings = { readingRoot: "Notes", articleLibraryRoots: "Articles", articleLibraryExcludeRoots: ".obsidian" };
+  const add = (path) => files.set(path, { file: makeFile(path), content: "" });
+  ["Articles/single/note.md", "Articles/single/note.pdf", "Articles/mixed/a.md", "Articles/mixed/b.md",
+    "Articles/versions/article.md", "Articles/versions/article_zh.md", "Articles/root.md"].forEach(add);
+  const before = plugin.collectArticleLibraryGroups().map((g) => g.id).sort();
+  ["Articles/single/design.html", "Articles/single/child/unrelated.html", "Articles/mixed/a.HTML",
+    "Articles/mixed/unmatched.htm", "Articles/versions/preview.html", "Articles/only/one.html",
+    "Articles/only/two.htm", "Articles/root.html"].forEach(add);
+  const groups = await plugin.buildArticleLibraryGroups();
+  const containing = (path) => groups.find((g) => g.files.some((f) => f.path === path));
+  for (const id of before) assert.ok(groups.some((g) => g.id === id), "existing group IDs must remain stable");
+  assert.strictEqual(containing("Articles/single/design.html").bestVersion.path, "Articles/single/note.md");
+  assert.strictEqual(containing("Articles/single/child/unrelated.html").files.length, 1);
+  assert.strictEqual(containing("Articles/mixed/a.HTML").bestVersion.path, "Articles/mixed/a.md");
+  assert.strictEqual(containing("Articles/mixed/unmatched.htm").files.length, 1);
+  assert.strictEqual(containing("Articles/versions/preview.html").files.length, 3);
+  assert.notStrictEqual(containing("Articles/only/one.html"), containing("Articles/only/two.htm"));
+  assert.strictEqual(containing("Articles/root.html").bestVersion.path, "Articles/root.md");
+  assert.strictEqual(containing("Articles/only/two.htm").bestVersion.kind, "html");
+  assert.strictEqual(plugin.articleVersionLabel("article_zh.html"), "HTML");
+  let opened = "";
+  plugin.openHtmlPreview = async (path) => { opened = path; };
+  await plugin.openLibraryVersion({ path: "Articles/only/two.htm", kind: "html" });
+  assert.strictEqual(opened, "Articles/only/two.htm");
+}
+
 async function testArticleLibraryFiltersAndSortsForResearchWorkflow() {
   const PluginClass = loadPluginClass();
   const plugin = new PluginClass();
@@ -5538,6 +5568,7 @@ testCaptureWritesAnnotationAndIndex()
   .then(testCaptureImageNote)
   .then(testRecordTargetAndHighlight)
   .then(testArticleLibraryGrouping)
+  .then(testHtmlLibrarySupport)
   .then(testArticleLibraryFiltersAndSortsForResearchWorkflow)
   .then(testArticleLibraryTopBarOpensCreativeIdeas)
   .then(testArticleLibraryUsesCacheUntilSourceFilesChange)
