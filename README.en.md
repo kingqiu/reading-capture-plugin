@@ -8,6 +8,16 @@ Reading Capture includes an article library (知见录), a Markdown reader, an H
 
 > This guide describes the current `personal/topic-miner` branch. Its source manifest declares version `0.4.4`. Development features may not yet be available in a GitHub Release; check the package you install.
 
+**Light theme**
+
+![Current library interface with sticky toolbar, article cards, and collapsible panels](docs/assets/screenshots/library-current-light.png)
+
+**Dark theme**
+
+![Library in dark mode](docs/assets/screenshots/library-current-dark.png)
+
+*Both are actual screenshots of the current version in Obsidian, using anonymous demo data. Directory paths are hidden; no private articles, accounts, or absolute local paths are shown.*
+
 ## Current reading experience
 
 - **Sticky library toolbar:** the title, search box, creation actions, rescan button, and theme switch remain visible as you scroll through articles.
@@ -16,8 +26,6 @@ Reading Capture includes an article library (知见录), a Markdown reader, an H
 - **Consistent light and dark themes:** the sun/moon button at the end of the toolbar also updates the reader, reading records, inspiration, creation projects, and plugin dialogs.
 - **Remembered preferences:** theme and panel visibility persist locally for each vault. They do not change Obsidian's global theme or authored HTML colors.
 - **Typography:** the interface uses system sans-serif fonts, preferring PingFang SC when available. The Markdown reader defaults to sans-serif; its Aa controls offer a serif option, font size, and line spacing.
-
-Outdated redrawn screenshots have been removed from this guide. Future screenshots will use anonymous demo data and be checked for local paths, account details, and private article content before upload.
 
 ## Install and update
 
