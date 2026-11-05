@@ -4168,6 +4168,7 @@ class ReadingCaptureLibraryView extends ItemView {
       const status = this.groupWorkflowStatus(group);
       const statusClass = this.workflowStatusClass(status);
       const card = list.createDiv({ cls: `reading-capture-library-card ${statusClass}` });
+      card.toggleClass("has-annotations", Number(group.stats?.annotationCount || 0) > 0);
       card.setAttr("role", "button");
       card.setAttr("tabindex", "0");
       if (group.id === this.selectedGroupId) card.addClass("is-active");
@@ -4240,7 +4241,7 @@ class ReadingCaptureLibraryView extends ItemView {
     const titleRow = detailHeader.createDiv({ cls: "reading-capture-library-detail-title-row" });
     titleRow.createEl("h2", { text: selected.title });
     titleRow.createEl("span", {
-      cls: `reading-capture-library-detail-status ${statusClass}`,
+      cls: `reading-capture-library-detail-status ${statusClass}${Number(selected.stats?.annotationCount || 0) > 0 ? " has-annotations" : ""}`,
       text: this.workflowStatusLabel(status),
     });
     detailHeader.createEl("p", { cls: "reading-capture-library-detail-path", text: selected.groupPath });

@@ -5935,7 +5935,7 @@ button.reading-capture-visual-source-picker .reading-capture-creation-source-row
 .reading-capture-library.rc-library-narrow .rc-library-left-panel,
 .reading-capture-library.rc-library-narrow .rc-library-right-panel { background: var(--rc-panel); }
 
-/* Reading progress is expressed by labels, not competing accent palettes. */
+/* Unannotated cards stay neutral; annotation presence has its own visual cue. */
 .reading-capture-library.reading-capture-library .reading-capture-library-card::before { display: none; }
 .reading-capture-library.reading-capture-library .reading-capture-library-status-pill,
 .reading-capture-library.reading-capture-library .reading-capture-library-detail-status {
@@ -6138,3 +6138,16 @@ button.reading-capture-visual-source-picker .reading-capture-creation-source-row
 }
 .rc-plugin-theme .reading-capture-reader-body :is(strong,b) { font-weight: 600 !important; }
 .rc-plugin-theme :is(code,pre,kbd,samp,.reading-capture-reader-body code,.reading-capture-reader-body pre) { font-family: var(--font-monospace) !important; }
+
+/* Annotation presence is independent of workflow status and current selection. */
+.reading-capture-library.reading-capture-library .reading-capture-library-card.has-annotations::before {
+  display: block;
+  background: var(--rc-accent);
+  width: 4px;
+}
+.reading-capture-library.reading-capture-library .reading-capture-library-card.has-annotations .reading-capture-library-status-pill,
+.reading-capture-library.reading-capture-library .reading-capture-library-detail-status.has-annotations {
+  background: var(--rc-selection);
+  border-color: var(--rc-accent);
+  color: var(--rc-accent);
+}
